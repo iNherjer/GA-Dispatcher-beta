@@ -107,21 +107,37 @@
                 <div class="page-number">Seite 1</div>
                 <h2 id="mTitle"></h2>
                 <p id="mStory" class="story"></p>
-                <div class="note-manifest">
-                    <div><strong>PAYLOAD:</strong> <span id="mPay"></span></div>
-                    <div><strong>FRACHT:</strong> <span id="mWeight"></span></div>
-                    <div><strong>STRECKE:</strong> <span id="mDistNote"></span></div>
-                    <div><strong>KURS:</strong> <span id="mHeadingNote"></span></div>
-                    <div><strong>ETE CA:</strong> <span id="mETENote"></span></div>
+                
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-top: 15px; border-top: 1px dashed #444; padding-top: 12px;">
+                    <div class="note-manifest" style="margin-top: 0; padding-top: 0; border-top: none; flex-grow: 1;">
+                        <div><strong>PAYLOAD:</strong> <span id="mPay"></span></div>
+                        <div><strong>FRACHT:</strong> <span id="mWeight"></span></div>
+                        <div><strong>STRECKE:</strong> <span id="mDistNote"></span></div>
+                        <div><strong>KURS:</strong> <span id="mHeadingNote"></span></div>
+                        <div><strong>ETE CA:</strong> <span id="mETENote"></span></div>
+                    </div>
+                    
+                    <div class="briefing-photo-attachment" onclick="toggleMapTable(); event.stopPropagation();" title="Kartentisch öffnen" style="margin: 0 0 0 15px; flex-shrink: 0;">
+                        <div class="photo-pin"></div>
+                        <div class="photo-img" id="miniMap"></div>
+                        <div class="photo-caption">Route Map</div>
+                    </div>
                 </div>
             </div>
             <div class="mission-note-page back-note" id="notePage2" onclick="toggleNotes()">
-                <div class="page-number">Seite 2</div>
-                <h2 class="wiki-title">Ziel-Info</h2>
-                <div id="wikiDescContainer" class="wiki-info-note">
-                    📖 <span id="wikiDescText">Warte auf Daten...</span>
-                </div>
-            </div>
+    <div class="page-number">Seite 2</div>
+    <h2 class="wiki-title">Ziel-Info</h2>
+    
+    <div class="briefing-photo-attachment" onclick="toggleMapTable(); event.stopPropagation();" title="Kartentisch öffnen">
+        <div class="photo-pin"></div>
+        <div class="photo-img"></div>
+        <div class="photo-caption">Route Map</div>
+    </div>
+
+    <div id="wikiDescContainer" class="wiki-info-note">
+        📖 <span id="wikiDescText">Warte auf Daten...</span>
+    </div>
+</div>
         </div>
         
         <div class="flightplan-container" style="display:flex; flex-direction:column;">

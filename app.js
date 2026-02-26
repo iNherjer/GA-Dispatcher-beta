@@ -445,7 +445,6 @@ async function generateMission() {
     document.getElementById("mDepName").innerText = start.n;
     document.getElementById("mDepCoords").innerText = `${start.lat.toFixed(4)}, ${start.lon.toFixed(4)}`;
     
-    // DIE FEHLERQUELLE: Hier haben wir headingDrum und headingArrow sicher entfernt!
     setDrumCounter('distDrum', totalDist);
     recalculatePerformance();
 
@@ -465,7 +464,6 @@ async function generateMission() {
 
     document.getElementById("briefingBox").style.display = "block";
     
-    // Das updatet jetzt auch live die dynamischen Wegpunkte und das Nav-Log!
     updateMap(start.lat, start.lon, dest.lat, dest.lon, currentStartICAO, dest.n);
 
     indicator.innerText = `Flugplan bereit (${dataSource}). Lade Infos...`;
@@ -495,8 +493,6 @@ let routeMarkers = [];
 let currentSName = "";
 let currentDName = "";
 
-// --- RIESIGE HITBOXEN FÜR BESSERES GREIFEN ---
-// Der sichtbare Punkt bleibt klein, aber der anklickbare Bereich ist groß und transparent
 const hitBoxHtml = (color) => `<div style="background-color: transparent; width: 34px; height: 34px; display:flex; justify-content:center; align-items:center;"><div style="background-color: ${color}; border: 2px solid #222; width: 14px; height: 14px; border-radius: 50%;"></div></div>`;
 const hitBoxIcon = (color) => L.divIcon({ className: 'custom-pin', html: hitBoxHtml(color), iconSize: [34, 34], iconAnchor: [17, 17] });
 
@@ -553,7 +549,6 @@ function renderMainRoute() {
     routeMarkers.forEach(m => map.removeLayer(m)); if (polyline) map.removeLayer(polyline); routeMarkers = [];
     if(routeWaypoints.length === 0) return;
 
-    // Linie ist jetzt dicker (weight: 8) für leichteres Anklicken
     polyline = L.polyline(routeWaypoints, { color: '#ff4444', weight: 8, dashArray: '10,10', className: 'interactive-route' }).addTo(map);
     
     polyline.on('click', function(e) {
@@ -579,7 +574,9 @@ function renderMainRoute() {
         if(draggable) marker.on('dragend', function(e) { routeWaypoints[index] = e.target.getLatLng(); renderMainRoute(); });
         routeMarkers.push(marker);
     });
+    
     updateRoutePerformance();
+    updateMiniMap(); // FIX: Hier zeichnen wir auch die Mini-Karte neu!
 }
 
 function updateRoutePerformance() {
@@ -618,7 +615,6 @@ function initMapBase() {
     const baseMaps = { "🛩️ VFR Lufträume (Aero)": aeroMap, "⛰️ Topografie (VFR)": topoMap, "🌑 Dark Mode (Clean)": darkMap, "🛰️ Satellit (Esri)": satMap };
     L.control.layers(baseMaps).addTo(map);
     
-    // VOLLBILD BUTTON IN DER KARTE (Neu programmiert)
     const fsControl = L.control({position: 'topleft'});
     fsControl.onAdd = function() {
         const btn = L.DomUtil.create('button', 'leaflet-bar leaflet-control');
@@ -628,7 +624,6 @@ function initMapBase() {
         
         btn.onclick = function(e){
             e.preventDefault(); 
-            // Hier schalten wir den gesamten Body um!
             document.body.classList.toggle('map-is-fullscreen');
             
             if (document.body.classList.contains('map-is-fullscreen')) {
@@ -636,7 +631,6 @@ function initMapBase() {
             } else {
                 btn.innerHTML = '⛶';
             }
-            // Zwingt die Karte, ihre neue Größe zu berechnen
             setTimeout(() => { if(map) map.invalidateSize(); }, 300);
         };
         return btn;
@@ -683,7 +677,10 @@ function toggleMapTable() {
                 if(routeWaypoints && routeWaypoints.length >= 2) map.fitBounds(L.latLngBounds(routeWaypoints), { padding: [40, 40] });
                 else updateMapFromInputs();
             }
-        }, 500); // 500ms warten, bis die Schublade ganz ausgefahren ist
+        }, 500); 
+    } else {
+        // BUGFIX: Zwingt den Body dazu, den Vollbildmodus beim Schließen zu beenden
+        document.body.classList.remove('map-is-fullscreen');
     }
 }
 
@@ -816,5 +813,34 @@ function makeDraggable(element, noteId) {
         let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
         const noteIndex = notes.findIndex(n => n.id === noteId);
         if(noteIndex > -1) { notes[noteIndex].x = element.offsetLeft; notes[noteIndex].y = element.offsetTop; localStorage.setItem('ga_pinboard', JSON.stringify(notes)); }
+    }
+}
+
+/* =========================================================
+   9. MINIMAP AUF DEM POLAROID
+   ========================================================= */
+let miniMap, miniRoutePolyline;
+
+function updateMiniMap() {
+    const miniContainer = document.getElementById('miniMap');
+    if (!miniContainer) return; 
+    
+    if (!miniMap) {
+        miniMap = L.map('miniMap', {
+            zoomControl: false, dragging: false, scrollWheelZoom: false,
+            doubleClickZoom: false, boxZoom: false, keyboard: false,
+            attributionControl: false 
+        });
+        L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png').addTo(miniMap);
+    }
+    
+    if (routeWaypoints && routeWaypoints.length > 0) {
+        if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline);
+        miniRoutePolyline = L.polyline(routeWaypoints, { color: '#d93829', weight: 4 }).addTo(miniMap);
+        
+        setTimeout(() => { 
+            miniMap.invalidateSize();
+            miniMap.fitBounds(L.latLngBounds(routeWaypoints), { padding: [10, 10] });
+        }, 150);
     }
 }

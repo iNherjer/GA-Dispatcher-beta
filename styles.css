@@ -323,7 +323,6 @@ body.theme-retro .paperclip {
     transform: rotate(-15deg); /* Leicht gedreht, damit sie nicht den Text verdeckt */
 }
 
-
 body.theme-retro .mission-note-page {
     grid-area: stack; /* Beide Seiten liegen im selben CSS Grid Bereich */
     background-color: #fdf5e6; 
@@ -386,6 +385,38 @@ body.theme-retro #mStory, body.theme-retro .wiki-info-note {
     line-height: 24px; /* Exakt auf der Linie */
     border: none; padding-bottom: 0; margin-bottom: 0;
     text-shadow: none; letter-spacing: -0.5px; font-style: normal;
+}
+
+/* --- NEU: Foto-Attachment im Briefing --- */
+.briefing-photo-attachment {
+    position: relative;
+    width: 130px;
+    background: #f0eada;
+    padding: 6px 6px 22px 6px;
+    box-shadow: 2px 4px 8px rgba(0,0,0,0.4);
+    transform: rotate(3deg);
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    float: right;
+    margin-left: 15px; margin-bottom: 10px;
+    border: 1px solid #ccc;
+    z-index: 5;
+}
+.briefing-photo-attachment:hover {
+    transform: rotate(0deg) scale(1.05);
+    box-shadow: 4px 8px 15px rgba(0,0,0,0.5);
+    z-index: 10;
+}
+.photo-pin {
+    position: absolute;
+    top: 4px; left: 50%; transform: translateX(-50%);
+    width: 10px; height: 10px; background: #d93829;
+    border-radius: 50%; z-index: 2;
+    box-shadow: inset -1px -2px 4px rgba(0,0,0,0.5), 1px 2px 2px rgba(0,0,0,0.4);
+}
+.photo-caption {
+    font-family: 'Caveat', cursive; font-size: 16px; color: #111;
+    text-align: center; position: absolute; bottom: 2px; width: 100%; left: 0;
 }
 
 /* ==========================================================================
@@ -518,7 +549,8 @@ body.theme-retro .api-hint a:hover {
 
 .pinboard-content {
     width: 900px; height: 600px; 
-    background-image: url('board.png'); background-size: cover; background-position: center;
+    background-image: url('board.jpg') !important; /* FIXED PNG TO JPG */
+    background-size: cover; background-position: center;
     position: relative; box-shadow: 0 10px 40px rgba(0,0,0,0.8); border-radius: 4px;
 }
 
@@ -633,16 +665,69 @@ body.map-is-fullscreen .pinboard-header {
     }
 }
 
+/* --- FIX: Scrolling blockieren NUR auf mobilen Geräten --- */
+@media (max-width: 1299px) {
+    body.maptable-open, body.pinboard-open {
+        overflow: hidden !important; 
+    }
+    .pinboard-overlay {
+        background: #080808 !important; /* Auf Handys komplett undurchsichtig */
+    }
+}
+
 /* ==========================================================================
    13. NAV-LOG (WEGPUNKTE)
    ========================================================================== */
 .waypoint-list {
     margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(255,255,255,0.2);
-    font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #ddd;
+    font-family: 'Courier New', Courier, monospace; 
+    font-size: 14px; 
+    color: #ddd;
 }
-body.theme-retro .waypoint-list { color: #333; border-top: 1px dashed #888; }
-.wp-row { display: flex; justify-content: space-between; margin-bottom: 3px; }
-.wp-name { font-weight: bold; }
-.wp-data { color: var(--green); font-weight: bold; }
-body.theme-retro .wp-data { color: var(--blue); }
+
+/* Modern Theme - Basiswerte */
+.wp-row { 
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; 
+    padding: 8px 4px; border-bottom: 1px solid rgba(255,255,255,0.05); 
+}
+.wp-row:last-child { border-bottom: none; }
+
+.wp-name { 
+    font-weight: bold; 
+    flex-grow: 1; 
+    padding-right: 15px; /* Sorgt für Abstand zu den Zahlen */
+    line-height: 1.3;
+}
+
+.wp-data { 
+    color: var(--green); 
+    font-weight: bold; 
+    letter-spacing: 0.5px; 
+    white-space: nowrap; /* FIX: Verhindert JEDEN Zeilenumbruch bei den Zahlen */
+    flex-shrink: 0;      /* FIX: Verhindert, dass die Zahlenbox gequetscht wird */
+    text-align: right;
+}
+
 .interactive-route { cursor: pointer; }
+
+/* Retro Theme - Überschreibungen */
+body.theme-retro .waypoint-list { 
+    color: #f4f4f4; border-top: 1px dashed #777; 
+    background: rgba(0, 0, 0, 0.25); padding: 10px 12px; 
+    border-radius: 6px; margin-top: 12px;
+    font-size: 15px; 
+}
+body.theme-retro .wp-data { color: var(--piper-yellow); }
+
+/* --- POLAROID BILD ANPASSUNGEN --- */
+.photo-img {
+    width: 100%; 
+    height: 115px; 
+    background-image: url('map.jpg');
+    background-size: cover; background-position: center;
+    border: 1px solid #ddd;
+    filter: sepia(0.4) contrast(1.1);
+    z-index: 1; 
+}
+/* Leaflet überschreibt uns sonst den Foto-Rand: */
+.photo-img .leaflet-container { background: transparent; }
