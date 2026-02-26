@@ -1,0 +1,820 @@
+/* =========================================================
+   1. THEME TOGGLE & NOTIZEN TOGGLE
+   ========================================================= */
+function toggleTheme() {
+    const toggle = document.getElementById('themeToggle');
+    if(toggle && toggle.checked) {
+        document.body.classList.add('theme-retro');
+        localStorage.setItem('ga_theme', 'retro');
+    } else {
+        document.body.classList.remove('theme-retro');
+        localStorage.setItem('ga_theme', 'classic');
+    }
+    updateDynamicColors();
+    refreshAllDrums();
+}
+
+function toggleNotes() {
+    const page1 = document.getElementById('notePage1');
+    const page2 = document.getElementById('notePage2');
+    if (!page1 || !page2) return;
+    if(page1.classList.contains('front-note')) {
+        page1.classList.replace('front-note', 'back-note');
+        page2.classList.replace('back-note', 'front-note');
+    } else {
+        page1.classList.replace('back-note', 'front-note');
+        page2.classList.replace('front-note', 'back-note');
+    }
+}
+
+function updateDynamicColors() {
+    const isRetro = document.body.classList.contains('theme-retro');
+    const primColor = isRetro ? 'var(--piper-white)' : 'var(--blue)';
+    const titleColor = isRetro ? 'var(--piper-white)' : 'var(--blue)';
+    const hlColor = isRetro ? 'var(--piper-yellow)' : 'var(--green)';
+    const mainTitle = document.getElementById('mainTitle');
+    if (mainTitle) mainTitle.style.color = isRetro ? '' : titleColor;
+    document.querySelectorAll('.theme-color-text').forEach(el => el.style.color = isRetro ? '' : primColor);
+    document.querySelectorAll('.theme-green-text').forEach(el => el.style.color = hlColor);
+}
+
+/* =========================================================
+   2. GLOBALE VARIABLEN & INITIALISIERUNG
+   ========================================================= */
+let map, polyline, markers = [], currentStartICAO, currentDestICAO, currentMissionData = null, selectedAC = "PA-24";
+let globalAirports = null, runwayCache = {};
+
+window.onload = () => {
+    const savedTheme = localStorage.getItem('ga_theme') || 'retro'; 
+    const themeToggleBtn = document.getElementById('themeToggle');
+    if (savedTheme === 'retro') {
+        document.body.classList.add('theme-retro');
+        if(themeToggleBtn) themeToggleBtn.checked = true;
+    } else {
+        document.body.classList.remove('theme-retro');
+        if(themeToggleBtn) themeToggleBtn.checked = false;
+    }
+    updateDynamicColors();
+
+    const lastDest = localStorage.getItem('last_icao_dest');
+    if (lastDest) document.getElementById('startLoc').value = lastDest;
+    
+    const savedKey = localStorage.getItem('ga_gemini_key');
+    if (savedKey) document.getElementById('apiKeyInput').value = savedKey;
+
+    const aiEnabled = localStorage.getItem('ga_ai_enabled');
+    const aiToggleBtn = document.getElementById('aiToggle');
+    if(aiToggleBtn) {
+        if (aiEnabled === 'false') { aiToggleBtn.checked = false; } 
+        else { aiToggleBtn.checked = true; }
+    }
+
+    renderLog();
+
+    requestAnimationFrame(() => {
+        setTimeout(() => { refreshAllDrums(); }, 50);
+    });
+};
+
+function saveApiKey() {
+    const key = document.getElementById('apiKeyInput').value.trim();
+    localStorage.setItem('ga_gemini_key', key);
+}
+function saveAiToggle() {
+    const aiToggleBtn = document.getElementById('aiToggle');
+    if(aiToggleBtn) { localStorage.setItem('ga_ai_enabled', aiToggleBtn.checked); }
+}
+
+/* =========================================================
+   3. HELPER-FUNKTIONEN (UI & Mathe)
+   ========================================================= */
+function setDrumCounter(elementId, valueStr) {
+    const container = document.getElementById(elementId);
+    if (!container) return;
+    if (!document.body.classList.contains('theme-retro')) {
+        container.innerHTML = `<span class="theme-color-text" style="font-weight:bold;">${valueStr}</span>`;
+        updateDynamicColors(); return;
+    }
+    let numericValue = valueStr.toString().replace(/[^0-9]/g, '');
+    if (numericValue === "") numericValue = "0"; 
+    const digits = numericValue.split(''), digitHeight = 22; 
+    let windowEl = container.querySelector('.drum-window');
+    if (!windowEl) {
+        container.innerHTML = '<div class="drum-window"></div>';
+        windowEl = container.querySelector('.drum-window');
+    }
+    const existingStrips = windowEl.querySelectorAll('.drum-strip');
+    const neededStrips = digits.length;
+    if (existingStrips.length < neededStrips) {
+        for (let i = 0; i < (neededStrips - existingStrips.length); i++) {
+            const strip = document.createElement('div');
+            strip.className = 'drum-strip';
+            strip.innerHTML = [0,1,2,3,4,5,6,7,8,9].map(d => `<div class="drum-digit">${d}</div>`).join('');
+            windowEl.appendChild(strip);
+        }
+    } else if (existingStrips.length > neededStrips) {
+        for (let i = neededStrips; i < existingStrips.length; i++) {
+            windowEl.removeChild(existingStrips[i]);
+        }
+    }
+    const finalStrips = windowEl.querySelectorAll('.drum-strip');
+    digits.forEach((digit, index) => {
+        const targetDigit = parseInt(digit);
+        const translateY = -(targetDigit * digitHeight);
+        finalStrips[index].style.transform = `translateY(${translateY}px)`;
+    });
+}
+
+function handleSliderChange(type, val) {
+    setDrumCounter(type + 'Drum', val); recalculatePerformance(); 
+}
+
+function recalculatePerformance() {
+    if (!currentMissionData) return;
+    const tas = parseInt(document.getElementById("tasSlider").value);
+    const gph = parseInt(document.getElementById("gphSlider").value);
+    const dist = currentMissionData.dist;
+    const fuel = Math.ceil((dist / tas * gph) + (0.75 * gph));
+    const totalMinutes = Math.round((dist / tas) * 60);
+    setDrumCounter('timeDrum', totalMinutes);
+    setDrumCounter('fuelDrum', fuel);
+}
+
+function refreshAllDrums() {
+    const tas = document.getElementById('tasSlider').value;
+    const gph = document.getElementById('gphSlider').value;
+    setDrumCounter('tasDrum', tas); setDrumCounter('gphDrum', gph);
+    if(currentMissionData) {
+       setDrumCounter('distDrum', currentMissionData.dist);
+       recalculatePerformance();
+    }
+}
+
+function applyPreset(t, g, s, n) { 
+    document.getElementById('tasSlider').value=t; 
+    document.getElementById('gphSlider').value=g; 
+    document.getElementById('maxSeats').value=s; selectedAC=n;
+    handleSliderChange('tas', t); handleSliderChange('gph', g);
+}
+
+function copyCoords(elementId) {
+    const txt = document.getElementById(elementId).innerText;
+    if(txt && txt !== "-") { navigator.clipboard.writeText(txt).then(() => alert("Koordinaten kopiert:\n" + txt)); }
+}
+
+function checkBearing(b, dirPref) {
+    if (dirPref === 'any') return true;
+    if (dirPref === 'N' && (b <= 45 || b >= 315)) return true;
+    if (dirPref === 'E' && (b >= 45 && b <= 135)) return true;
+    if (dirPref === 'S' && (b >= 135 && b <= 225)) return true;
+    if (dirPref === 'W' && (b >= 225 && b <= 315)) return true;
+    return false;
+}
+
+function resetBtn(btn) { btn.disabled = false; btn.innerText = "Auftrag generieren"; }
+
+function calcNav(lat1, lon1, lat2, lon2) {
+    const R = 3440, dLat = (lat2-lat1)*Math.PI/180, dLon = (lon2-lon1)*Math.PI/180;
+    const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
+    const dist = Math.round(R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+    const y = Math.sin(dLon)*Math.cos(lat2*Math.PI/180), x = Math.cos(lat1*Math.PI/180)*Math.sin(lat2*Math.PI/180)-Math.sin(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.cos(dLon);
+    return { dist, brng: Math.round((Math.atan2(y, x)*180/Math.PI + 360)%360) };
+}
+
+function getDestinationPoint(lat, lon, distNM, bearing) {
+    const R = 3440.065, lat1 = lat * Math.PI / 180, lon1 = lon * Math.PI / 180, brng = bearing * Math.PI / 180;
+    const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distNM / R) + Math.cos(lat1) * Math.sin(distNM / R) * Math.cos(brng));
+    const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(distNM / R) * Math.cos(lat1), Math.cos(distNM / R) - Math.sin(lat1) * Math.sin(lat2));
+    return { lat: lat2 * 180 / Math.PI, lon: lon2 * 180 / Math.PI };
+}
+
+/* =========================================================
+   4. DATEN-FETCHING (APIs & GEMINI KI)
+   ========================================================= */
+async function loadGlobalAirports() {
+    if (globalAirports) return;
+    try {
+        const res = await fetch('https://raw.githubusercontent.com/mwgg/Airports/master/airports.json');
+        globalAirports = await res.json();
+    } catch (e) { globalAirports = {}; }
+}
+
+async function getAirportData(icao) {
+    if (typeof coreDB !== 'undefined' && coreDB[icao]) return coreDB[icao]; 
+    await loadGlobalAirports(); 
+    if (globalAirports[icao]) return { icao: icao, n: globalAirports[icao].name || globalAirports[icao].city, lat: globalAirports[icao].lat, lon: globalAirports[icao].lon };
+    try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${icao}+airport`);
+        const data = await res.json();
+        if (data && data.length > 0) return { icao: icao, n: data[0].display_name.split(',')[0], lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+    } catch (e) {} return null;
+}
+
+async function findGithubAirport(lat, lon, minNM, maxNM, dirPref, regionPref) {
+    await loadGlobalAirports();
+    let validAirports = [];
+    for (const key in globalAirports) {
+        const apt = globalAirports[key];
+        if(apt.icao === currentStartICAO) continue;
+        const isDE = apt.icao.startsWith('ED') || apt.icao.startsWith('ET');
+        if (regionPref === "de" && !isDE) continue;
+        if (regionPref === "int" && isDE) continue;
+        const navCalc = calcNav(lat, lon, apt.lat, apt.lon);
+        if (navCalc.dist >= minNM && navCalc.dist <= maxNM && checkBearing(navCalc.brng, dirPref)) {
+            validAirports.push({ icao: apt.icao, n: apt.name || apt.city || "Unbekannt", lat: apt.lat, lon: apt.lon });
+        }
+    }
+    if (validAirports.length > 0) return validAirports[Math.floor(Math.random() * validAirports.length)];
+    return null;
+}
+
+async function findWikipediaPOI(lat, lon, minNM, maxNM, dirPref) {
+    const dist = Math.floor(Math.random() * (maxNM - minNM + 1)) + minNM;
+    let minB = 0, maxB = 360;
+    if (dirPref === 'N') { minB = 315; maxB = 405; } else if (dirPref === 'E') { minB = 45; maxB = 135; }
+    else if (dirPref === 'S') { minB = 135; maxB = 225; } else if (dirPref === 'W') { minB = 225; maxB = 315; }
+    let bearing = Math.floor(Math.random() * (maxB - minB + 1)) + minB; bearing = bearing % 360;
+    const target = getDestinationPoint(lat, lon, dist, bearing);
+    const url = `https://de.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${target.lat}|${target.lon}&gsradius=10000&gslimit=30&format=json&origin=*`;
+    try {
+        const res = await fetch(url); const data = await res.json();
+        if (data.query && data.query.geosearch && data.query.geosearch.length > 0) {
+            const poi = data.query.geosearch[Math.floor(Math.random() * data.query.geosearch.length)];
+            return { icao: "POI", n: poi.title, lat: poi.lat, lon: poi.lon };
+        }
+    } catch(e) {}
+    return null;
+}
+
+async function fetchAreaDescription(lat, lon, elementId, exactTitle = null) {
+    try {
+        let titleToFetch = exactTitle;
+        if (!titleToFetch) {
+            const geoRes = await fetch(`https://de.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}|${lon}&gsradius=10000&gslimit=1&format=json&origin=*`);
+            const geoData = await geoRes.json();
+            if (geoData?.query?.geosearch?.length > 0) titleToFetch = geoData.query.geosearch[0].title;
+            else { document.getElementById(elementId).innerText = "Keine regionalen Wikipedia-Daten gefunden."; return; }
+        }
+        if (titleToFetch) {
+            const extRes = await fetch(`https://de.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=true&explaintext=true&exsentences=3&titles=${encodeURIComponent(titleToFetch)}&format=json&origin=*`);
+            const extData = await extRes.json();
+            if (extData?.query?.pages) {
+                const pageId = Object.keys(extData.query.pages)[0];
+                if (pageId !== "-1" && extData.query.pages[pageId].extract) {
+                    let prefix = exactTitle ? "" : `Region (${titleToFetch}):\n`;
+                    document.getElementById(elementId).innerText = prefix + extData.query.pages[pageId].extract; return;
+                }
+            }
+        }
+        document.getElementById(elementId).innerText = "Der Artikel konnte nicht von Wikipedia abgerufen werden.";
+    } catch(e) { document.getElementById(elementId).innerText = "Wiki-Daten konnten nicht geladen werden."; }
+}
+
+async function fetchRunwayDetails(lat, lon, elementId, icaoCode) {
+    const domEl = document.getElementById(elementId);
+    const hColor = document.body.classList.contains('theme-retro') ? 'var(--piper-yellow)' : 'var(--warn)';
+    if (icaoCode && runwayCache[icaoCode]) { domEl.innerText = runwayCache[icaoCode]; domEl.style.color = hColor; return; }
+    try {
+        const res = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(`[out:json][timeout:5];way["aeroway"="runway"](around:2000,${lat},${lon});out tags;`)}`);
+        const data = await res.json();
+        if (data?.elements?.length > 0) {
+            let rwyElement = data.elements.find(el => el.tags && el.tags.ref) || data.elements[0];
+            const ref = rwyElement.tags.ref || "???";
+            let surface = rwyElement.tags.surface ? rwyElement.tags.surface.toLowerCase() : "unbekannt";
+            const trans = { "asphalt": "Asphalt", "concrete": "Beton", "grass": "Gras", "paved": "Befestigt", "unpaved": "Unbefestigt", "dirt": "Erde", "gravel": "Schotter" };
+            const finalString = `${ref} - ${trans[surface] || surface}${rwyElement.tags.length ? ` (${rwyElement.tags.length}m)` : ""}`;
+            if (icaoCode && finalString !== "??? - unbekannt") runwayCache[icaoCode] = finalString;
+            domEl.innerText = finalString; domEl.style.color = hColor; return;
+        }
+    } catch (e) {}
+    domEl.innerText = "Keine Daten gefunden"; domEl.style.color = "#888";
+}
+
+async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, cargoText) {
+    const aiToggleBtn = document.getElementById('aiToggle');
+    if (!aiToggleBtn || !aiToggleBtn.checked) return null; 
+    const apiKeyInput = document.getElementById('apiKeyInput');
+    const apiKey = apiKeyInput ? apiKeyInput.value.trim() : "";
+    if (!apiKey) return null; 
+
+    const prompt = `Du bist ein Dispatcher für die allgemeine Luftfahrt (General Aviation).
+    Erstelle ein realistisches Einsatzbriefing:
+    Start: ${startName}
+    Ziel/Fokus: ${destName} ${isPOI ? '(POI / Wendepunkt)' : '(Zielflughafen)'}
+    Distanz (Gesamt): ${dist} NM
+    Zuladung: ${paxText}, ${cargoText} Fracht.
+
+    WICHTIGE REGELN:
+    1. Antworte IMMER auf Deutsch!
+    2. Schreibe knapp und professionell im Ton eines echten Dispatcher-Briefings auf dem Klemmbrett.
+    3. Baue echte geografische oder historische Fakten zur Region ein.
+    ${isPOI ? 
+    `4. RUNDFLUG-REGELN: Start/Landung ist ${startName}. Am POI (${destName}) wird NICHTS gelandet! 
+    5. AUFGABE: Klassische Rundflug-Motive (Fotoflug, LiDAR). TRAININGS-FALLBACK: Übungsflug bei langweiligem POI.` 
+    : `4. ROUTEN-REGELN: Normaler Streckenflug von ${startName} nach ${destName}. Typische GA-Aufgaben.`}
+
+    Antworte AUSSCHLIESSLICH als JSON. Keine Markdown-Formatierung.
+    Struktur: {"title": "Kurzer, knackiger Titel", "story": "Das Briefing (max 3-4 Sätze)"}`;
+
+    try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { response_mime_type: "application/json" } })
+        });
+        if (!response.ok) throw new Error('API antwortet nicht mit OK');
+        const data = await response.json();
+        const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
+        return { t: parsed.title, s: parsed.story, i: "📋", cat: "std" };
+    } catch (e) { console.warn("Gemini API fehlgeschlagen.", e); return null; }
+}
+
+/* =========================================================
+   5. HAUPT-LOGIK: AUFTRAG GENERIEREN
+   ========================================================= */
+async function generateMission() {
+    const btn = document.getElementById('generateBtn'); 
+    btn.disabled = true; btn.innerText = "Sucht Route & Daten...";
+    document.getElementById("briefingBox").style.display = "none";
+    
+    const page1 = document.getElementById('notePage1'), page2 = document.getElementById('notePage2');
+    if(page1 && page2) { page1.classList.replace('back-note', 'front-note'); page2.classList.replace('front-note', 'back-note'); }
+    
+    document.getElementById("mDepRwy").innerText = "Sucht Pisten-Infos..."; document.getElementById("mDepRwy").style.color = "#fff";
+    document.getElementById("mDestRwy").innerText = "Sucht Pisten-Infos..."; document.getElementById("mDestRwy").style.color = "#fff";
+    document.getElementById("wikiDescText").innerText = "Lade Region-Info...";
+
+    const indicator = document.getElementById('searchIndicator');
+    const needle = document.getElementById('meterNeedle');
+    const led = document.getElementById('meterLed');
+    if (led) led.classList.remove('led-green', 'led-blue');
+    
+    if (window.meterInterval) clearInterval(window.meterInterval);
+    window.meterInterval = setInterval(() => {
+        const randomAngle = Math.floor(Math.random() * 60) - 20; 
+        if (needle) needle.style.transform = `translateX(-50%) rotate(${randomAngle}deg)`;
+    }, 120);
+
+    currentStartICAO = document.getElementById("startLoc").value.toUpperCase();
+    const start = await getAirportData(currentStartICAO);
+    if(!start) { 
+        alert("Startplatz unbekannt!"); resetBtn(btn); 
+        if(window.meterInterval) clearInterval(window.meterInterval);
+        if (needle) needle.style.transform = `translateX(-50%) rotate(-45deg)`; return; 
+    }
+    
+    const rangePref = document.getElementById("distRange").value, regionPref = document.getElementById("regionFilter").value;
+    const targetType = document.getElementById("targetType").value, dirPref = document.getElementById("dirPref").value;
+    const maxSeats = parseInt(document.getElementById("maxSeats").value);
+    const selectedTas = parseInt(document.getElementById("tasSlider").value) || 160;
+    const selectedGph = parseInt(document.getElementById("gphSlider").value) || 14;
+    
+    let targetDest = document.getElementById("destLoc").value.toUpperCase();
+    let dataSource = targetDest ? "Manuell" : "Generiert";
+    
+    let minNM, maxNM;
+    if(rangePref === "any") {
+        const roll = Math.random(); if (roll < 0.33) { minNM=10; maxNM=50; } else if (roll < 0.66) { minNM=50; maxNM=100; } else { minNM=100; maxNM=250; }
+    } else {
+        if(rangePref === "short") { minNM=10; maxNM=50; } if(rangePref === "medium") { minNM=50; maxNM=100; } if(rangePref === "long") { minNM=100; maxNM=250; }
+    }
+
+    let searchMin = targetType === "poi" ? minNM / 2 : minNM, searchMax = targetType === "poi" ? maxNM / 2 : maxNM, dest = null;
+    
+    if (targetDest) { dest = await getAirportData(targetDest); } else {
+        if (targetType === "apt") { dest = await findGithubAirport(start.lat, start.lon, searchMin, searchMax, dirPref, regionPref); } 
+        else if (targetType === "poi") { dest = await findWikipediaPOI(start.lat, start.lon, searchMin, searchMax, dirPref); }
+    }
+    
+    if(!dest && !targetDest && typeof coreDB !== 'undefined') {
+        if (targetType === "apt") {
+            dataSource = "Core DB (Fallback)";
+            let keys = Object.keys(coreDB).filter(k => k !== currentStartICAO);
+            if(regionPref === "de") keys = keys.filter(k => k.startsWith('ED') || k.startsWith('ET'));
+            if(regionPref === "int") keys = keys.filter(k => !k.startsWith('ED') && !k.startsWith('ET'));
+            let dirFilteredKeys = keys.filter(k => checkBearing(calcNav(start.lat, start.lon, coreDB[k].lat, coreDB[k].lon).brng, dirPref));
+            if(dirFilteredKeys.length > 0) keys = dirFilteredKeys;
+            if(keys.length === 0) keys = Object.keys(coreDB).filter(k => k !== currentStartICAO); 
+            dest = coreDB[keys[Math.floor(Math.random()*keys.length)]];
+        } else if (targetType === "poi" && typeof fallbackPOIs !== 'undefined') {
+            dataSource = "Fallback POIs";
+            let validPOIs = fallbackPOIs.filter(p => checkBearing(calcNav(start.lat, start.lon, p.lat, p.lon).brng, dirPref));
+            if(validPOIs.length === 0) validPOIs = fallbackPOIs; 
+            dest = validPOIs[Math.floor(Math.random() * validPOIs.length)]; dest.icao = "POI";
+        }
+    }
+
+    if(!dest) { 
+        indicator.innerText = "Fehler: Kein passendes Ziel gefunden."; resetBtn(btn); 
+        if(window.meterInterval) clearInterval(window.meterInterval);
+        if (needle) needle.style.transform = `translateX(-50%) rotate(-45deg)`; return; 
+    }
+    
+    const isPOI = (targetType === 'poi' && !targetDest);
+    const nav = calcNav(start.lat, start.lon, dest.lat, dest.lon);
+    let totalDist = isPOI ? nav.dist * 2 : nav.dist;
+    currentDestICAO = isPOI ? currentStartICAO : dest.icao;
+    
+    const maxPax = Math.max(1, maxSeats - 1), randomPax = Math.floor(Math.random() * maxPax) + 1;
+    let paxText = `${randomPax} PAX`, cargoText = `${Math.floor(Math.random()*300)+20} lbs`;
+    
+    indicator.innerText = `Kontaktiere KI-Dispatcher...`;
+    let m = await fetchGeminiMission(start.n, dest.n, totalDist, isPOI, paxText, cargoText);
+
+    if (m) { dataSource = "Gemini AI"; } else {
+        indicator.innerText = `Lade Auftrag aus lokaler Datenbank...`;
+        if (isPOI) {
+            m = generateDynamicPOIMission(dest.n, maxSeats); paxText = m.payloadText; cargoText = m.cargoText; dataSource = "Wikipedia GeoSearch";
+        } else if (typeof missions !== 'undefined') {
+            const availM = missions.filter(ms => (nav.dist < 50 || ms.cat === "std"));
+            m = availM[Math.floor(Math.random()*availM.length)] || missions[0];
+            if(dataSource === "Generiert") dataSource = "GitHub Airport DB";
+            if (m.cat === "trn" || m.cat === "cargo") { paxText = "0 PAX"; }
+        }
+    }
+    
+    const fuel = Math.ceil((totalDist / selectedTas * selectedGph) + (0.75 * selectedGph));
+    const totalMinutes = Math.round((totalDist / selectedTas) * 60);
+    const hrs = Math.floor(totalMinutes / 60), mins = totalMinutes % 60;
+    const timeStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} Min.`;
+
+    currentMissionData = { start: currentStartICAO, dest: currentDestICAO, poiName: isPOI ? dest.n : null, mission: m.t, dist: totalDist, ac: selectedAC, heading: nav.brng };
+    
+    document.getElementById("mTitle").innerHTML = `${m.i ? m.i + ' ' : ''}${m.t}`;
+    document.getElementById("mStory").innerText = m.s;
+    document.getElementById("mDepICAO").innerText = currentStartICAO;
+    document.getElementById("mDepName").innerText = start.n;
+    document.getElementById("mDepCoords").innerText = `${start.lat.toFixed(4)}, ${start.lon.toFixed(4)}`;
+    
+    // DIE FEHLERQUELLE: Hier haben wir headingDrum und headingArrow sicher entfernt!
+    setDrumCounter('distDrum', totalDist);
+    recalculatePerformance();
+
+    document.getElementById("destIcon").innerText = isPOI ? "🎯" : "🛬";
+    document.getElementById("mDestICAO").innerText = isPOI ? "POI" : currentDestICAO;
+    document.getElementById("mDestName").innerText = dest.n;
+    document.getElementById("mDestCoords").innerText = `${dest.lat.toFixed(4)}, ${dest.lon.toFixed(4)}`;
+    
+    document.getElementById("mPay").innerText = paxText; document.getElementById("mWeight").innerText = cargoText;
+    document.getElementById("mDistNote").innerText = `${totalDist} NM`; 
+    document.getElementById("mETENote").innerText = timeStr;
+    const mHeadingNote = document.getElementById("mHeadingNote");
+    if(mHeadingNote) mHeadingNote.innerText = `${nav.brng}°`;
+    
+    document.getElementById("destRwyContainer").style.display = isPOI ? "none" : "block";
+    const destSwitchRow = document.getElementById("destSwitchRow"); if(destSwitchRow) destSwitchRow.style.display = isPOI ? "none" : "flex";
+
+    document.getElementById("briefingBox").style.display = "block";
+    
+    // Das updatet jetzt auch live die dynamischen Wegpunkte und das Nav-Log!
+    updateMap(start.lat, start.lon, dest.lat, dest.lon, currentStartICAO, dest.n);
+
+    indicator.innerText = `Flugplan bereit (${dataSource}). Lade Infos...`;
+    fetchRunwayDetails(start.lat, start.lon, 'mDepRwy', currentStartICAO);
+    
+    setTimeout(() => {
+        if (!isPOI) fetchRunwayDetails(dest.lat, dest.lon, 'mDestRwy', currentDestICAO);
+        fetchAreaDescription(dest.lat, dest.lon, 'wikiDescText', isPOI ? dest.n : null);
+        indicator.innerText = `Briefing komplett.`; resetBtn(btn);
+        
+        if(window.meterInterval) clearInterval(window.meterInterval);
+        if(needle) needle.style.transform = `translateX(-50%) rotate(-45deg)`; 
+        if (led) { if (dataSource === "Gemini AI") { led.classList.add('led-blue'); } else { led.classList.add('led-green'); } }
+    }, 800); 
+}
+
+/* =========================================================
+   6. KARTE (LEAFLET, KARTENTISCH & MESS-WERKZEUG)
+   ========================================================= */
+let measureMode = false;
+let measurePoints = [];
+let measurePolyline = null;
+let measureMarkers = [];
+
+let routeWaypoints = [];
+let routeMarkers = [];
+let currentSName = "";
+let currentDName = "";
+
+// --- RIESIGE HITBOXEN FÜR BESSERES GREIFEN ---
+// Der sichtbare Punkt bleibt klein, aber der anklickbare Bereich ist groß und transparent
+const hitBoxHtml = (color) => `<div style="background-color: transparent; width: 34px; height: 34px; display:flex; justify-content:center; align-items:center;"><div style="background-color: ${color}; border: 2px solid #222; width: 14px; height: 14px; border-radius: 50%;"></div></div>`;
+const hitBoxIcon = (color) => L.divIcon({ className: 'custom-pin', html: hitBoxHtml(color), iconSize: [34, 34], iconAnchor: [17, 17] });
+
+const startIcon = hitBoxIcon('#44ff44');
+const destIcon  = hitBoxIcon('#ff4444');
+const wpIcon    = L.divIcon({ className: 'custom-pin', html: `<div style="background-color: transparent; width: 34px; height: 34px; display:flex; justify-content:center; align-items:center; cursor: move;"><div style="background-color: #fdfd86; border: 2px solid #222; width: 14px; height: 14px; border-radius: 50%;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
+const measureIcon = L.divIcon({ className: 'custom-pin', html: `<div style="background-color: transparent; width: 34px; height: 34px; display:flex; justify-content:center; align-items:center; cursor: move;"><div style="background-color: #fff; border: 2px solid #222; width: 12px; height: 12px; border-radius: 50%;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
+
+window.removeMeasureMarker = function(index) {
+    if(measureMarkers[index]) {
+        map.removeLayer(measureMarkers[index]); measureMarkers.splice(index, 1); updateMeasureRoute();
+    }
+};
+
+window.removeRouteWaypoint = function(index) {
+    routeWaypoints.splice(index, 1); renderMainRoute(); 
+};
+
+function resetMainRoute() {
+    if(routeWaypoints.length > 2) {
+        routeWaypoints = [routeWaypoints[0], routeWaypoints[routeWaypoints.length - 1]];
+        renderMainRoute(); map.fitBounds(L.latLngBounds(routeWaypoints), { padding: [40, 40] });
+    }
+}
+
+function addMeasurePoint(latlng) {
+    const marker = L.marker(latlng, {icon: measureIcon, draggable: true}).addTo(map);
+    marker.on('dragend', updateMeasureRoute);
+    marker.on('click', function(e) { if(!measureMode) marker.openPopup(); });
+    measureMarkers.push(marker); updateMeasureRoute();
+    if(measureMarkers.length > 1) marker.openPopup();
+}
+
+function updateMeasureRoute() {
+    if(measurePolyline) map.removeLayer(measurePolyline);
+    measurePoints = measureMarkers.map(m => m.getLatLng());
+    if(measurePoints.length > 1) {
+        measurePolyline = L.polyline(measurePoints, {color: '#222', weight: 4, dashArray: '6,6'}).addTo(map);
+    }
+    let totalDist = 0;
+    for(let i=0; i<measureMarkers.length; i++) {
+        let m = measureMarkers[i], text = ``;
+        if(i > 0) {
+            let prev = measurePoints[i-1], curr = measurePoints[i], nav = calcNav(prev.lat, prev.lng, curr.lat, curr.lng); totalDist += nav.dist;
+            text = `<div style="text-align:center;"><b>Messpunkt ${i+1}</b><br><hr style="margin:4px 0;">Kurs: <b>${nav.brng}°</b><br>Leg: ${nav.dist} NM<br><b>Gesamt: ${totalDist} NM</b><br><button onclick="removeMeasureMarker(${i})" style="margin-top:8px; background:#d93829; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius: 2px; width:100%;">🗑️ Löschen</button></div>`;
+        } else {
+            text = `<div style="text-align:center;"><b>Startpunkt</b><br><hr style="margin:4px 0;"><button onclick="removeMeasureMarker(${i})" style="margin-top:8px; background:#d93829; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius: 2px; width:100%;">🗑️ Löschen</button></div>`;
+        }
+        m.bindPopup(text);
+    }
+}
+
+function renderMainRoute() {
+    routeMarkers.forEach(m => map.removeLayer(m)); if (polyline) map.removeLayer(polyline); routeMarkers = [];
+    if(routeWaypoints.length === 0) return;
+
+    // Linie ist jetzt dicker (weight: 8) für leichteres Anklicken
+    polyline = L.polyline(routeWaypoints, { color: '#ff4444', weight: 8, dashArray: '10,10', className: 'interactive-route' }).addTo(map);
+    
+    polyline.on('click', function(e) {
+        let bestIndex = 1, minDiff = Infinity;
+        for (let i = 0; i < routeWaypoints.length - 1; i++) {
+            let p1 = L.latLng(routeWaypoints[i].lat, routeWaypoints[i].lng || routeWaypoints[i].lon), p2 = L.latLng(routeWaypoints[i+1].lat, routeWaypoints[i+1].lng || routeWaypoints[i+1].lon);
+            let d1 = map.distance(p1, e.latlng), d2 = map.distance(e.latlng, p2), d = map.distance(p1, p2), diff = d1 + d2 - d;
+            if (diff < minDiff) { minDiff = diff; bestIndex = i + 1; }
+        }
+        routeWaypoints.splice(bestIndex, 0, e.latlng); renderMainRoute(); 
+    });
+
+    routeWaypoints.forEach((latlng, index) => {
+        let isStart = (index === 0), isDest = (index === routeWaypoints.length - 1 && routeWaypoints.length > 1);
+        let icon = isStart ? startIcon : (isDest ? destIcon : wpIcon);
+        let draggable = (!isStart && !isDest); 
+        let marker = L.marker(latlng, {icon: icon, draggable: draggable}).addTo(map);
+
+        if (isStart) marker.bindPopup(`<b>DEP:</b> ${currentSName}`);
+        else if (isDest) marker.bindPopup(`<b>DEST:</b> ${currentDName}`);
+        else marker.bindPopup(`<div style="text-align:center;"><b>Wegpunkt</b><br><button onclick="removeRouteWaypoint(${index})" style="margin-top:5px; background:#d93829; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius: 2px;">🗑️ Löschen</button></div>`);
+
+        if(draggable) marker.on('dragend', function(e) { routeWaypoints[index] = e.target.getLatLng(); renderMainRoute(); });
+        routeMarkers.push(marker);
+    });
+    updateRoutePerformance();
+}
+
+function updateRoutePerformance() {
+    if(routeWaypoints.length < 2 || !currentMissionData) return;
+    let totalNM = 0, wpHTML = '';
+    
+    for(let i=0; i<routeWaypoints.length - 1; i++) {
+        let p1 = routeWaypoints[i], p2 = routeWaypoints[i+1], nav = calcNav(p1.lat, p1.lng || p1.lon, p2.lat, p2.lng || p2.lon);
+        totalNM += nav.dist;
+        let name1 = (i === 0) ? currentSName : `WP ${i}`, name2 = (i === routeWaypoints.length - 2) ? currentDName : `WP ${i+1}`;
+        wpHTML += `<div class="wp-row"><span class="wp-name">${name1} ➔ ${name2}</span><span class="wp-data">${nav.brng}° | ${nav.dist} NM</span></div>`;
+    }
+    
+    let initialNav = calcNav(routeWaypoints[0].lat, routeWaypoints[0].lng || routeWaypoints[0].lon, routeWaypoints[1].lat, routeWaypoints[1].lng || routeWaypoints[1].lon);
+    currentMissionData.dist = totalNM; currentMissionData.heading = initialNav.brng;
+
+    setDrumCounter('distDrum', totalNM);
+    const mHeadingNote = document.getElementById("mHeadingNote"); if(mHeadingNote) mHeadingNote.innerText = `${initialNav.brng}°`;
+    const wpListContainer = document.getElementById("waypointList"); if(wpListContainer) wpListContainer.innerHTML = wpHTML;
+    
+    recalculatePerformance();
+    const mDistNote = document.getElementById("mDistNote"); if(mDistNote) mDistNote.innerText = `${totalNM} NM`;
+    const tas = parseInt(document.getElementById("tasSlider").value) || 160, totalMinutes = Math.round((totalNM / tas) * 60);
+    const hrs = Math.floor(totalMinutes / 60), mins = totalMinutes % 60;
+    const mETENote = document.getElementById("mETENote"); if(mETENote) mETENote.innerText = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} Min.`;
+}
+
+function initMapBase() {
+    if(map) return;
+    const aeroMap = L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { attribution: 'AeroData / Navigraph' });
+    const darkMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: 'CartoDB' });
+    const topoMap = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: 'OpenTopoMap' });
+    const satMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' });
+
+    map = L.map('map', { layers: [aeroMap], attributionControl: false }).setView([51.1657, 10.4515], 6);
+    const baseMaps = { "🛩️ VFR Lufträume (Aero)": aeroMap, "⛰️ Topografie (VFR)": topoMap, "🌑 Dark Mode (Clean)": darkMap, "🛰️ Satellit (Esri)": satMap };
+    L.control.layers(baseMaps).addTo(map);
+    
+    // VOLLBILD BUTTON IN DER KARTE (Neu programmiert)
+    const fsControl = L.control({position: 'topleft'});
+    fsControl.onAdd = function() {
+        const btn = L.DomUtil.create('button', 'leaflet-bar leaflet-control');
+        btn.innerHTML = '⛶'; btn.title = 'Vollbildmodus'; btn.style.width = '30px'; btn.style.height = '30px';
+        btn.style.lineHeight = '30px'; btn.style.backgroundColor = '#fff'; btn.style.border = '1px solid #ccc';
+        btn.style.cursor = 'pointer'; btn.style.fontSize = '18px'; btn.style.fontWeight = 'bold'; btn.style.textAlign = 'center'; btn.style.padding = '0';
+        
+        btn.onclick = function(e){
+            e.preventDefault(); 
+            // Hier schalten wir den gesamten Body um!
+            document.body.classList.toggle('map-is-fullscreen');
+            
+            if (document.body.classList.contains('map-is-fullscreen')) {
+                btn.innerHTML = '✖';
+            } else {
+                btn.innerHTML = '⛶';
+            }
+            // Zwingt die Karte, ihre neue Größe zu berechnen
+            setTimeout(() => { if(map) map.invalidateSize(); }, 300);
+        };
+        return btn;
+    };
+    fsControl.addTo(map);
+
+    map.on('click', function(e) { if (!measureMode) return; addMeasurePoint(e.latlng); });
+}
+
+function updateMap(lat1, lon1, lat2, lon2, s, d) {
+    if (!map) initMapBase();
+    currentSName = s || "Start"; currentDName = d || "Ziel";
+    routeWaypoints = [{lat: lat1, lng: lon1}, {lat: lat2, lng: lon2}];
+    renderMainRoute();
+}
+
+async function updateMapFromInputs() {
+    if(!document.getElementById('mapTableOverlay').classList.contains('active')) return;
+    const sIcao = document.getElementById('startLoc').value.toUpperCase(), dIcao = document.getElementById('destLoc').value.toUpperCase();
+    if(!sIcao) return;
+    if(!map) initMapBase();
+    let sData = await getAirportData(sIcao), dData = dIcao ? await getAirportData(dIcao) : null;
+    if(sData && dData) {
+        currentSName = sData.icao; currentDName = dData.icao;
+        routeWaypoints = [{lat: sData.lat, lng: sData.lon}, {lat: dData.lat, lng: dData.lon}];
+        renderMainRoute(); map.fitBounds(L.latLngBounds([sData.lat, sData.lon], [dData.lat, dData.lon]), { padding: [40, 40] });
+    } else if (sData) {
+        currentSName = sData.icao; routeWaypoints = [{lat: sData.lat, lng: sData.lon}];
+        renderMainRoute(); map.panTo([sData.lat, sData.lon]); if(map.getZoom() < 8) map.setZoom(9);
+    }
+}
+
+function toggleMapTable() {
+    const board = document.getElementById('mapTableOverlay'), pinBoard = document.getElementById('pinboardOverlay');
+    if (pinBoard.classList.contains('active')) { togglePinboard(); }
+    
+    board.classList.toggle('active'); document.body.classList.toggle('maptable-open');
+    
+    if (board.classList.contains('active')) {
+        if(!map) initMapBase();
+        setTimeout(() => { 
+            if(map) {
+                map.invalidateSize();
+                if(routeWaypoints && routeWaypoints.length >= 2) map.fitBounds(L.latLngBounds(routeWaypoints), { padding: [40, 40] });
+                else updateMapFromInputs();
+            }
+        }, 500); // 500ms warten, bis die Schublade ganz ausgefahren ist
+    }
+}
+
+function toggleMeasureMode() {
+    measureMode = !measureMode; const btn = document.getElementById('measureBtn');
+    if (measureMode) {
+        btn.innerText = '📏 Messen (An)'; btn.style.background = 'var(--piper-yellow)'; btn.style.color = '#000';
+        document.getElementById('map').style.cursor = 'crosshair';
+        if(measureMarkers.length === 0 && routeWaypoints.length > 0) addMeasurePoint(L.latLng(routeWaypoints[0].lat, routeWaypoints[0].lng || routeWaypoints[0].lon));
+    } else {
+        btn.innerText = '📏 Messen (Aus)'; btn.style.background = '#444'; btn.style.color = '#fff';
+        document.getElementById('map').style.cursor = '';
+    }
+}
+
+function clearMeasure() {
+    if(measurePolyline) map.removeLayer(measurePolyline); measureMarkers.forEach(m => map.removeLayer(m));
+    measurePoints = []; measureMarkers = [];
+}
+
+
+/* =========================================================
+   7. EXTERNE LINKS & LOGBUCH
+   ========================================================= */
+function openAIP(t) { window.open(`https://aip.aero/de/vfr/?${t==='dep'?currentStartICAO:currentDestICAO}`, '_blank'); }
+function openMetar(t) { window.open(`https://metar-taf.com/de/${t==='dep'?currentStartICAO:currentDestICAO}`, '_blank'); }
+
+function logCurrentFlight() {
+    if(!currentMissionData) return;
+    const log = JSON.parse(localStorage.getItem('ga_logbook')) || [];
+    log.unshift({ ...currentMissionData, date: new Date().toLocaleString('de-DE', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) });
+    localStorage.setItem('ga_logbook', JSON.stringify(log.slice(0, 50)));
+    localStorage.setItem('last_icao_dest', currentMissionData.dest);
+    document.getElementById('startLoc').value = currentMissionData.dest; document.getElementById('destLoc').value = "";
+    renderLog(); alert(`Flug geloggt! Du bist in ${currentMissionData.dest}.`);
+}
+
+function renderLog() {
+    const log = JSON.parse(localStorage.getItem('ga_logbook')) || [];
+    const container = document.getElementById('logContent');
+    container.innerHTML = log.length ? '' : '<div style="color:#888; font-size:11px;">Keine Einträge vorhanden.</div>';
+    const isRetro = document.body.classList.contains('theme-retro');
+    log.forEach(e => {
+        const div = document.createElement('div'); div.className = 'log-entry';
+        const routeStr = e.poiName ? `<b>${e.start} ➔ ${e.poiName} ➔ ${e.dest}</b>` : `<b>${e.start} ➔ ${e.dest}</b>`;
+        const hlColor = isRetro ? 'var(--piper-yellow)' : 'var(--blue)';
+        const subColor = isRetro ? '#aaa' : '#888';
+        div.innerHTML = `<span style="color:${subColor};">${e.date} • ${e.ac}</span><br>${routeStr}<br><span style="color:${hlColor}">${e.mission} (${e.dist} NM)</span>`;
+        container.appendChild(div);
+    });
+}
+function clearLog() { if(confirm("Gesamtes Logbuch löschen?")) { localStorage.removeItem('ga_logbook'); localStorage.removeItem('last_icao_dest'); renderLog(); } }
+
+/* =========================================================
+   8. HANGAR PINNWAND (LOKAL)
+   ========================================================= */
+function togglePinboard() {
+    const board = document.getElementById('pinboardOverlay');
+    const mapBoard = document.getElementById('mapTableOverlay');
+    if (mapBoard.classList.contains('active')) { toggleMapTable(); } 
+    
+    board.classList.toggle('active');
+    document.body.classList.toggle('pinboard-open'); 
+    
+    if(board.classList.contains('active')) { renderNotes(); }
+}
+
+function addNote() {
+    const text = prompt("Was möchtest du ans schwarze Brett pinnen?");
+    if(!text || text.trim() === "") return;
+    let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
+    const rot = Math.floor(Math.random() * 9) - 4;
+    notes.push({ id: Date.now(), text: text, x: 300, y: 200, rot: rot });
+    localStorage.setItem('ga_pinboard', JSON.stringify(notes));
+    renderNotes();
+}
+
+function deleteNote(id) {
+    if(!confirm("Zettel wirklich abreißen?")) return;
+    let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
+    notes = notes.filter(n => n.id !== id);
+    localStorage.setItem('ga_pinboard', JSON.stringify(notes));
+    renderNotes();
+}
+
+function renderNotes() {
+    const board = document.getElementById('pinboard');
+    if (!board) return;
+    board.innerHTML = ''; 
+    let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
+    notes.forEach(note => {
+        const div = document.createElement('div'); div.className = 'post-it';
+        div.style.left = note.x + 'px'; div.style.top = note.y + 'px'; div.style.transform = `rotate(${note.rot}deg)`;
+        div.innerHTML = `<div class="post-it-pin"></div><div class="post-it-del" onclick="deleteNote(${note.id})">✖</div>${note.text.replace(/\n/g, '<br>')}`;
+        makeDraggable(div, note.id); board.appendChild(div);
+    });
+}
+
+function makeDraggable(element, noteId) {
+    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+    element.onmousedown = dragMouseDown; element.ontouchstart = dragMouseDown;
+
+    function dragMouseDown(e) {
+        if(e.target.className === 'post-it-del') return; 
+        e.preventDefault();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX, clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        pos3 = clientX; pos4 = clientY;
+        document.onmouseup = closeDragElement; document.ontouchend = closeDragElement;
+        document.onmousemove = elementDrag; document.ontouchmove = elementDrag;
+    }
+
+    function elementDrag(e) {
+        e.preventDefault(); 
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX, clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        pos1 = pos3 - clientX; pos2 = pos4 - clientY; pos3 = clientX; pos4 = clientY;
+        
+        let newTop = element.offsetTop - pos2, newLeft = element.offsetLeft - pos1;
+        const board = document.getElementById('pinboard'), padding = 15; 
+        const minLeft = padding, maxLeft = board.offsetWidth - element.offsetWidth - padding;
+        const minTop = padding, maxTop = board.offsetHeight - element.offsetHeight - padding;
+        
+        if (newLeft < minLeft) newLeft = minLeft; if (newLeft > maxLeft) newLeft = maxLeft;
+        if (newTop < minTop) newTop = minTop; if (newTop > maxTop) newTop = maxTop;
+        
+        element.style.top = newTop + "px"; element.style.left = newLeft + "px";
+    }
+
+    function closeDragElement() {
+        document.onmouseup = null; document.ontouchend = null; document.onmousemove = null; document.ontouchmove = null;
+        let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
+        const noteIndex = notes.findIndex(n => n.id === noteId);
+        if(noteIndex > -1) { notes[noteIndex].x = element.offsetLeft; notes[noteIndex].y = element.offsetTop; localStorage.setItem('ga_pinboard', JSON.stringify(notes)); }
+    }
+}
