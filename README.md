@@ -1,4 +1,4 @@
 # GA-dispatcher
-My little GA dispatcher for flight simming in Germany 
+beta 
 
-https://inherjer.github.io/GA-dispatcher/
+https://inherjer.github.io/GA-Dispatcher-beta/
