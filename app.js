@@ -175,6 +175,7 @@ function resetApp() {
     if(map) {
         routeMarkers.forEach(m => map.removeLayer(m));
         if (polyline) map.removeLayer(polyline);
+        if (window.hitBoxPolyline) map.removeLayer(window.hitBoxPolyline); // FIX: Hitbox löschen
     }
     if (miniMap) {
         if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline);
@@ -186,7 +187,6 @@ function resetApp() {
     setDrumCounter('distDrum', 0);
     recalculatePerformance();
 }
-
 /* =========================================================
    4. HELPER-FUNKTIONEN (UI & Mathe)
    ========================================================= */
@@ -681,12 +681,21 @@ function resetMainRoute() {
 function renderMainRoute() {
     if (!map) initMapBase();
     
-    routeMarkers.forEach(m => map.removeLayer(m)); if (polyline) map.removeLayer(polyline); routeMarkers = [];
+    routeMarkers.forEach(m => map.removeLayer(m)); 
+    if (polyline) map.removeLayer(polyline); 
+    if (window.hitBoxPolyline) map.removeLayer(window.hitBoxPolyline); // Alte Hitbox löschen
+    routeMarkers = [];
+    
     if(routeWaypoints.length === 0) return;
 
-    polyline = L.polyline(routeWaypoints, { color: '#ff4444', weight: 8, dashArray: '10,10', className: 'interactive-route' }).addTo(map);
+    // 1. Die SICHTBARE Route (Klicks dafür deaktivieren, damit sie nicht stört)
+    polyline = L.polyline(routeWaypoints, { color: '#ff4444', weight: 8, dashArray: '10,10', interactive: false }).addTo(map);
     
-    polyline.on('click', function(e) {
+    // 2. Die UNSICHTBARE Hitbox-Route (45 Pixel dick für leichtes Treffen mit dem Finger!)
+    window.hitBoxPolyline = L.polyline(routeWaypoints, { color: 'transparent', weight: 45, opacity: 0, className: 'interactive-route' }).addTo(map);
+    
+    // Wir hängen das Klick-Event jetzt an die unsichtbare dicke Linie!
+    window.hitBoxPolyline.on('click', function(e) {
         let bestIndex = 1, minDiff = Infinity;
         for (let i = 0; i < routeWaypoints.length - 1; i++) {
             let p1 = L.latLng(routeWaypoints[i].lat, routeWaypoints[i].lng || routeWaypoints[i].lon), p2 = L.latLng(routeWaypoints[i+1].lat, routeWaypoints[i+1].lng || routeWaypoints[i+1].lon);

@@ -829,9 +829,9 @@ body.theme-retro .wp-data { color: var(--piper-yellow); }
         border-radius: 0 !important;
     }
     #map {
-        /* Karte fast bis an den Rand ziehen, nur ein Hauch vom Hintergrundbild bleibt */
-        width: 96% !important;
-        height: 96% !important;
+        /* Karte etwas schmaler (92%), damit wieder mehr Holztisch zu sehen ist */
+        width: 92% !important;
+        height: 92% !important;
         border-radius: 6px !important;
     }
 
