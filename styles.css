@@ -890,20 +890,18 @@ body.theme-retro .wp-data { color: var(--piper-yellow); }
         height: 92% !important;
         border-radius: 6px !important;
     }
-
-    /* --- 2. Pinnwand horizontal scrollbar machen --- */
+    /* --- 2. Pinnwand in alle Richtungen scrollbar machen (Pan-Canvas) --- */
     #pinboardOverlay .pinboard-scroll-area {
-        display: block !important; /* Behebt einen Flexbox-Bug, der das Scrollen nach links blockiert */
-        overflow-x: auto !important;
-        overflow-y: hidden !important;
-        -webkit-overflow-scrolling: touch; /* Sorgt für extrem weiches Wischen auf iOS */
-        padding: 15px 0 !important; 
+        display: block !important; 
+        overflow: auto !important; /* Erlaubt horizontales UND vertikales Scrollen */
+        -webkit-overflow-scrolling: touch; /* Weiches Wischen auf iOS */
+        padding: 20px !important; /* Luft an allen Seiten, damit man gut an den Rand kommt */
     }
     .pinboard-content {
-        width: 850px !important; /* Zwingt das Board, auf dem Handy breit zu bleiben */
-        height: 100% !important; /* Nutzt die Höhe bis zur Toolbox perfekt aus */
-        margin: 0 15px !important; /* Sorgt dafür, dass es beim Wischen nicht am Displayrand klebt */
+        width: 900px !important; /* Feste Breite wie auf dem Desktop */
+        height: 600px !important; /* Feste Höhe, damit man auch vertikal pannen kann */
+        margin: 0 auto !important; /* Rand wird über das Padding des Parents erzeugt */
         max-width: none !important;
+        max-height: none !important;
         border-radius: 8px !important;
     }
-}
