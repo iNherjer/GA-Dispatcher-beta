@@ -735,14 +735,40 @@ function updateRoutePerformance() {
 
 function initMapBase() {
     if(map) return;
-    const aeroMap = L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { attribution: 'AeroData / Navigraph' });
-    const darkMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: 'CartoDB' });
+    
+    // 1. BASE MAPS (Untergrund - per Radiobutton wählbar)
     const topoMap = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: 'OpenTopoMap' });
+    // NEU: Blasse Version der Topo-Karte für perfekte Lesbarkeit
+    const topoLightMap = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: 'OpenTopoMap', opacity: 0.35 });
+    
     const satMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' });
+    const darkMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: 'CartoDB' });
+    const lightMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: 'CartoDB' }); // Blanke/Helle Karte
 
-    map = L.map('map', { layers: [aeroMap], attributionControl: false }).setView([51.1657, 10.4515], 6);
-    const baseMaps = { "🛩️ VFR Lufträume (Aero)": aeroMap, "⛰️ Topografie (VFR)": topoMap, "🌑 Dark Mode (Clean)": darkMap, "🛰️ Satellit (Esri)": satMap };
-    L.control.layers(baseMaps).addTo(map);
+   // 2. OVERLAY MAP (VFR Infos - per Checkbox on top schaltbar)
+    const aeroOverlay = L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { 
+        attribution: 'AeroData / Navigraph',
+        opacity: 0.65,
+        maxNativeZoom: 12, // Höchste Zoom-Stufe, die der Server physisch hat
+        maxZoom: 20        // Erlaubt unserer App das digitale "Überzoomen" bis Stufe 20
+    });
+
+    // Wir starten jetzt standardmäßig mit der blassen Topo-Karte!
+    map = L.map('map', { layers: [topoLightMap, aeroOverlay], attributionControl: false }).setView([51.1657, 10.4515], 6);
+    
+    const baseMaps = { 
+        "🏔️ Topo Light (Blass)": topoLightMap, 
+        "⛰️ Topo (Stark)": topoMap, 
+        "🛰️ Satellit": satMap, 
+        "🗺️ Light Mode (Blank)": lightMap,
+        "🌑 Dark Mode": darkMap
+    };
+    
+    const overlayMaps = {
+        "🛩️ VFR Lufträume (Overlay)": aeroOverlay
+    };
+
+    L.control.layers(baseMaps, overlayMaps).addTo(map);
     
     const fsControl = L.control({position: 'topleft'});
     fsControl.onAdd = function() {
@@ -812,7 +838,10 @@ function updateMiniMap() {
     
     if (!miniMap) {
         miniMap = L.map('miniMap', { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, attributionControl: false });
+        
+        // Stapelt die Karten für den perfekten Aviation-Look auf dem Foto
         L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png').addTo(miniMap);
+        L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { opacity: 0.65 }).addTo(miniMap);
     }
     
     if (routeWaypoints && routeWaypoints.length > 0) {
