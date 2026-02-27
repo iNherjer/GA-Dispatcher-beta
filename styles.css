@@ -617,52 +617,89 @@ body.map-is-fullscreen .pinboard-header {
 }
 
 /* ==========================================================================
-   12. DIE SCHUBLADEN-ANIMATION (PC LAYOUT)
+   12. DIE SCHUBLADEN-ANIMATION (PC LAYOUT) - NATIVE AUFLÖSUNG
    ========================================================================== */
 .container {
     position: relative;
-    z-index: 10; /* Das Haupt-Cockpit liegt IMMER ganz vorne */
+    z-index: 10; 
     transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (min-width: 1300px) {
-    /* Basis-Setup für beide Schubladen (Versteckt in der Mitte) */
     .pinboard-overlay {
         display: flex !important; visibility: hidden; background: transparent;
         left: 50%; top: 50%; right: auto; bottom: auto;
-        transform: translate(-50%, -50%) scale(0.5); z-index: 1; opacity: 0; pointer-events: none;
+        /* Beim Öffnen vergrößert es sich von 80% (0.8) auf 100% (1.0), so bleibt es scharf! */
+        transform: translate(-50%, -50%) scale(0.8); 
+        z-index: 1; opacity: 0; pointer-events: none;
         transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.4s, visibility 0.4s;
     }
-}
-
-/* FÜR LAPTOPS UND NORMALE MONITORE (1300px bis 1600px) - ANTI CLIPPING! */
-@media (min-width: 1300px) and (max-width: 1600px) {
-    body.pinboard-open .container { transform: translateX(-240px); }
-    body.maptable-open .container { transform: translateX(240px); }
     
+    /* Aktiver Zustand: exakt 1.0 (Keine künstliche Vergrößerung = Scharf!) */
     #pinboardOverlay.active {
         visibility: visible; opacity: 1; pointer-events: all;
-        left: calc(50% - 10px); transform: translate(0, -50%) scale(0.65); transform-origin: left center;
+        transform: translate(0, -50%) scale(1); transform-origin: left center;
     }
     #mapTableOverlay.active {
         visibility: visible; opacity: 1; pointer-events: all;
-        left: auto; right: calc(50% - 10px); transform: translate(0, -50%) scale(0.65); transform-origin: right center;
+        transform: translate(0, -50%) scale(1); transform-origin: right center;
+    }
+    
+    /* Sanfter Übergang, wenn sich die Tischgröße ändert */
+    .maptable-content, .pinboard-content {
+        transition: width 0.6s ease, height 0.6s ease;
     }
 }
 
-/* FÜR RIESIGE MONITORE (Über 1600px) - VOLLE GRÖSSE! */
-@media (min-width: 1601px) {
+/* 1. FÜR LAPTOPS UND KLEINE MONITORE (1300px bis 1599px) */
+@media (min-width: 1300px) and (max-width: 1599px) {
     body.pinboard-open .container { transform: translateX(-280px); }
     body.maptable-open .container { transform: translateX(280px); }
     
-    #pinboardOverlay.active {
-        visibility: visible; opacity: 1; pointer-events: all;
-        left: calc(50% - 30px); transform: translate(0, -50%) scale(0.85); transform-origin: left center;
-    }
-    #mapTableOverlay.active {
-        visibility: visible; opacity: 1; pointer-events: all;
-        left: auto; right: calc(50% - 30px); transform: translate(0, -50%) scale(0.85); transform-origin: right center;
-    }
+    #pinboardOverlay.active { left: calc(50% - 50px); }
+    #mapTableOverlay.active { left: auto; right: calc(50% - 50px); }
+    
+    .maptable-content { width: 900px; height: 550px; }
+    .pinboard-content { width: 800px; height: 550px; }
+}
+
+/* 2. FÜR NORMALE DESKTOPS (1600px bis 1919px) */
+@media (min-width: 1600px) and (max-width: 1919px) {
+    body.pinboard-open .container { transform: translateX(-360px); } 
+    body.maptable-open .container { transform: translateX(360px); }
+    
+    #pinboardOverlay.active { left: calc(50% - 100px); }
+    #mapTableOverlay.active { left: auto; right: calc(50% - 100px); }
+    
+    /* Echte Pixel-Vergrößerung! */
+    .maptable-content { width: 1100px; height: 680px; }
+    .pinboard-content { width: 1000px; height: 680px; }
+}
+
+/* 3. FÜR FULL-HD UND GROßE DESKTOPS (1920px bis 2559px) */
+@media (min-width: 1920px) and (max-width: 2559px) {
+    body.pinboard-open .container { transform: translateX(-460px); } 
+    body.maptable-open .container { transform: translateX(460px); }
+    
+    #pinboardOverlay.active { left: calc(50% - 180px); }
+    #mapTableOverlay.active { left: auto; right: calc(50% - 180px); }
+    
+    /* Tisch wird massiv breiter, Karte lädt mehr Kacheln */
+    .maptable-content { width: 1350px; height: 800px; }
+    .pinboard-content { width: 1200px; height: 800px; }
+}
+
+/* 4. FÜR WQHD, 4K UND ULTRAWIDE (Ab 2560px) */
+@media (min-width: 2560px) {
+    body.pinboard-open .container { transform: translateX(-600px); } 
+    body.maptable-open .container { transform: translateX(600px); }
+    
+    #pinboardOverlay.active { left: calc(50% - 280px); }
+    #mapTableOverlay.active { left: auto; right: calc(50% - 280px); }
+    
+    /* Riesen-Fläche für Ultrawide (Gestochen scharf!) */
+    .maptable-content { width: 1700px; height: 1000px; }
+    .pinboard-content { width: 1500px; height: 1000px; }
 }
 
 /* --- FIX: Scrolling blockieren NUR auf mobilen Geräten --- */
@@ -671,8 +708,11 @@ body.map-is-fullscreen .pinboard-header {
         overflow: hidden !important; 
     }
     .pinboard-overlay {
-        background: #080808 !important; /* Auf Handys komplett undurchsichtig */
+        background: #080808 !important; 
     }
+}
+body.map-is-fullscreen .pb-btn.close {
+    display: none !important;
 }
 
 /* ==========================================================================
@@ -737,7 +777,7 @@ body.theme-retro .wp-data { color: var(--piper-yellow); }
    ========================================================================== */
 .emergency-reset {
     position: relative;
-    flex-shrink: 0; /* Verhindert, dass der Button gequetscht wird */
+    flex-shrink: 0;
     width: 45px;
     height: 45px;
     border-radius: 50%;
@@ -749,6 +789,7 @@ body.theme-retro .wp-data { color: var(--piper-yellow); }
     box-shadow: 0 4px 10px rgba(0,0,0,0.8);
     border: 2px solid #222;
     transition: transform 0.2s;
+    margin: 0 5px; /* Abstand zu den anderen Elementen */
 }
 .emergency-reset:hover {
     transform: scale(1.05);

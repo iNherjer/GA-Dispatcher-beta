@@ -92,7 +92,7 @@ function saveAiToggle() {
 }
 
 /* =========================================================
-   3. PERSISTENZ (SPEICHERN & LADEN) & RESET
+   3. PERSISTENZ (SPEICHERN, LADEN & RESET)
    ========================================================= */
 function saveMissionState() {
     if (document.getElementById("briefingBox").style.display !== "block") return;
@@ -241,7 +241,6 @@ function recalculatePerformance() {
     setDrumCounter('timeDrum', totalMinutes);
     setDrumCounter('fuelDrum', fuel);
     
-    // Änderungen (z.B. TAS Slider anpassen) auch abspeichern
     setTimeout(() => saveMissionState(), 500);
 }
 
@@ -583,7 +582,7 @@ async function generateMission() {
         if(needle) needle.style.transform = `translateX(-50%) rotate(-45deg)`; 
         if (led) { if (dataSource === "Gemini AI") { led.classList.add('led-blue'); } else { led.classList.add('led-green'); } }
         
-        // AUTOMATISCH SPEICHERN wenn alles fertig geladen ist!
+        // AUTOMATISCH SPEICHERN
         setTimeout(() => saveMissionState(), 1000);
     }, 800); 
 }
@@ -595,6 +594,7 @@ let measureMode = false;
 let measurePoints = [];
 let measurePolyline = null;
 let measureMarkers = [];
+let measureTooltip = null;
 
 let routeWaypoints = [];
 let routeMarkers = [];
@@ -609,11 +609,63 @@ const destIcon  = hitBoxIcon('#ff4444');
 const wpIcon    = L.divIcon({ className: 'custom-pin', html: `<div style="background-color: transparent; width: 34px; height: 34px; display:flex; justify-content:center; align-items:center; cursor: move;"><div style="background-color: #fdfd86; border: 2px solid #222; width: 14px; height: 14px; border-radius: 50%;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
 const measureIcon = L.divIcon({ className: 'custom-pin', html: `<div style="background-color: transparent; width: 34px; height: 34px; display:flex; justify-content:center; align-items:center; cursor: move;"><div style="background-color: #fff; border: 2px solid #222; width: 12px; height: 12px; border-radius: 50%;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
 
-window.removeMeasureMarker = function(index) {
-    if(measureMarkers[index]) {
-        map.removeLayer(measureMarkers[index]); measureMarkers.splice(index, 1); updateMeasureRoute();
+
+function toggleMeasureMode() {
+    measureMode = !measureMode; const btn = document.getElementById('measureBtn');
+    if (measureMode) {
+        btn.innerText = '📏 Messen (An)'; btn.style.background = 'var(--piper-yellow)'; btn.style.color = '#000';
+        document.getElementById('map').style.cursor = 'crosshair';
+    } else {
+        btn.innerText = '📏 Messen (Aus)'; btn.style.background = '#444'; btn.style.color = '#fff';
+        document.getElementById('map').style.cursor = '';
     }
-};
+}
+
+function addMeasurePoint(latlng) {
+    if (measureMarkers.length >= 2) {
+        clearMeasure();
+    }
+    const marker = L.marker(latlng, {icon: measureIcon, draggable: true}).addTo(map);
+    
+    marker.on('drag', updateMeasureRoute);
+    marker.on('dragend', updateMeasureRoute);
+    
+    measureMarkers.push(marker); 
+    updateMeasureRoute();
+}
+
+function updateMeasureRoute() {
+    if(measurePolyline) map.removeLayer(measurePolyline);
+    if(measureTooltip) { map.removeLayer(measureTooltip); measureTooltip = null; }
+    
+    measurePoints = measureMarkers.map(m => m.getLatLng());
+    
+    if(measurePoints.length === 2) {
+        measurePolyline = L.polyline(measurePoints, {color: '#f2c12e', weight: 4, dashArray: '6,6'}).addTo(map);
+        
+        const nav = calcNav(measurePoints[0].lat, measurePoints[0].lng, measurePoints[1].lat, measurePoints[1].lng);
+        const centerLat = (measurePoints[0].lat + measurePoints[1].lat) / 2;
+        const centerLng = (measurePoints[0].lng + measurePoints[1].lng) / 2;
+        
+        const labelText = `<div style="font-weight:bold; font-size:14px; color:#111; text-align:center; line-height: 1.2;">${nav.brng}°<br>${nav.dist} NM</div>`;
+        
+        measureTooltip = L.tooltip({
+            permanent: true,
+            direction: 'center',
+            className: 'measure-label'
+        })
+        .setLatLng([centerLat, centerLng])
+        .setContent(labelText)
+        .addTo(map);
+    }
+}
+
+function clearMeasure() {
+    if(measurePolyline) map.removeLayer(measurePolyline);
+    if(measureTooltip) { map.removeLayer(measureTooltip); measureTooltip = null; }
+    measureMarkers.forEach(m => map.removeLayer(m));
+    measurePoints = []; measureMarkers = [];
+}
 
 window.removeRouteWaypoint = function(index) {
     routeWaypoints.splice(index, 1); renderMainRoute(); 
@@ -626,34 +678,9 @@ function resetMainRoute() {
     }
 }
 
-function addMeasurePoint(latlng) {
-    const marker = L.marker(latlng, {icon: measureIcon, draggable: true}).addTo(map);
-    marker.on('dragend', updateMeasureRoute);
-    marker.on('click', function(e) { if(!measureMode) marker.openPopup(); });
-    measureMarkers.push(marker); updateMeasureRoute();
-    if(measureMarkers.length > 1) marker.openPopup();
-}
-
-function updateMeasureRoute() {
-    if(measurePolyline) map.removeLayer(measurePolyline);
-    measurePoints = measureMarkers.map(m => m.getLatLng());
-    if(measurePoints.length > 1) {
-        measurePolyline = L.polyline(measurePoints, {color: '#222', weight: 4, dashArray: '6,6'}).addTo(map);
-    }
-    let totalDist = 0;
-    for(let i=0; i<measureMarkers.length; i++) {
-        let m = measureMarkers[i], text = ``;
-        if(i > 0) {
-            let prev = measurePoints[i-1], curr = measurePoints[i], nav = calcNav(prev.lat, prev.lng, curr.lat, curr.lng); totalDist += nav.dist;
-            text = `<div style="text-align:center;"><b>Messpunkt ${i+1}</b><br><hr style="margin:4px 0;">Kurs: <b>${nav.brng}°</b><br>Leg: ${nav.dist} NM<br><b>Gesamt: ${totalDist} NM</b><br><button onclick="removeMeasureMarker(${i})" style="margin-top:8px; background:#d93829; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius: 2px; width:100%;">🗑️ Löschen</button></div>`;
-        } else {
-            text = `<div style="text-align:center;"><b>Startpunkt</b><br><hr style="margin:4px 0;"><button onclick="removeMeasureMarker(${i})" style="margin-top:8px; background:#d93829; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius: 2px; width:100%;">🗑️ Löschen</button></div>`;
-        }
-        m.bindPopup(text);
-    }
-}
-
 function renderMainRoute() {
+    if (!map) initMapBase();
+    
     routeMarkers.forEach(m => map.removeLayer(m)); if (polyline) map.removeLayer(polyline); routeMarkers = [];
     if(routeWaypoints.length === 0) return;
 
@@ -711,7 +738,6 @@ function updateRoutePerformance() {
     const hrs = Math.floor(totalMinutes / 60), mins = totalMinutes % 60;
     const mETENote = document.getElementById("mETENote"); if(mETENote) mETENote.innerText = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} Min.`;
 
-    // Speichern, wenn der User manuell Wegpunkte ändert
     setTimeout(() => saveMissionState(), 500);
 }
 
@@ -741,7 +767,10 @@ function initMapBase() {
             } else {
                 btn.innerHTML = '⛶';
             }
-            setTimeout(() => { if(map) map.invalidateSize(); }, 300);
+            setTimeout(() => { 
+                if(map) map.invalidateSize(); 
+                updateMiniMap();
+            }, 300);
         };
         return btn;
     };
@@ -755,45 +784,6 @@ function updateMap(lat1, lon1, lat2, lon2, s, d) {
     currentSName = s || "Start"; currentDName = d || "Ziel";
     routeWaypoints = [{lat: lat1, lng: lon1}, {lat: lat2, lng: lon2}];
     renderMainRoute();
-}
-
-function renderMainRoute() {
-    if (!map) initMapBase(); // <--- HIER GEHÖRT DER WICHTIGE FIX HIN!
-    
-    routeMarkers.forEach(m => map.removeLayer(m)); 
-    if (polyline) map.removeLayer(polyline); 
-    routeMarkers = [];
-    
-    if(routeWaypoints.length === 0) return;
-
-    polyline = L.polyline(routeWaypoints, { color: '#ff4444', weight: 8, dashArray: '10,10', className: 'interactive-route' }).addTo(map);
-    
-    polyline.on('click', function(e) {
-        let bestIndex = 1, minDiff = Infinity;
-        for (let i = 0; i < routeWaypoints.length - 1; i++) {
-            let p1 = L.latLng(routeWaypoints[i].lat, routeWaypoints[i].lng || routeWaypoints[i].lon), p2 = L.latLng(routeWaypoints[i+1].lat, routeWaypoints[i+1].lng || routeWaypoints[i+1].lon);
-            let d1 = map.distance(p1, e.latlng), d2 = map.distance(e.latlng, p2), d = map.distance(p1, p2), diff = d1 + d2 - d;
-            if (diff < minDiff) { minDiff = diff; bestIndex = i + 1; }
-        }
-        routeWaypoints.splice(bestIndex, 0, e.latlng); renderMainRoute(); 
-    });
-
-    routeWaypoints.forEach((latlng, index) => {
-        let isStart = (index === 0), isDest = (index === routeWaypoints.length - 1 && routeWaypoints.length > 1);
-        let icon = isStart ? startIcon : (isDest ? destIcon : wpIcon);
-        let draggable = (!isStart && !isDest); 
-        let marker = L.marker(latlng, {icon: icon, draggable: draggable}).addTo(map);
-
-        if (isStart) marker.bindPopup(`<b>DEP:</b> ${currentSName}`);
-        else if (isDest) marker.bindPopup(`<b>DEST:</b> ${currentDName}`);
-        else marker.bindPopup(`<div style="text-align:center;"><b>Wegpunkt</b><br><button onclick="removeRouteWaypoint(${index})" style="margin-top:5px; background:#d93829; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius: 2px;">🗑️ Löschen</button></div>`);
-
-        if(draggable) marker.on('dragend', function(e) { routeWaypoints[index] = e.target.getLatLng(); renderMainRoute(); });
-        routeMarkers.push(marker);
-    });
-    
-    updateRoutePerformance();
-    updateMiniMap(); 
 }
 
 async function updateMapFromInputs() {
@@ -832,26 +822,50 @@ function toggleMapTable() {
     }
 }
 
-function toggleMeasureMode() {
-    measureMode = !measureMode; const btn = document.getElementById('measureBtn');
-    if (measureMode) {
-        btn.innerText = '📏 Messen (An)'; btn.style.background = 'var(--piper-yellow)'; btn.style.color = '#000';
-        document.getElementById('map').style.cursor = 'crosshair';
-        if(measureMarkers.length === 0 && routeWaypoints.length > 0) addMeasurePoint(L.latLng(routeWaypoints[0].lat, routeWaypoints[0].lng || routeWaypoints[0].lon));
-    } else {
-        btn.innerText = '📏 Messen (Aus)'; btn.style.background = '#444'; btn.style.color = '#fff';
-        document.getElementById('map').style.cursor = '';
+/* =========================================================
+   8. POLAROID MINIMAP
+   ========================================================= */
+let miniMap, miniRoutePolyline, miniMapMarkers = [];
+
+function updateMiniMap() {
+    const miniContainer = document.getElementById('miniMap');
+    if (!miniContainer || miniContainer.offsetParent === null) return; 
+    
+    if (!miniMap) {
+        miniMap = L.map('miniMap', {
+            zoomControl: false, dragging: false, scrollWheelZoom: false,
+            doubleClickZoom: false, boxZoom: false, keyboard: false,
+            attributionControl: false 
+        });
+        L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png').addTo(miniMap);
+    }
+    
+    if (routeWaypoints && routeWaypoints.length > 0) {
+        if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline);
+        miniRoutePolyline = L.polyline(routeWaypoints, { color: '#d93829', weight: 4 }).addTo(miniMap);
+        
+        miniMapMarkers.forEach(m => miniMap.removeLayer(m));
+        miniMapMarkers = [];
+
+        const startMarker = L.circleMarker(routeWaypoints[0], { 
+            radius: 5, color: '#111', weight: 2, fillColor: '#44ff44', fillOpacity: 1 
+        }).addTo(miniMap);
+        
+        const destMarker = L.circleMarker(routeWaypoints[routeWaypoints.length - 1], { 
+            radius: 5, color: '#111', weight: 2, fillColor: '#ff4444', fillOpacity: 1 
+        }).addTo(miniMap);
+        
+        miniMapMarkers.push(startMarker, destMarker);
+
+        setTimeout(() => { 
+            miniMap.invalidateSize();
+            miniMap.fitBounds(L.latLngBounds(routeWaypoints), { padding: [15, 15] });
+        }, 150);
     }
 }
 
-function clearMeasure() {
-    if(measurePolyline) map.removeLayer(measurePolyline); measureMarkers.forEach(m => map.removeLayer(m));
-    measurePoints = []; measureMarkers = [];
-}
-
-
 /* =========================================================
-   8. EXTERNE LINKS & LOGBUCH
+   9. EXTERNE LINKS & LOGBUCH
    ========================================================= */
 function openAIP(t) { window.open(`https://aip.aero/de/vfr/?${t==='dep'?currentStartICAO:currentDestICAO}`, '_blank'); }
 function openMetar(t) { window.open(`https://metar-taf.com/de/${t==='dep'?currentStartICAO:currentDestICAO}`, '_blank'); }
@@ -883,7 +897,7 @@ function renderLog() {
 function clearLog() { if(confirm("Gesamtes Logbuch löschen?")) { localStorage.removeItem('ga_logbook'); localStorage.removeItem('last_icao_dest'); renderLog(); } }
 
 /* =========================================================
-   9. HANGAR PINNWAND (LOKAL)
+   10. HANGAR PINNWAND (LOKAL)
    ========================================================= */
 function togglePinboard() {
     const board = document.getElementById('pinboardOverlay');
@@ -961,50 +975,5 @@ function makeDraggable(element, noteId) {
         let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
         const noteIndex = notes.findIndex(n => n.id === noteId);
         if(noteIndex > -1) { notes[noteIndex].x = element.offsetLeft; notes[noteIndex].y = element.offsetTop; localStorage.setItem('ga_pinboard', JSON.stringify(notes)); }
-    }
-}
-
-/* =========================================================
-   10. MINIMAP AUF DEM POLAROID
-   ========================================================= */
-let miniMap, miniRoutePolyline, miniMapMarkers = [];
-
-function updateMiniMap() {
-    const miniContainer = document.getElementById('miniMap');
-    if (!miniContainer) return; 
-    
-    if (!miniMap) {
-        miniMap = L.map('miniMap', {
-            zoomControl: false, dragging: false, scrollWheelZoom: false,
-            doubleClickZoom: false, boxZoom: false, keyboard: false,
-            attributionControl: false 
-        });
-        L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png').addTo(miniMap);
-    }
-    
-    if (routeWaypoints && routeWaypoints.length > 0) {
-        if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline);
-        miniRoutePolyline = L.polyline(routeWaypoints, { color: '#d93829', weight: 4 }).addTo(miniMap);
-        
-        // PINS auf der Minimap bereinigen und neu setzen
-        miniMapMarkers.forEach(m => miniMap.removeLayer(m));
-        miniMapMarkers = [];
-
-        // START-PIN (Grün)
-        const startMarker = L.circleMarker(routeWaypoints[0], { 
-            radius: 5, color: '#111', weight: 2, fillColor: '#44ff44', fillOpacity: 1 
-        }).addTo(miniMap);
-        
-        // ZIEL-PIN (Rot)
-        const destMarker = L.circleMarker(routeWaypoints[routeWaypoints.length - 1], { 
-            radius: 5, color: '#111', weight: 2, fillColor: '#ff4444', fillOpacity: 1 
-        }).addTo(miniMap);
-        
-        miniMapMarkers.push(startMarker, destMarker);
-
-        setTimeout(() => { 
-            miniMap.invalidateSize();
-            miniMap.fitBounds(L.latLngBounds(routeWaypoints), { padding: [15, 15] });
-        }, 150);
     }
 }
