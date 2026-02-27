@@ -39,6 +39,41 @@ function updateDynamicColors() {
 }
 
 /* =========================================================
+   1b. COCKPIT FARBSCHEMA (Lackierung)
+   ========================================================= */
+function applySavedPanelTheme() {
+    const savedPanel = localStorage.getItem('ga_panel_theme') || 'panel-med';
+    const panel = document.querySelector('.container');
+    if (panel) {
+        // Alte Farbcodes entfernen, um Fehler zu vermeiden
+        panel.classList.remove('panel-med', 'panel-creme', 'panel-light', 'panel-dark');
+        panel.classList.add(savedPanel);
+    }
+}
+
+function cyclePanelColor() {
+    if (!document.body.classList.contains('theme-retro')) return; // Nur im Analog-Modus
+    
+    const panel = document.querySelector('.container');
+    const themes = ['panel-med', 'panel-creme', 'panel-light', 'panel-dark'];
+    
+    let currentIndex = 0;
+    for (let i = 0; i < themes.length; i++) {
+        if (panel.classList.contains(themes[i])) {
+            currentIndex = i;
+            panel.classList.remove(themes[i]);
+            break;
+        }
+    }
+    
+    const nextIndex = (currentIndex + 1) % themes.length;
+    const nextTheme = themes[nextIndex];
+    
+    panel.classList.add(nextTheme);
+    localStorage.setItem('ga_panel_theme', nextTheme);
+}
+
+/* =========================================================
    2. GLOBALE VARIABLEN & INITIALISIERUNG
    ========================================================= */
 let map, polyline, markers = [], currentStartICAO, currentDestICAO, currentMissionData = null, selectedAC = "PA-24";
@@ -55,6 +90,8 @@ window.onload = () => {
         if(themeToggleBtn) themeToggleBtn.checked = false;
     }
     updateDynamicColors();
+    applySavedPanelTheme(); // <--- HIER: Lädt die Cockpit-Farbe!
+    // ... Rest bleibt gleich
 
     const lastDest = localStorage.getItem('last_icao_dest');
     if (lastDest) document.getElementById('startLoc').value = lastDest;
