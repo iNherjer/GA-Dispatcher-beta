@@ -59,6 +59,7 @@ input, select { width: 100%; padding: 12px; background-color: #2a2a2a; border: 1
 
 .slider-container { margin-bottom: 10px; background: #252525; padding: 10px; border-radius: 8px; border: 1px solid #333; transition: all 0.3s; }
 .slider-header { display: flex; justify-content: space-between; font-size: 13px; }
+.slider-label { margin-bottom: 0; display: inline-block; }
 input[type=range] { width: 100%; appearance: none; height: 5px; background: #444; border-radius: 5px; margin: 12px 0; }
 input[type=range]::-webkit-slider-thumb { appearance: none; height: 18px; width: 18px; border-radius: 50%; background: var(--blue); cursor: pointer; border: 2px solid #2a2a2a; }
 
@@ -614,8 +615,14 @@ body.theme-retro .api-hint a:hover {
 .post-it-del {
     position: absolute; top: -8px; right: -8px; background: #d93829; color: white; width: 20px; height: 20px;
     border-radius: 50%; text-align: center; line-height: 20px; font-size: 12px; cursor: pointer; font-family: sans-serif;
-    box-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+    box-shadow: 1px 1px 3px rgba(0,0,0,0.5); transition: transform 0.1s;
 }
+.post-it-edit {
+    position: absolute; top: -8px; left: -8px; background: #4da6ff; color: white; width: 20px; height: 20px;
+    border-radius: 50%; text-align: center; line-height: 20px; font-size: 10px; cursor: pointer; font-family: sans-serif;
+    box-shadow: 1px 1px 3px rgba(0,0,0,0.5); transition: transform 0.1s;
+}
+.post-it-edit:hover, .post-it-del:hover { transform: scale(1.1); }
 .post-it-pin {
     position: absolute; top: 2px; left: 50%; transform: translateX(-50%);
     width: 8px; height: 8px; border-radius: 50%; background: #444; box-shadow: inset -1px -1px 2px rgba(0,0,0,0.5);

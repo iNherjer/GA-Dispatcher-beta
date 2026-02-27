@@ -982,9 +982,22 @@ function renderNotes() {
     notes.forEach(note => {
         const div = document.createElement('div'); div.className = 'post-it';
         div.style.left = note.x + 'px'; div.style.top = note.y + 'px'; div.style.transform = `rotate(${note.rot}deg)`;
-        div.innerHTML = `<div class="post-it-pin"></div><div class="post-it-del" onclick="deleteNote(${note.id})">✖</div>${note.text.replace(/\n/g, '<br>')}`;
+        div.innerHTML = `<div class="post-it-pin"></div><div class="post-it-edit" onclick="editNote(${note.id})">✏️</div><div class="post-it-del" onclick="deleteNote(${note.id})">✖</div>${note.text.replace(/\n/g, '<br>')}`;
         makeDraggable(div, note.id); board.appendChild(div);
     });
+}
+
+function editNote(id) {
+    let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
+    const noteIndex = notes.findIndex(n => n.id === id);
+    if(noteIndex > -1) {
+        const newText = prompt("Notiz bearbeiten:", notes[noteIndex].text);
+        if(newText !== null && newText.trim() !== "") {
+            notes[noteIndex].text = newText;
+            localStorage.setItem('ga_pinboard', JSON.stringify(notes));
+            renderNotes();
+        }
+    }
 }
 
 function makeDraggable(element, noteId) {
@@ -992,7 +1005,7 @@ function makeDraggable(element, noteId) {
     element.onmousedown = dragMouseDown; element.ontouchstart = dragMouseDown;
 
     function dragMouseDown(e) {
-        if(e.target.className === 'post-it-del') return; 
+        if(e.target.className === 'post-it-del' || e.target.className === 'post-it-edit') return; 
         e.preventDefault();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX, clientY = e.touches ? e.touches[0].clientY : e.clientY;
         pos3 = clientX; pos4 = clientY;

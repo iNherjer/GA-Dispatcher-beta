@@ -71,7 +71,7 @@
 
     <div class="slider-container">
         <div class="slider-header">
-            <label style="background:transparent; border:none; box-shadow:none; padding:0; color:#888;">GPH</label>
+            <label class="slider-label">GPH</label>
             <span id="gphDrum" class="drum-readout-container theme-color-text" style="font-weight:bold;">14</span>
         </div>
         <input type="range" id="gphSlider" min="5" max="35" value="14" oninput="handleSliderChange('gph', this.value)">
@@ -79,7 +79,7 @@
 
     <div class="slider-container">
         <div class="slider-header">
-            <label style="background:transparent; border:none; box-shadow:none; padding:0; color:#888;">TAS (kts)</label>
+            <label class="slider-label">TAS (kts)</label>
             <span id="tasDrum" class="drum-readout-container theme-color-text" style="font-weight:bold;">160</span>
         </div>
         <input type="range" id="tasSlider" min="80" max="260" value="160" step="5" oninput="handleSliderChange('tas', this.value)">
