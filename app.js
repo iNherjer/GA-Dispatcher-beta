@@ -71,6 +71,12 @@ window.onload = () => {
 
     renderLog();
 
+    // AUTO-LOAD: Wenn ein offenes Briefing existiert, lade es!
+    const activeMission = localStorage.getItem('ga_active_mission');
+    if (activeMission) {
+        setTimeout(() => restoreMissionState(JSON.parse(activeMission)), 300);
+    }
+
     requestAnimationFrame(() => {
         setTimeout(() => { refreshAllDrums(); }, 50);
     });
@@ -86,7 +92,103 @@ function saveAiToggle() {
 }
 
 /* =========================================================
-   3. HELPER-FUNKTIONEN (UI & Mathe)
+   3. PERSISTENZ (SPEICHERN & LADEN) & RESET
+   ========================================================= */
+function saveMissionState() {
+    if (document.getElementById("briefingBox").style.display !== "block") return;
+    const state = {
+        mTitle: document.getElementById('mTitle').innerHTML,
+        mStory: document.getElementById('mStory').innerText,
+        mDepICAO: document.getElementById("mDepICAO").innerText,
+        mDepName: document.getElementById("mDepName").innerText,
+        mDepCoords: document.getElementById("mDepCoords").innerText,
+        mDepRwy: document.getElementById("mDepRwy").innerText,
+        destIcon: document.getElementById("destIcon").innerText,
+        mDestICAO: document.getElementById("mDestICAO").innerText,
+        mDestName: document.getElementById("mDestName").innerText,
+        mDestCoords: document.getElementById("mDestCoords").innerText,
+        mDestRwy: document.getElementById("mDestRwy").innerText,
+        mPay: document.getElementById("mPay").innerText,
+        mWeight: document.getElementById("mWeight").innerText,
+        mDistNote: document.getElementById("mDistNote").innerText,
+        mHeadingNote: document.getElementById("mHeadingNote").innerText,
+        mETENote: document.getElementById("mETENote").innerText,
+        wikiDescText: document.getElementById("wikiDescText").innerText,
+        isPOI: document.getElementById("destRwyContainer").style.display === "none",
+        currentMissionData: currentMissionData,
+        routeWaypoints: routeWaypoints,
+        currentStartICAO: currentStartICAO,
+        currentDestICAO: currentDestICAO,
+        currentSName: currentSName,
+        currentDName: currentDName
+    };
+    localStorage.setItem('ga_active_mission', JSON.stringify(state));
+}
+
+function restoreMissionState(state) {
+    document.getElementById('mTitle').innerHTML = state.mTitle;
+    document.getElementById('mStory').innerText = state.mStory;
+    document.getElementById("mDepICAO").innerText = state.mDepICAO;
+    document.getElementById("mDepName").innerText = state.mDepName;
+    document.getElementById("mDepCoords").innerText = state.mDepCoords;
+    document.getElementById("mDepRwy").innerText = state.mDepRwy;
+    document.getElementById("destIcon").innerText = state.destIcon;
+    document.getElementById("mDestICAO").innerText = state.mDestICAO;
+    document.getElementById("mDestName").innerText = state.mDestName;
+    document.getElementById("mDestCoords").innerText = state.mDestCoords;
+    document.getElementById("mDestRwy").innerText = state.mDestRwy;
+    document.getElementById("mPay").innerText = state.mPay;
+    document.getElementById("mWeight").innerText = state.mWeight;
+    document.getElementById("mDistNote").innerText = state.mDistNote;
+    document.getElementById("mHeadingNote").innerText = state.mHeadingNote;
+    document.getElementById("mETENote").innerText = state.mETENote;
+    document.getElementById("wikiDescText").innerText = state.wikiDescText;
+
+    document.getElementById("destRwyContainer").style.display = state.isPOI ? "none" : "block";
+    const destSwitchRow = document.getElementById("destSwitchRow"); 
+    if(destSwitchRow) destSwitchRow.style.display = state.isPOI ? "none" : "flex";
+
+    currentMissionData = state.currentMissionData;
+    routeWaypoints = state.routeWaypoints;
+    currentStartICAO = state.currentStartICAO;
+    currentDestICAO = state.currentDestICAO;
+    currentSName = state.currentSName;
+    currentDName = state.currentDName;
+
+    document.getElementById("briefingBox").style.display = "block";
+    
+    renderMainRoute();
+    setDrumCounter('distDrum', state.currentMissionData.dist);
+    recalculatePerformance();
+    document.getElementById('searchIndicator').innerText = "📋 Gespeichertes Briefing geladen.";
+}
+
+function resetApp() {
+    if(!confirm("Möchtest du das aktuelle Briefing wirklich verwerfen und alles auf Anfang setzen?")) return;
+    
+    localStorage.removeItem('ga_active_mission');
+    document.getElementById("briefingBox").style.display = "none";
+    currentMissionData = null;
+    routeWaypoints = [];
+    
+    // Karte & Minimap bereinigen
+    if(map) {
+        routeMarkers.forEach(m => map.removeLayer(m));
+        if (polyline) map.removeLayer(polyline);
+    }
+    if (miniMap) {
+        if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline);
+        miniMapMarkers.forEach(m => miniMap.removeLayer(m));
+        miniMapMarkers = [];
+    }
+    
+    document.getElementById('searchIndicator').innerText = "System bereit.";
+    setDrumCounter('distDrum', 0);
+    recalculatePerformance();
+}
+
+/* =========================================================
+   4. HELPER-FUNKTIONEN (UI & Mathe)
    ========================================================= */
 function setDrumCounter(elementId, valueStr) {
     const container = document.getElementById(elementId);
@@ -138,6 +240,9 @@ function recalculatePerformance() {
     const totalMinutes = Math.round((dist / tas) * 60);
     setDrumCounter('timeDrum', totalMinutes);
     setDrumCounter('fuelDrum', fuel);
+    
+    // Änderungen (z.B. TAS Slider anpassen) auch abspeichern
+    setTimeout(() => saveMissionState(), 500);
 }
 
 function refreshAllDrums() {
@@ -189,7 +294,7 @@ function getDestinationPoint(lat, lon, distNM, bearing) {
 }
 
 /* =========================================================
-   4. DATEN-FETCHING (APIs & GEMINI KI)
+   5. DATEN-FETCHING (APIs & GEMINI KI)
    ========================================================= */
 async function loadGlobalAirports() {
     if (globalAirports) return;
@@ -329,7 +434,7 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
 }
 
 /* =========================================================
-   5. HAUPT-LOGIK: AUFTRAG GENERIEREN
+   6. HAUPT-LOGIK: AUFTRAG GENERIEREN
    ========================================================= */
 async function generateMission() {
     const btn = document.getElementById('generateBtn'); 
@@ -477,11 +582,14 @@ async function generateMission() {
         if(window.meterInterval) clearInterval(window.meterInterval);
         if(needle) needle.style.transform = `translateX(-50%) rotate(-45deg)`; 
         if (led) { if (dataSource === "Gemini AI") { led.classList.add('led-blue'); } else { led.classList.add('led-green'); } }
+        
+        // AUTOMATISCH SPEICHERN wenn alles fertig geladen ist!
+        setTimeout(() => saveMissionState(), 1000);
     }, 800); 
 }
 
 /* =========================================================
-   6. KARTE (LEAFLET, KARTENTISCH & MESS-WERKZEUG)
+   7. KARTE (LEAFLET, KARTENTISCH & MESS-WERKZEUG)
    ========================================================= */
 let measureMode = false;
 let measurePoints = [];
@@ -576,7 +684,7 @@ function renderMainRoute() {
     });
     
     updateRoutePerformance();
-    updateMiniMap(); // FIX: Hier zeichnen wir auch die Mini-Karte neu!
+    updateMiniMap(); 
 }
 
 function updateRoutePerformance() {
@@ -602,6 +710,9 @@ function updateRoutePerformance() {
     const tas = parseInt(document.getElementById("tasSlider").value) || 160, totalMinutes = Math.round((totalNM / tas) * 60);
     const hrs = Math.floor(totalMinutes / 60), mins = totalMinutes % 60;
     const mETENote = document.getElementById("mETENote"); if(mETENote) mETENote.innerText = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} Min.`;
+
+    // Speichern, wenn der User manuell Wegpunkte ändert
+    setTimeout(() => saveMissionState(), 500);
 }
 
 function initMapBase() {
@@ -625,7 +736,6 @@ function initMapBase() {
         btn.onclick = function(e){
             e.preventDefault(); 
             document.body.classList.toggle('map-is-fullscreen');
-            
             if (document.body.classList.contains('map-is-fullscreen')) {
                 btn.innerHTML = '✖';
             } else {
@@ -645,6 +755,45 @@ function updateMap(lat1, lon1, lat2, lon2, s, d) {
     currentSName = s || "Start"; currentDName = d || "Ziel";
     routeWaypoints = [{lat: lat1, lng: lon1}, {lat: lat2, lng: lon2}];
     renderMainRoute();
+}
+
+function renderMainRoute() {
+    if (!map) initMapBase(); // <--- HIER GEHÖRT DER WICHTIGE FIX HIN!
+    
+    routeMarkers.forEach(m => map.removeLayer(m)); 
+    if (polyline) map.removeLayer(polyline); 
+    routeMarkers = [];
+    
+    if(routeWaypoints.length === 0) return;
+
+    polyline = L.polyline(routeWaypoints, { color: '#ff4444', weight: 8, dashArray: '10,10', className: 'interactive-route' }).addTo(map);
+    
+    polyline.on('click', function(e) {
+        let bestIndex = 1, minDiff = Infinity;
+        for (let i = 0; i < routeWaypoints.length - 1; i++) {
+            let p1 = L.latLng(routeWaypoints[i].lat, routeWaypoints[i].lng || routeWaypoints[i].lon), p2 = L.latLng(routeWaypoints[i+1].lat, routeWaypoints[i+1].lng || routeWaypoints[i+1].lon);
+            let d1 = map.distance(p1, e.latlng), d2 = map.distance(e.latlng, p2), d = map.distance(p1, p2), diff = d1 + d2 - d;
+            if (diff < minDiff) { minDiff = diff; bestIndex = i + 1; }
+        }
+        routeWaypoints.splice(bestIndex, 0, e.latlng); renderMainRoute(); 
+    });
+
+    routeWaypoints.forEach((latlng, index) => {
+        let isStart = (index === 0), isDest = (index === routeWaypoints.length - 1 && routeWaypoints.length > 1);
+        let icon = isStart ? startIcon : (isDest ? destIcon : wpIcon);
+        let draggable = (!isStart && !isDest); 
+        let marker = L.marker(latlng, {icon: icon, draggable: draggable}).addTo(map);
+
+        if (isStart) marker.bindPopup(`<b>DEP:</b> ${currentSName}`);
+        else if (isDest) marker.bindPopup(`<b>DEST:</b> ${currentDName}`);
+        else marker.bindPopup(`<div style="text-align:center;"><b>Wegpunkt</b><br><button onclick="removeRouteWaypoint(${index})" style="margin-top:5px; background:#d93829; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius: 2px;">🗑️ Löschen</button></div>`);
+
+        if(draggable) marker.on('dragend', function(e) { routeWaypoints[index] = e.target.getLatLng(); renderMainRoute(); });
+        routeMarkers.push(marker);
+    });
+    
+    updateRoutePerformance();
+    updateMiniMap(); 
 }
 
 async function updateMapFromInputs() {
@@ -679,7 +828,6 @@ function toggleMapTable() {
             }
         }, 500); 
     } else {
-        // BUGFIX: Zwingt den Body dazu, den Vollbildmodus beim Schließen zu beenden
         document.body.classList.remove('map-is-fullscreen');
     }
 }
@@ -703,7 +851,7 @@ function clearMeasure() {
 
 
 /* =========================================================
-   7. EXTERNE LINKS & LOGBUCH
+   8. EXTERNE LINKS & LOGBUCH
    ========================================================= */
 function openAIP(t) { window.open(`https://aip.aero/de/vfr/?${t==='dep'?currentStartICAO:currentDestICAO}`, '_blank'); }
 function openMetar(t) { window.open(`https://metar-taf.com/de/${t==='dep'?currentStartICAO:currentDestICAO}`, '_blank'); }
@@ -735,7 +883,7 @@ function renderLog() {
 function clearLog() { if(confirm("Gesamtes Logbuch löschen?")) { localStorage.removeItem('ga_logbook'); localStorage.removeItem('last_icao_dest'); renderLog(); } }
 
 /* =========================================================
-   8. HANGAR PINNWAND (LOKAL)
+   9. HANGAR PINNWAND (LOKAL)
    ========================================================= */
 function togglePinboard() {
     const board = document.getElementById('pinboardOverlay');
@@ -817,9 +965,9 @@ function makeDraggable(element, noteId) {
 }
 
 /* =========================================================
-   9. MINIMAP AUF DEM POLAROID
+   10. MINIMAP AUF DEM POLAROID
    ========================================================= */
-let miniMap, miniRoutePolyline;
+let miniMap, miniRoutePolyline, miniMapMarkers = [];
 
 function updateMiniMap() {
     const miniContainer = document.getElementById('miniMap');
@@ -838,9 +986,25 @@ function updateMiniMap() {
         if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline);
         miniRoutePolyline = L.polyline(routeWaypoints, { color: '#d93829', weight: 4 }).addTo(miniMap);
         
+        // PINS auf der Minimap bereinigen und neu setzen
+        miniMapMarkers.forEach(m => miniMap.removeLayer(m));
+        miniMapMarkers = [];
+
+        // START-PIN (Grün)
+        const startMarker = L.circleMarker(routeWaypoints[0], { 
+            radius: 5, color: '#111', weight: 2, fillColor: '#44ff44', fillOpacity: 1 
+        }).addTo(miniMap);
+        
+        // ZIEL-PIN (Rot)
+        const destMarker = L.circleMarker(routeWaypoints[routeWaypoints.length - 1], { 
+            radius: 5, color: '#111', weight: 2, fillColor: '#ff4444', fillOpacity: 1 
+        }).addTo(miniMap);
+        
+        miniMapMarkers.push(startMarker, destMarker);
+
         setTimeout(() => { 
             miniMap.invalidateSize();
-            miniMap.fitBounds(L.latLngBounds(routeWaypoints), { padding: [10, 10] });
+            miniMap.fitBounds(L.latLngBounds(routeWaypoints), { padding: [15, 15] });
         }, 150);
     }
 }

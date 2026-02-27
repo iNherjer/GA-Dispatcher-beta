@@ -18,8 +18,11 @@
 <body class="theme-retro">
 
 <div class="container">
+    
+
     <div class="screw top-left"></div>
     <div class="screw top-right"></div>
+
     <div class="screw bottom-left"></div>
     <div class="screw bottom-right"></div>
 
@@ -85,6 +88,10 @@
     <div class="action-bar">
         <button class="btn-main" id="generateBtn" onclick="generateMission()">Auftrag generieren</button>
         
+        <div class="emergency-reset" onclick="resetApp()" title="Briefing verwerfen & Reset">
+            <div class="emergency-reset-inner">↻</div>
+        </div>
+        
         <div class="analog-meter" id="searchMeter" title="Signalstärke">
             <div class="meter-face">
                 <div class="meter-scale"></div>
@@ -128,11 +135,7 @@
     <div class="page-number">Seite 2</div>
     <h2 class="wiki-title">Ziel-Info</h2>
     
-    <div class="briefing-photo-attachment" onclick="toggleMapTable(); event.stopPropagation();" title="Kartentisch öffnen">
-        <div class="photo-pin"></div>
-        <div class="photo-img"></div>
-        <div class="photo-caption">Route Map</div>
-    </div>
+    
 
     <div id="wikiDescContainer" class="wiki-info-note">
         📖 <span id="wikiDescText">Warte auf Daten...</span>
