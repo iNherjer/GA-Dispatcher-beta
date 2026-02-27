@@ -38,37 +38,26 @@ function updateDynamicColors() {
     document.querySelectorAll('.theme-green-text').forEach(el => el.style.color = hlColor);
 }
 
-/* =========================================================
-   1b. COCKPIT FARBSCHEMA (Lackierung)
-   ========================================================= */
 function applySavedPanelTheme() {
     const savedPanel = localStorage.getItem('ga_panel_theme') || 'panel-med';
     const panel = document.querySelector('.container');
     if (panel) {
-        // Alte Farbcodes entfernen, um Fehler zu vermeiden
         panel.classList.remove('panel-med', 'panel-creme', 'panel-light', 'panel-dark');
         panel.classList.add(savedPanel);
     }
 }
 
 function cyclePanelColor() {
-    if (!document.body.classList.contains('theme-retro')) return; // Nur im Analog-Modus
-    
+    if (!document.body.classList.contains('theme-retro')) return; 
     const panel = document.querySelector('.container');
     const themes = ['panel-med', 'panel-creme', 'panel-light', 'panel-dark'];
-    
     let currentIndex = 0;
     for (let i = 0; i < themes.length; i++) {
         if (panel.classList.contains(themes[i])) {
-            currentIndex = i;
-            panel.classList.remove(themes[i]);
-            break;
+            currentIndex = i; panel.classList.remove(themes[i]); break;
         }
     }
-    
-    const nextIndex = (currentIndex + 1) % themes.length;
-    const nextTheme = themes[nextIndex];
-    
+    const nextTheme = themes[(currentIndex + 1) % themes.length];
     panel.classList.add(nextTheme);
     localStorage.setItem('ga_panel_theme', nextTheme);
 }
@@ -90,8 +79,7 @@ window.onload = () => {
         if(themeToggleBtn) themeToggleBtn.checked = false;
     }
     updateDynamicColors();
-    applySavedPanelTheme(); // <--- HIER: Lädt die Cockpit-Farbe!
-    // ... Rest bleibt gleich
+    applySavedPanelTheme(); 
 
     const lastDest = localStorage.getItem('last_icao_dest');
     if (lastDest) document.getElementById('startLoc').value = lastDest;
@@ -101,14 +89,11 @@ window.onload = () => {
 
     const aiEnabled = localStorage.getItem('ga_ai_enabled');
     const aiToggleBtn = document.getElementById('aiToggle');
-    if(aiToggleBtn) {
-        if (aiEnabled === 'false') { aiToggleBtn.checked = false; } 
-        else { aiToggleBtn.checked = true; }
-    }
+    if(aiToggleBtn) { aiToggleBtn.checked = (aiEnabled !== 'false'); }
 
     renderLog();
+    updateApiFuelMeter(); // API Zähler starten
 
-    // AUTO-LOAD: Wenn ein offenes Briefing existiert, lade es!
     const activeMission = localStorage.getItem('ga_active_mission');
     if (activeMission) {
         setTimeout(() => restoreMissionState(JSON.parse(activeMission)), 300);
@@ -119,14 +104,8 @@ window.onload = () => {
     });
 };
 
-function saveApiKey() {
-    const key = document.getElementById('apiKeyInput').value.trim();
-    localStorage.setItem('ga_gemini_key', key);
-}
-function saveAiToggle() {
-    const aiToggleBtn = document.getElementById('aiToggle');
-    if(aiToggleBtn) { localStorage.setItem('ga_ai_enabled', aiToggleBtn.checked); }
-}
+function saveApiKey() { localStorage.setItem('ga_gemini_key', document.getElementById('apiKeyInput').value.trim()); }
+function saveAiToggle() { const t = document.getElementById('aiToggle'); if(t) localStorage.setItem('ga_ai_enabled', t.checked); }
 
 /* =========================================================
    3. PERSISTENZ (SPEICHERN, LADEN & RESET)
@@ -163,67 +142,36 @@ function saveMissionState() {
 }
 
 function restoreMissionState(state) {
-    document.getElementById('mTitle').innerHTML = state.mTitle;
-    document.getElementById('mStory').innerText = state.mStory;
-    document.getElementById("mDepICAO").innerText = state.mDepICAO;
-    document.getElementById("mDepName").innerText = state.mDepName;
-    document.getElementById("mDepCoords").innerText = state.mDepCoords;
-    document.getElementById("mDepRwy").innerText = state.mDepRwy;
-    document.getElementById("destIcon").innerText = state.destIcon;
-    document.getElementById("mDestICAO").innerText = state.mDestICAO;
-    document.getElementById("mDestName").innerText = state.mDestName;
-    document.getElementById("mDestCoords").innerText = state.mDestCoords;
-    document.getElementById("mDestRwy").innerText = state.mDestRwy;
-    document.getElementById("mPay").innerText = state.mPay;
-    document.getElementById("mWeight").innerText = state.mWeight;
-    document.getElementById("mDistNote").innerText = state.mDistNote;
-    document.getElementById("mHeadingNote").innerText = state.mHeadingNote;
-    document.getElementById("mETENote").innerText = state.mETENote;
+    document.getElementById('mTitle').innerHTML = state.mTitle; document.getElementById('mStory').innerText = state.mStory;
+    document.getElementById("mDepICAO").innerText = state.mDepICAO; document.getElementById("mDepName").innerText = state.mDepName;
+    document.getElementById("mDepCoords").innerText = state.mDepCoords; document.getElementById("mDepRwy").innerText = state.mDepRwy;
+    document.getElementById("destIcon").innerText = state.destIcon; document.getElementById("mDestICAO").innerText = state.mDestICAO;
+    document.getElementById("mDestName").innerText = state.mDestName; document.getElementById("mDestCoords").innerText = state.mDestCoords;
+    document.getElementById("mDestRwy").innerText = state.mDestRwy; document.getElementById("mPay").innerText = state.mPay;
+    document.getElementById("mWeight").innerText = state.mWeight; document.getElementById("mDistNote").innerText = state.mDistNote;
+    document.getElementById("mHeadingNote").innerText = state.mHeadingNote; document.getElementById("mETENote").innerText = state.mETENote;
     document.getElementById("wikiDescText").innerText = state.wikiDescText;
-
     document.getElementById("destRwyContainer").style.display = state.isPOI ? "none" : "block";
-    const destSwitchRow = document.getElementById("destSwitchRow"); 
-    if(destSwitchRow) destSwitchRow.style.display = state.isPOI ? "none" : "flex";
+    const destSwitchRow = document.getElementById("destSwitchRow"); if(destSwitchRow) destSwitchRow.style.display = state.isPOI ? "none" : "flex";
 
-    currentMissionData = state.currentMissionData;
-    routeWaypoints = state.routeWaypoints;
-    currentStartICAO = state.currentStartICAO;
-    currentDestICAO = state.currentDestICAO;
-    currentSName = state.currentSName;
-    currentDName = state.currentDName;
+    currentMissionData = state.currentMissionData; routeWaypoints = state.routeWaypoints;
+    currentStartICAO = state.currentStartICAO; currentDestICAO = state.currentDestICAO;
+    currentSName = state.currentSName; currentDName = state.currentDName;
 
     document.getElementById("briefingBox").style.display = "block";
-    
-    renderMainRoute();
-    setDrumCounter('distDrum', state.currentMissionData.dist);
-    recalculatePerformance();
-    document.getElementById('searchIndicator').innerText = "📋 Gespeichertes Briefing geladen.";
+    renderMainRoute(); setDrumCounter('distDrum', state.currentMissionData.dist);
+    recalculatePerformance(); document.getElementById('searchIndicator').innerText = "📋 Gespeichertes Briefing geladen.";
 }
 
 function resetApp() {
     if(!confirm("Möchtest du das aktuelle Briefing wirklich verwerfen und alles auf Anfang setzen?")) return;
-    
-    localStorage.removeItem('ga_active_mission');
-    document.getElementById("briefingBox").style.display = "none";
-    currentMissionData = null;
-    routeWaypoints = [];
-    
-    // Karte & Minimap bereinigen
-    if(map) {
-        routeMarkers.forEach(m => map.removeLayer(m));
-        if (polyline) map.removeLayer(polyline);
-        if (window.hitBoxPolyline) map.removeLayer(window.hitBoxPolyline); // FIX: Hitbox löschen
-    }
-    if (miniMap) {
-        if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline);
-        miniMapMarkers.forEach(m => miniMap.removeLayer(m));
-        miniMapMarkers = [];
-    }
-    
-    document.getElementById('searchIndicator').innerText = "System bereit.";
-    setDrumCounter('distDrum', 0);
-    recalculatePerformance();
+    localStorage.removeItem('ga_active_mission'); document.getElementById("briefingBox").style.display = "none";
+    currentMissionData = null; routeWaypoints = [];
+    if(map) { routeMarkers.forEach(m => map.removeLayer(m)); if (polyline) map.removeLayer(polyline); if (window.hitBoxPolyline) map.removeLayer(window.hitBoxPolyline); }
+    if (miniMap) { if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline); miniMapMarkers.forEach(m => miniMap.removeLayer(m)); miniMapMarkers = []; }
+    document.getElementById('searchIndicator').innerText = "System bereit."; setDrumCounter('distDrum', 0); recalculatePerformance();
 }
+
 /* =========================================================
    4. HELPER-FUNKTIONEN (UI & Mathe)
    ========================================================= */
@@ -238,62 +186,35 @@ function setDrumCounter(elementId, valueStr) {
     if (numericValue === "") numericValue = "0"; 
     const digits = numericValue.split(''), digitHeight = 22; 
     let windowEl = container.querySelector('.drum-window');
-    if (!windowEl) {
-        container.innerHTML = '<div class="drum-window"></div>';
-        windowEl = container.querySelector('.drum-window');
-    }
-    const existingStrips = windowEl.querySelectorAll('.drum-strip');
-    const neededStrips = digits.length;
+    if (!windowEl) { container.innerHTML = '<div class="drum-window"></div>'; windowEl = container.querySelector('.drum-window'); }
+    const existingStrips = windowEl.querySelectorAll('.drum-strip'), neededStrips = digits.length;
     if (existingStrips.length < neededStrips) {
         for (let i = 0; i < (neededStrips - existingStrips.length); i++) {
-            const strip = document.createElement('div');
-            strip.className = 'drum-strip';
+            const strip = document.createElement('div'); strip.className = 'drum-strip';
             strip.innerHTML = [0,1,2,3,4,5,6,7,8,9].map(d => `<div class="drum-digit">${d}</div>`).join('');
             windowEl.appendChild(strip);
         }
-    } else if (existingStrips.length > neededStrips) {
-        for (let i = neededStrips; i < existingStrips.length; i++) {
-            windowEl.removeChild(existingStrips[i]);
-        }
-    }
+    } else if (existingStrips.length > neededStrips) { for (let i = neededStrips; i < existingStrips.length; i++) { windowEl.removeChild(existingStrips[i]); } }
     const finalStrips = windowEl.querySelectorAll('.drum-strip');
-    digits.forEach((digit, index) => {
-        const targetDigit = parseInt(digit);
-        const translateY = -(targetDigit * digitHeight);
-        finalStrips[index].style.transform = `translateY(${translateY}px)`;
-    });
+    digits.forEach((digit, index) => { const translateY = -(parseInt(digit) * digitHeight); finalStrips[index].style.transform = `translateY(${translateY}px)`; });
 }
 
-function handleSliderChange(type, val) {
-    setDrumCounter(type + 'Drum', val); recalculatePerformance(); 
-}
+function handleSliderChange(type, val) { setDrumCounter(type + 'Drum', val); recalculatePerformance(); }
 
 function recalculatePerformance() {
     if (!currentMissionData) return;
-    const tas = parseInt(document.getElementById("tasSlider").value);
-    const gph = parseInt(document.getElementById("gphSlider").value);
-    const dist = currentMissionData.dist;
-    const fuel = Math.ceil((dist / tas * gph) + (0.75 * gph));
-    const totalMinutes = Math.round((dist / tas) * 60);
-    setDrumCounter('timeDrum', totalMinutes);
-    setDrumCounter('fuelDrum', fuel);
-    
+    const tas = parseInt(document.getElementById("tasSlider").value), gph = parseInt(document.getElementById("gphSlider").value), dist = currentMissionData.dist;
+    setDrumCounter('timeDrum', Math.round((dist / tas) * 60)); setDrumCounter('fuelDrum', Math.ceil((dist / tas * gph) + (0.75 * gph)));
     setTimeout(() => saveMissionState(), 500);
 }
 
 function refreshAllDrums() {
-    const tas = document.getElementById('tasSlider').value;
-    const gph = document.getElementById('gphSlider').value;
-    setDrumCounter('tasDrum', tas); setDrumCounter('gphDrum', gph);
-    if(currentMissionData) {
-       setDrumCounter('distDrum', currentMissionData.dist);
-       recalculatePerformance();
-    }
+    setDrumCounter('tasDrum', document.getElementById('tasSlider').value); setDrumCounter('gphDrum', document.getElementById('gphSlider').value);
+    if(currentMissionData) { setDrumCounter('distDrum', currentMissionData.dist); recalculatePerformance(); }
 }
 
 function applyPreset(t, g, s, n) { 
-    document.getElementById('tasSlider').value=t; 
-    document.getElementById('gphSlider').value=g; 
+    document.getElementById('tasSlider').value=t; document.getElementById('gphSlider').value=g; 
     document.getElementById('maxSeats').value=s; selectedAC=n;
     handleSliderChange('tas', t); handleSliderChange('gph', g);
 }
@@ -334,10 +255,7 @@ function getDestinationPoint(lat, lon, distNM, bearing) {
    ========================================================= */
 async function loadGlobalAirports() {
     if (globalAirports) return;
-    try {
-        const res = await fetch('https://raw.githubusercontent.com/mwgg/Airports/master/airports.json');
-        globalAirports = await res.json();
-    } catch (e) { globalAirports = {}; }
+    try { const res = await fetch('https://raw.githubusercontent.com/mwgg/Airports/master/airports.json'); globalAirports = await res.json(); } catch (e) { globalAirports = {}; }
 }
 
 async function getAirportData(icao) {
@@ -345,25 +263,19 @@ async function getAirportData(icao) {
     await loadGlobalAirports(); 
     if (globalAirports[icao]) return { icao: icao, n: globalAirports[icao].name || globalAirports[icao].city, lat: globalAirports[icao].lat, lon: globalAirports[icao].lon };
     try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${icao}+airport`);
-        const data = await res.json();
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${icao}+airport`); const data = await res.json();
         if (data && data.length > 0) return { icao: icao, n: data[0].display_name.split(',')[0], lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
     } catch (e) {} return null;
 }
 
 async function findGithubAirport(lat, lon, minNM, maxNM, dirPref, regionPref) {
-    await loadGlobalAirports();
-    let validAirports = [];
+    await loadGlobalAirports(); let validAirports = [];
     for (const key in globalAirports) {
-        const apt = globalAirports[key];
-        if(apt.icao === currentStartICAO) continue;
+        const apt = globalAirports[key]; if(apt.icao === currentStartICAO) continue;
         const isDE = apt.icao.startsWith('ED') || apt.icao.startsWith('ET');
-        if (regionPref === "de" && !isDE) continue;
-        if (regionPref === "int" && isDE) continue;
+        if (regionPref === "de" && !isDE) continue; if (regionPref === "int" && isDE) continue;
         const navCalc = calcNav(lat, lon, apt.lat, apt.lon);
-        if (navCalc.dist >= minNM && navCalc.dist <= maxNM && checkBearing(navCalc.brng, dirPref)) {
-            validAirports.push({ icao: apt.icao, n: apt.name || apt.city || "Unbekannt", lat: apt.lat, lon: apt.lon });
-        }
+        if (navCalc.dist >= minNM && navCalc.dist <= maxNM && checkBearing(navCalc.brng, dirPref)) { validAirports.push({ icao: apt.icao, n: apt.name || apt.city || "Unbekannt", lat: apt.lat, lon: apt.lon }); }
     }
     if (validAirports.length > 0) return validAirports[Math.floor(Math.random() * validAirports.length)];
     return null;
@@ -372,8 +284,7 @@ async function findGithubAirport(lat, lon, minNM, maxNM, dirPref, regionPref) {
 async function findWikipediaPOI(lat, lon, minNM, maxNM, dirPref) {
     const dist = Math.floor(Math.random() * (maxNM - minNM + 1)) + minNM;
     let minB = 0, maxB = 360;
-    if (dirPref === 'N') { minB = 315; maxB = 405; } else if (dirPref === 'E') { minB = 45; maxB = 135; }
-    else if (dirPref === 'S') { minB = 135; maxB = 225; } else if (dirPref === 'W') { minB = 225; maxB = 315; }
+    if (dirPref === 'N') { minB = 315; maxB = 405; } else if (dirPref === 'E') { minB = 45; maxB = 135; } else if (dirPref === 'S') { minB = 135; maxB = 225; } else if (dirPref === 'W') { minB = 225; maxB = 315; }
     let bearing = Math.floor(Math.random() * (maxB - minB + 1)) + minB; bearing = bearing % 360;
     const target = getDestinationPoint(lat, lon, dist, bearing);
     const url = `https://de.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${target.lat}|${target.lon}&gsradius=10000&gslimit=30&format=json&origin=*`;
@@ -457,21 +368,90 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
     Antworte AUSSCHLIESSLICH als JSON. Keine Markdown-Formatierung.
     Struktur: {"title": "Kurzer, knackiger Titel", "story": "Das Briefing (max 3-4 Sätze)"}`;
 
+    const payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { response_mime_type: "application/json" } };
+    const reqOptions = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) };
+
+    // VERSUCH 1: Gemini 2.5 Flash (Primary)
     try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { response_mime_type: "application/json" } })
-        });
-        if (!response.ok) throw new Error('API antwortet nicht mit OK');
-        const data = await response.json();
-        const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
-        return { t: parsed.title, s: parsed.story, i: "📋", cat: "std" };
-    } catch (e) { console.warn("Gemini API fehlgeschlagen.", e); return null; }
+        const resFlash = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, reqOptions);
+        if (resFlash.ok) {
+            const data = await resFlash.json();
+            const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
+            incrementApiUsage('flash'); // Zähler für die Tankanzeige
+            return { t: parsed.title, s: parsed.story, i: "📋", cat: "std", _source: "Gemini 2.5 Flash" };
+        } else if (resFlash.status === 429) {
+            console.warn("Flash API Quota erreicht (429). Wechsle zu Lite Modell...");
+        } else {
+            throw new Error('Flash API Fehler: ' + resFlash.status);
+        }
+    } catch (e) {
+        console.warn("Gemini Flash fehlgeschlagen:", e);
+    }
+
+    // VERSUCH 2: Gemini 2.5 Flash Lite (Fallback)
+    try {
+        const resLite = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`, reqOptions);
+        if (resLite.ok) {
+            const data = await resLite.json();
+            const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
+            incrementApiUsage('lite'); // Zähler für die Tankanzeige
+            return { t: parsed.title, s: parsed.story, i: "📋", cat: "std", _source: "Gemini 2.5 Flash Lite" };
+        } else {
+            console.warn("Lite API Fehler (Code: " + resLite.status + "). Wechsle zu lokaler Datenbank.");
+            return null; // Gibt Null zurück -> Lokale Datenbank springt ein
+        }
+    } catch (e) {
+        console.warn("Gemini Lite fehlgeschlagen:", e);
+        return null; // Gibt Null zurück -> Lokale Datenbank springt ein
+    }
 }
 
 /* =========================================================
-   6. HAUPT-LOGIK: AUFTRAG GENERIEREN
+   6. HAUPT-LOGIK & ZÄHLER
    ========================================================= */
+function getQuotaDay() {
+    const now = new Date();
+    // Vor 09:00 Uhr zählt noch zum Vortag
+    if (now.getHours() < 9) now.setDate(now.getDate() - 1);
+    return now.toISOString().split('T')[0];
+}
+
+function getApiUsage() {
+    const today = getQuotaDay();
+    let data = JSON.parse(localStorage.getItem('ga_api_fuel'));
+    
+    // Wenn keine Daten da sind, ein neuer Tag ist, ODER das alte Format (ohne 'flash') noch im Speicher hängt: Reset!
+    if (!data || data.date !== today || data.flash === undefined) { 
+        data = { date: today, flash: 0, lite: 0 }; 
+        localStorage.setItem('ga_api_fuel', JSON.stringify(data)); 
+    }
+    return data;
+}
+
+function incrementApiUsage(modelType) {
+    const today = getQuotaDay();
+    let data = getApiUsage();
+    if (modelType === 'flash') data.flash++;
+    else if (modelType === 'lite') data.lite++;
+    localStorage.setItem('ga_api_fuel', JSON.stringify({ date: today, flash: data.flash, lite: data.lite }));
+    updateApiFuelMeter();
+}
+
+function updateApiFuelMeter() {
+    const needle = document.getElementById('apiNeedle');
+    if(!needle) return;
+    const data = getApiUsage();
+    let used = data.flash + data.lite;
+    const maxCalls = 40; // 20x Flash + 20x Flash Lite
+    
+    if(used > maxCalls) used = maxCalls;
+    let percentage = used / maxCalls;
+    
+    // Nadel-Berechnung: +45° (Voll/F/Rechts) bis -45° (Leer/E/Links)
+    let angle = 45 - (percentage * 90); 
+    needle.style.transform = `translateX(-50%) rotate(${angle}deg)`;
+}
+
 async function generateMission() {
     const btn = document.getElementById('generateBtn'); 
     btn.disabled = true; btn.innerText = "Sucht Route & Daten...";
@@ -487,7 +467,7 @@ async function generateMission() {
     const indicator = document.getElementById('searchIndicator');
     const needle = document.getElementById('meterNeedle');
     const led = document.getElementById('meterLed');
-    if (led) led.classList.remove('led-green', 'led-blue');
+    if (led) led.classList.remove('led-green', 'led-blue', 'led-red');
     
     if (window.meterInterval) clearInterval(window.meterInterval);
     window.meterInterval = setInterval(() => {
@@ -561,8 +541,9 @@ async function generateMission() {
     indicator.innerText = `Kontaktiere KI-Dispatcher...`;
     let m = await fetchGeminiMission(start.n, dest.n, totalDist, isPOI, paxText, cargoText);
 
-    if (m) { dataSource = "Gemini AI"; } else {
+    if (m) { dataSource = m._source; } else {
         indicator.innerText = `Lade Auftrag aus lokaler Datenbank...`;
+        dataSource = "Lokale DB"; // Setze Fallback-Quelle explizit
         if (isPOI) {
             m = generateDynamicPOIMission(dest.n, maxSeats); paxText = m.payloadText; cargoText = m.cargoText; dataSource = "Wikipedia GeoSearch";
         } else if (typeof missions !== 'undefined') {
@@ -617,7 +598,13 @@ async function generateMission() {
         
         if(window.meterInterval) clearInterval(window.meterInterval);
         if(needle) needle.style.transform = `translateX(-50%) rotate(-45deg)`; 
-        if (led) { if (dataSource === "Gemini AI") { led.classList.add('led-blue'); } else { led.classList.add('led-green'); } }
+        
+        if (led) { 
+            led.classList.remove('led-green', 'led-blue', 'led-red');
+            if (dataSource === "Gemini 2.5 Flash") { led.classList.add('led-blue'); } 
+            else if (dataSource === "Gemini 2.5 Flash Lite") { led.classList.add('led-green'); } 
+            else { led.classList.add('led-red'); } 
+        }
         
         // AUTOMATISCH SPEICHERN
         setTimeout(() => saveMissionState(), 1000);
@@ -627,25 +614,15 @@ async function generateMission() {
 /* =========================================================
    7. KARTE (LEAFLET, KARTENTISCH & MESS-WERKZEUG)
    ========================================================= */
-let measureMode = false;
-let measurePoints = [];
-let measurePolyline = null;
-let measureMarkers = [];
-let measureTooltip = null;
-
-let routeWaypoints = [];
-let routeMarkers = [];
-let currentSName = "";
-let currentDName = "";
+let measureMode = false, measurePoints = [], measurePolyline = null, measureMarkers = [], measureTooltip = null;
+let routeWaypoints = [], routeMarkers = [], currentSName = "", currentDName = "";
 
 const hitBoxHtml = (color) => `<div style="background-color: transparent; width: 34px; height: 34px; display:flex; justify-content:center; align-items:center;"><div style="background-color: ${color}; border: 2px solid #222; width: 14px; height: 14px; border-radius: 50%;"></div></div>`;
 const hitBoxIcon = (color) => L.divIcon({ className: 'custom-pin', html: hitBoxHtml(color), iconSize: [34, 34], iconAnchor: [17, 17] });
 
-const startIcon = hitBoxIcon('#44ff44');
-const destIcon  = hitBoxIcon('#ff4444');
+const startIcon = hitBoxIcon('#44ff44'), destIcon  = hitBoxIcon('#ff4444');
 const wpIcon    = L.divIcon({ className: 'custom-pin', html: `<div style="background-color: transparent; width: 34px; height: 34px; display:flex; justify-content:center; align-items:center; cursor: move;"><div style="background-color: #fdfd86; border: 2px solid #222; width: 14px; height: 14px; border-radius: 50%;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
 const measureIcon = L.divIcon({ className: 'custom-pin', html: `<div style="background-color: transparent; width: 34px; height: 34px; display:flex; justify-content:center; align-items:center; cursor: move;"><div style="background-color: #fff; border: 2px solid #222; width: 12px; height: 12px; border-radius: 50%;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
-
 
 function toggleMeasureMode() {
     measureMode = !measureMode; const btn = document.getElementById('measureBtn');
@@ -659,54 +636,33 @@ function toggleMeasureMode() {
 }
 
 function addMeasurePoint(latlng) {
-    if (measureMarkers.length >= 2) {
-        clearMeasure();
-    }
+    if (measureMarkers.length >= 2) { clearMeasure(); }
     const marker = L.marker(latlng, {icon: measureIcon, draggable: true}).addTo(map);
-    
-    marker.on('drag', updateMeasureRoute);
-    marker.on('dragend', updateMeasureRoute);
-    
-    measureMarkers.push(marker); 
-    updateMeasureRoute();
+    marker.on('drag', updateMeasureRoute); marker.on('dragend', updateMeasureRoute);
+    measureMarkers.push(marker); updateMeasureRoute();
 }
 
 function updateMeasureRoute() {
     if(measurePolyline) map.removeLayer(measurePolyline);
     if(measureTooltip) { map.removeLayer(measureTooltip); measureTooltip = null; }
-    
     measurePoints = measureMarkers.map(m => m.getLatLng());
     
     if(measurePoints.length === 2) {
         measurePolyline = L.polyline(measurePoints, {color: '#f2c12e', weight: 4, dashArray: '6,6'}).addTo(map);
-        
         const nav = calcNav(measurePoints[0].lat, measurePoints[0].lng, measurePoints[1].lat, measurePoints[1].lng);
-        const centerLat = (measurePoints[0].lat + measurePoints[1].lat) / 2;
-        const centerLng = (measurePoints[0].lng + measurePoints[1].lng) / 2;
-        
+        const centerLat = (measurePoints[0].lat + measurePoints[1].lat) / 2, centerLng = (measurePoints[0].lng + measurePoints[1].lng) / 2;
         const labelText = `<div style="font-weight:bold; font-size:14px; color:#111; text-align:center; line-height: 1.2;">${nav.brng}°<br>${nav.dist} NM</div>`;
-        
-        measureTooltip = L.tooltip({
-            permanent: true,
-            direction: 'center',
-            className: 'measure-label'
-        })
-        .setLatLng([centerLat, centerLng])
-        .setContent(labelText)
-        .addTo(map);
+        measureTooltip = L.tooltip({ permanent: true, direction: 'center', className: 'measure-label' }).setLatLng([centerLat, centerLng]).setContent(labelText).addTo(map);
     }
 }
 
 function clearMeasure() {
     if(measurePolyline) map.removeLayer(measurePolyline);
     if(measureTooltip) { map.removeLayer(measureTooltip); measureTooltip = null; }
-    measureMarkers.forEach(m => map.removeLayer(m));
-    measurePoints = []; measureMarkers = [];
+    measureMarkers.forEach(m => map.removeLayer(m)); measurePoints = []; measureMarkers = [];
 }
 
-window.removeRouteWaypoint = function(index) {
-    routeWaypoints.splice(index, 1); renderMainRoute(); 
-};
+window.removeRouteWaypoint = function(index) { routeWaypoints.splice(index, 1); renderMainRoute(); };
 
 function resetMainRoute() {
     if(routeWaypoints.length > 2) {
@@ -717,21 +673,12 @@ function resetMainRoute() {
 
 function renderMainRoute() {
     if (!map) initMapBase();
-    
-    routeMarkers.forEach(m => map.removeLayer(m)); 
-    if (polyline) map.removeLayer(polyline); 
-    if (window.hitBoxPolyline) map.removeLayer(window.hitBoxPolyline); // Alte Hitbox löschen
-    routeMarkers = [];
-    
+    routeMarkers.forEach(m => map.removeLayer(m)); if (polyline) map.removeLayer(polyline); if (window.hitBoxPolyline) map.removeLayer(window.hitBoxPolyline); routeMarkers = [];
     if(routeWaypoints.length === 0) return;
 
-    // 1. Die SICHTBARE Route (Klicks dafür deaktivieren, damit sie nicht stört)
     polyline = L.polyline(routeWaypoints, { color: '#ff4444', weight: 8, dashArray: '10,10', interactive: false }).addTo(map);
-    
-    // 2. Die UNSICHTBARE Hitbox-Route (45 Pixel dick für leichtes Treffen mit dem Finger!)
     window.hitBoxPolyline = L.polyline(routeWaypoints, { color: 'transparent', weight: 45, opacity: 0, className: 'interactive-route' }).addTo(map);
     
-    // Wir hängen das Klick-Event jetzt an die unsichtbare dicke Linie!
     window.hitBoxPolyline.on('click', function(e) {
         let bestIndex = 1, minDiff = Infinity;
         for (let i = 0; i < routeWaypoints.length - 1; i++) {
@@ -756,8 +703,7 @@ function renderMainRoute() {
         routeMarkers.push(marker);
     });
     
-    updateRoutePerformance();
-    updateMiniMap(); 
+    updateRoutePerformance(); updateMiniMap(); 
 }
 
 function updateRoutePerformance() {
@@ -806,22 +752,13 @@ function initMapBase() {
         btn.style.cursor = 'pointer'; btn.style.fontSize = '18px'; btn.style.fontWeight = 'bold'; btn.style.textAlign = 'center'; btn.style.padding = '0';
         
         btn.onclick = function(e){
-            e.preventDefault(); 
-            document.body.classList.toggle('map-is-fullscreen');
-            if (document.body.classList.contains('map-is-fullscreen')) {
-                btn.innerHTML = '✖';
-            } else {
-                btn.innerHTML = '⛶';
-            }
-            setTimeout(() => { 
-                if(map) map.invalidateSize(); 
-                updateMiniMap();
-            }, 300);
+            e.preventDefault(); document.body.classList.toggle('map-is-fullscreen');
+            if (document.body.classList.contains('map-is-fullscreen')) { btn.innerHTML = '✖'; } else { btn.innerHTML = '⛶'; }
+            setTimeout(() => { if(map) map.invalidateSize(); updateMiniMap(); }, 300);
         };
         return btn;
     };
     fsControl.addTo(map);
-
     map.on('click', function(e) { if (!measureMode) return; addMeasurePoint(e.latlng); });
 }
 
@@ -851,9 +788,7 @@ async function updateMapFromInputs() {
 function toggleMapTable() {
     const board = document.getElementById('mapTableOverlay'), pinBoard = document.getElementById('pinboardOverlay');
     if (pinBoard.classList.contains('active')) { togglePinboard(); }
-    
     board.classList.toggle('active'); document.body.classList.toggle('maptable-open');
-    
     if (board.classList.contains('active')) {
         if(!map) initMapBase();
         setTimeout(() => { 
@@ -863,9 +798,7 @@ function toggleMapTable() {
                 else updateMapFromInputs();
             }
         }, 500); 
-    } else {
-        document.body.classList.remove('map-is-fullscreen');
-    }
+    } else { document.body.classList.remove('map-is-fullscreen'); }
 }
 
 /* =========================================================
@@ -878,35 +811,20 @@ function updateMiniMap() {
     if (!miniContainer || miniContainer.offsetParent === null) return; 
     
     if (!miniMap) {
-        miniMap = L.map('miniMap', {
-            zoomControl: false, dragging: false, scrollWheelZoom: false,
-            doubleClickZoom: false, boxZoom: false, keyboard: false,
-            attributionControl: false 
-        });
+        miniMap = L.map('miniMap', { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, attributionControl: false });
         L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png').addTo(miniMap);
     }
     
     if (routeWaypoints && routeWaypoints.length > 0) {
         if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline);
         miniRoutePolyline = L.polyline(routeWaypoints, { color: '#d93829', weight: 4 }).addTo(miniMap);
-        
-        miniMapMarkers.forEach(m => miniMap.removeLayer(m));
-        miniMapMarkers = [];
+        miniMapMarkers.forEach(m => miniMap.removeLayer(m)); miniMapMarkers = [];
 
-        const startMarker = L.circleMarker(routeWaypoints[0], { 
-            radius: 5, color: '#111', weight: 2, fillColor: '#44ff44', fillOpacity: 1 
-        }).addTo(miniMap);
-        
-        const destMarker = L.circleMarker(routeWaypoints[routeWaypoints.length - 1], { 
-            radius: 5, color: '#111', weight: 2, fillColor: '#ff4444', fillOpacity: 1 
-        }).addTo(miniMap);
+        const startMarker = L.circleMarker(routeWaypoints[0], { radius: 5, color: '#111', weight: 2, fillColor: '#44ff44', fillOpacity: 1 }).addTo(miniMap);
+        const destMarker = L.circleMarker(routeWaypoints[routeWaypoints.length - 1], { radius: 5, color: '#111', weight: 2, fillColor: '#ff4444', fillOpacity: 1 }).addTo(miniMap);
         
         miniMapMarkers.push(startMarker, destMarker);
-
-        setTimeout(() => { 
-            miniMap.invalidateSize();
-            miniMap.fitBounds(L.latLngBounds(routeWaypoints), { padding: [15, 15] });
-        }, 150);
+        setTimeout(() => { miniMap.invalidateSize(); miniMap.fitBounds(L.latLngBounds(routeWaypoints), { padding: [15, 15] }); }, 150);
     }
 }
 
@@ -934,8 +852,7 @@ function renderLog() {
     log.forEach(e => {
         const div = document.createElement('div'); div.className = 'log-entry';
         const routeStr = e.poiName ? `<b>${e.start} ➔ ${e.poiName} ➔ ${e.dest}</b>` : `<b>${e.start} ➔ ${e.dest}</b>`;
-        const hlColor = isRetro ? 'var(--piper-yellow)' : 'var(--blue)';
-        const subColor = isRetro ? '#aaa' : '#888';
+        const hlColor = isRetro ? 'var(--piper-yellow)' : 'var(--blue)', subColor = isRetro ? '#aaa' : '#888';
         div.innerHTML = `<span style="color:${subColor};">${e.date} • ${e.ac}</span><br>${routeStr}<br><span style="color:${hlColor}">${e.mission} (${e.dist} NM)</span>`;
         container.appendChild(div);
     });
@@ -974,19 +891,6 @@ function deleteNote(id) {
     renderNotes();
 }
 
-function renderNotes() {
-    const board = document.getElementById('pinboard');
-    if (!board) return;
-    board.innerHTML = ''; 
-    let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
-    notes.forEach(note => {
-        const div = document.createElement('div'); div.className = 'post-it';
-        div.style.left = note.x + 'px'; div.style.top = note.y + 'px'; div.style.transform = `rotate(${note.rot}deg)`;
-        div.innerHTML = `<div class="post-it-pin"></div><div class="post-it-edit" onclick="editNote(${note.id})">✏️</div><div class="post-it-del" onclick="deleteNote(${note.id})">✖</div>${note.text.replace(/\n/g, '<br>')}`;
-        makeDraggable(div, note.id); board.appendChild(div);
-    });
-}
-
 function editNote(id) {
     let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
     const noteIndex = notes.findIndex(n => n.id === id);
@@ -998,6 +902,19 @@ function editNote(id) {
             renderNotes();
         }
     }
+}
+
+function renderNotes() {
+    const board = document.getElementById('pinboard');
+    if (!board) return;
+    board.innerHTML = ''; 
+    let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
+    notes.forEach(note => {
+        const div = document.createElement('div'); div.className = 'post-it';
+        div.style.left = note.x + 'px'; div.style.top = note.y + 'px'; div.style.transform = `rotate(${note.rot}deg)`;
+        div.innerHTML = `<div class="post-it-pin"></div><div class="post-it-edit" onclick="editNote(${note.id})">✏️</div><div class="post-it-del" onclick="deleteNote(${note.id})">✖</div>${note.text.replace(/\n/g, '<br>')}`;
+        makeDraggable(div, note.id); board.appendChild(div);
+    });
 }
 
 function makeDraggable(element, noteId) {
