@@ -814,3 +814,40 @@ body.theme-retro .wp-data { color: var(--piper-yellow); }
     transform: scale(0.9);
     box-shadow: inset 0 4px 8px rgba(0,0,0,0.8);
 }
+
+/* ==========================================================================
+   16. MOBILE OPTIMIERUNG (SMARTPHONES)
+   ========================================================================== */
+@media (max-width: 850px) {
+    /* --- 1. Kartentisch maximieren --- */
+    #mapTableOverlay .pinboard-scroll-area {
+        padding: 0 !important; /* Entfernt den äußeren Abstand komplett */
+    }
+    .maptable-content {
+        width: 100% !important;
+        height: 100% !important;
+        border-radius: 0 !important;
+    }
+    #map {
+        /* Karte fast bis an den Rand ziehen, nur ein Hauch vom Hintergrundbild bleibt */
+        width: 96% !important;
+        height: 96% !important;
+        border-radius: 6px !important;
+    }
+
+    /* --- 2. Pinnwand horizontal scrollbar machen --- */
+    #pinboardOverlay .pinboard-scroll-area {
+        display: block !important; /* Behebt einen Flexbox-Bug, der das Scrollen nach links blockiert */
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        -webkit-overflow-scrolling: touch; /* Sorgt für extrem weiches Wischen auf iOS */
+        padding: 15px 0 !important; 
+    }
+    .pinboard-content {
+        width: 850px !important; /* Zwingt das Board, auf dem Handy breit zu bleiben */
+        height: 100% !important; /* Nutzt die Höhe bis zur Toolbox perfekt aus */
+        margin: 0 15px !important; /* Sorgt dafür, dass es beim Wischen nicht am Displayrand klebt */
+        max-width: none !important;
+        border-radius: 8px !important;
+    }
+}
