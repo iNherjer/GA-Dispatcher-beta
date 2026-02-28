@@ -927,25 +927,37 @@ function renderLog() {
 function clearLog() { if(confirm("Gesamtes Logbuch löschen?")) { localStorage.removeItem('ga_logbook'); localStorage.removeItem('last_icao_dest'); renderLog(); } }
 
 /* =========================================================
-   10. HANGAR PINNWAND (LOKAL & TUTORIAL)
+   10. HANGAR PINNWAND (LOKAL & TUTORIAL & SKALIERUNG)
    ========================================================= */
 const tutorialNotes = [
-    { id: 101, text: "👋 WILLKOMMEN!\n\nZiehe diese Zettel umher, bearbeite sie (✏️) oder lösch sie (✖). Nutze das Brett für Checklisten oder Funk-Notizen.", x: 50, y: 50, rot: -2 },
-    { id: 102, text: "✈️ AUFTRÄGE\n\nStelle Start, Ziel und Distanz ein. Der Dispatcher sucht dir eine realistische Route oder einen coolen POI (für Rundflüge).", x: 260, y: 60, rot: 3 },
-    { id: 103, text: "🗺️ KARTENTISCH\n\n- Layer-Icon (oben rechts) für Topo/Satellit\n- Wegpunkte auf der Route verschieben\n- Neue Punkte: auf rote Linie klicken\n- Lineal: Distanzen messen", x: 500, y: 40, rot: -1 },
-    { id: 104, text: "🌤️ WETTER & AIP\n\nIm Briefing-Fenster (auf der Frontseite) findest du kleine Kippschalter. Damit öffnest du direkt METAR/TAF und die passenden Anflugkarten (AIP).", x: 80, y: 250, rot: 1 },
-    { id: 105, text: "🎨 COCKPIT DESIGN\n\nGeheimtipp:\nKlicke auf die SCHRAUBE oben links am Hauptpanel, um die Lackierung (Hintergrundfarbe) des Cockpits zu ändern!", x: 300, y: 260, rot: -3 },
-    { id: 106, text: "🤖 GEMINI API\n\nHol dir einen kostenlosen Google AI Studio Key. Trag ihn unten ein, und die KI generiert dir individuelle, historisch korrekte Flugaufträge zur Region!", x: 520, y: 240, rot: 2 }
+    { id: 101, text: "👋 WILLKOMMEN!\n\nZiehe diese Zettel umher, bearbeite sie (✏️) oder lösch sie (✖).", x: 5, y: 8, rot: -2 },
+    { id: 102, text: "✈️ AUFTRÄGE\n\nStelle Start, Ziel und Distanz ein. Der Dispatcher sucht dir Missionen.", x: 28, y: 12, rot: 3 },
+    { id: 103, text: "🗺️ KARTENTISCH\n\n- Layer-Icon nutzen\n- Wegpunkte verschieben\n- Distanzen messen", x: 52, y: 6, rot: -1 },
+    { id: 104, text: "🌤️ WETTER & AIP\n\nIm Briefing-Fenster findest du Schalter für METAR/TAF und AIP.", x: 8, y: 45, rot: 1 },
+    { id: 105, text: "🎨 COCKPIT DESIGN\n\nKlicke auf die SCHRAUBE oben links, um die Lackierung zu ändern!", x: 32, y: 48, rot: -3 },
+    { id: 106, text: "🤖 GEMINI API\n\nHol dir einen AI Key und die KI generiert individuelle Aufträge!", x: 55, y: 42, rot: 2 }
 ];
 
-function loadTutorialNotes() {
-    if(confirm("Möchtest du die Tutorial-Zettel laden? (Bestehende Zettel bleiben an der Pinnwand)")) {
-        let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
-        let timeOffset = Date.now();
-        tutorialNotes.forEach((tn, idx) => {
-            notes.push({ ...tn, id: timeOffset + idx });
+function toggleTutorialNotes() {
+    let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
+    const hasTutorial = notes.some(n => n.id >= 101 && n.id <= 106);
+    
+    if (hasTutorial) {
+        // Sind sie da, blenden wir sie aus
+        notes = notes.filter(n => n.id < 101 || n.id > 106);
+    } else {
+        // Sind sie weg, holen wir sie zurück (ohne Duplikate)
+        tutorialNotes.forEach(tn => {
+            if (!notes.find(n => n.id === tn.id)) notes.push(tn);
         });
-        localStorage.setItem('ga_pinboard', JSON.stringify(notes));
+    }
+    localStorage.setItem('ga_pinboard', JSON.stringify(notes));
+    renderNotes();
+}
+
+function clearPinboard() {
+    if(confirm("🗑️ Möchtest du wirklich ALLE Zettel von der Pinnwand in den Müll werfen?")) {
+        localStorage.setItem('ga_pinboard', JSON.stringify([]));
         renderNotes();
     }
 }
@@ -954,10 +966,8 @@ function togglePinboard() {
     const board = document.getElementById('pinboardOverlay');
     const mapBoard = document.getElementById('mapTableOverlay');
     if (mapBoard.classList.contains('active')) { toggleMapTable(); } 
-    
     board.classList.toggle('active');
     document.body.classList.toggle('pinboard-open'); 
-    
     if(board.classList.contains('active')) { renderNotes(); }
 }
 
@@ -965,8 +975,7 @@ function addNote() {
     const text = prompt("Was möchtest du ans schwarze Brett pinnen?");
     if(!text || text.trim() === "") return;
     let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
-    const rot = Math.floor(Math.random() * 9) - 4;
-    notes.push({ id: Date.now(), text: text, x: 300, y: 200, rot: rot });
+    notes.push({ id: Date.now(), text: text, x: 30 + Math.random()*15, y: 30 + Math.random()*15, rot: Math.floor(Math.random() * 9) - 4 });
     localStorage.setItem('ga_pinboard', JSON.stringify(notes));
     renderNotes();
 }
@@ -996,8 +1005,7 @@ function pinCurrentFlight() {
     if (document.getElementById("briefingBox").style.display !== "block" || !currentMissionData) return;
     let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
     if (notes.filter(n => n.type === 'flight').length >= 10) {
-        alert("Das Board ist voll! Du kannst maximal 10 Flüge anheften. Bitte lösche alte Flüge von der Pinnwand (✖).");
-        return;
+        alert("Das Board ist voll! Du kannst maximal 10 Flüge anheften. Bitte lösche alte Flüge von der Pinnwand (✖)."); return;
     }
 
     const state = {
@@ -1018,16 +1026,12 @@ function pinCurrentFlight() {
     notes.push({
         id: Date.now(), type: "flight", flightData: state,
         text: `✈️ <b>${routeText}</b><br><span style="font-size:11px; color:#555;">${currentMissionData.mission}</span><br><span style="font-size:11px;">${state.mDistNote}</span>`,
-        x: 350 + Math.floor(Math.random() * 100), y: 150 + Math.floor(Math.random() * 100), rot: Math.floor(Math.random() * 9) - 4
+        x: 35 + Math.random()*15, y: 20 + Math.random()*15, rot: Math.floor(Math.random() * 9) - 4
     });
     
     localStorage.setItem('ga_pinboard', JSON.stringify(notes));
-    
     renderNotes();
-    
-    if (!document.getElementById('pinboardOverlay').classList.contains('active')) {
-        alert("📌 Flugauftrag erfolgreich ans schwarze Brett geheftet!");
-    }
+    if (!document.getElementById('pinboardOverlay').classList.contains('active')) alert("📌 Flugauftrag erfolgreich ans schwarze Brett geheftet!");
 }
 
 function loadPinnedFlight(id) {
@@ -1036,12 +1040,7 @@ function loadPinnedFlight(id) {
     if (note && note.flightData) {
         restoreMissionState(note.flightData);
         togglePinboard(); 
-        setTimeout(() => {
-            if (map && routeWaypoints.length >= 2) {
-                map.fitBounds(L.latLngBounds(routeWaypoints), { padding: [40, 40] });
-                updateMiniMap();
-            }
-        }, 300);
+        setTimeout(() => { if (map && routeWaypoints.length >= 2) { map.fitBounds(L.latLngBounds(routeWaypoints), { padding: [40, 40] }); updateMiniMap(); } }, 300);
     }
 }
 
@@ -1050,11 +1049,7 @@ function loadPinnedFlight(id) {
 // ==========================================
 function exportMission() {
     if (document.getElementById("briefingBox").style.display !== "block" || !currentMissionData) return;
-    
-    // 1. Wegpunkte komprimieren: Aus Objekten {lat: 51, lng: 10} werden winzige Arrays [51, 10]
     const wps = routeWaypoints.map(wp => [parseFloat(wp.lat.toFixed(4)), parseFloat((wp.lng||wp.lon).toFixed(4))]);
-
-    // 2. Array-Kompression: Wir werfen alle langen JSON-Namen weg und speichern nur die rohen Werte!
     const pack = [
         document.getElementById('mTitle').innerHTML, document.getElementById('mStory').innerText,
         document.getElementById("mDepICAO").innerText, document.getElementById("mDepName").innerText,
@@ -1068,61 +1063,38 @@ function exportMission() {
         currentMissionData, wps, currentStartICAO, currentDestICAO, currentSName, currentDName
     ];
 
-    // 3. Stringify, URL-Safe machen und Base64 encodieren
     const code = btoa(encodeURIComponent(JSON.stringify(pack)));
-    
-    navigator.clipboard.writeText(code).then(() => {
-        alert("🔗 Mission Code kopiert!\n\nDu kannst ihn jetzt einfügen und an deine Fliegerkollegen schicken.");
-    }).catch(err => {
-        prompt("Dein Browser blockiert das automatische Kopieren. Bitte kopiere den Code hier:", code);
-    });
+    navigator.clipboard.writeText(code).then(() => { alert("🔗 Mission Code kopiert!\n\nDu kannst ihn jetzt einfügen und an deine Fliegerkollegen schicken."); })
+    .catch(err => { prompt("Dein Browser blockiert das automatische Kopieren. Bitte kopiere den Code hier:", code); });
 }
 
 function importMission() {
     const code = prompt("Füge hier den Mission Code ein:");
     if (!code || code.trim() === "") return;
-    
     try {
-        // Code entschlüsseln
         const pack = JSON.parse(decodeURIComponent(atob(code.trim())));
-        
-        // Sicherheits-Check: Ist es unser neues Array-Format?
         if (!Array.isArray(pack) || pack.length < 24) throw new Error("Ungültiges oder veraltetes Format");
-
-        // Wegpunkte wieder in das Format ausklappen, das die Leaflet-Karte versteht
         const wps = pack[19].map(p => ({ lat: p[0], lng: p[1] }));
-
-        // Das Array wieder in das große, lesbare Status-Objekt übersetzen
         const state = {
             mTitle: pack[0], mStory: pack[1], mDepICAO: pack[2], mDepName: pack[3], mDepCoords: pack[4], mDepRwy: pack[5],
             destIcon: pack[6], mDestICAO: pack[7], mDestName: pack[8], mDestCoords: pack[9], mDestRwy: pack[10],
             mPay: pack[11], mWeight: pack[12], mDistNote: pack[13], mHeadingNote: pack[14], mETENote: pack[15],
-            wikiDescText: pack[16], isPOI: pack[17] === 1,
-            currentMissionData: pack[18], routeWaypoints: wps, 
+            wikiDescText: pack[16], isPOI: pack[17] === 1, currentMissionData: pack[18], routeWaypoints: wps, 
             currentStartICAO: pack[20], currentDestICAO: pack[21], currentSName: pack[22], currentDName: pack[23]
         };
-        
         let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
-        if (notes.filter(n => n.type === 'flight').length >= 10) {
-            alert("Das Board ist voll! Du kannst maximal 10 Flüge anheften. Bitte lösche alte Flüge (✖).");
-            return;
-        }
+        if (notes.filter(n => n.type === 'flight').length >= 10) { alert("Das Board ist voll! Du kannst maximal 10 Flüge anheften. Bitte lösche alte Flüge (✖)."); return; }
         
         const routeText = `${state.currentStartICAO} ➔ ${state.currentDestICAO === "POI" ? state.currentMissionData.poiName : state.currentDestICAO}`;
         notes.push({
             id: Date.now(), type: "flight", flightData: state,
             text: `✈️ <b>${routeText}</b><br><span style="font-size:11px; color:#555;">${state.currentMissionData.mission}</span><br><span style="font-size:11px;">${state.mDistNote}</span>`,
-            x: 350 + Math.floor(Math.random() * 100), y: 150 + Math.floor(Math.random() * 100), rot: Math.floor(Math.random() * 9) - 4
+            x: 40 + Math.random()*15, y: 25 + Math.random()*15, rot: Math.floor(Math.random() * 9) - 4
         });
-        
         localStorage.setItem('ga_pinboard', JSON.stringify(notes));
         renderNotes();
         alert("📥 Flugauftrag erfolgreich empfangen und ans Brett geheftet!");
-        
-    } catch (e) {
-        alert("❌ Fehler: Der Code ist ungültig oder beschädigt.");
-        console.error("Import Error:", e);
-    }
+    } catch (e) { alert("❌ Fehler: Der Code ist ungültig oder beschädigt."); }
 }
 
 function renderNotes() {
@@ -1133,7 +1105,14 @@ function renderNotes() {
     notes.forEach(note => {
         const div = document.createElement('div'); 
         div.className = note.type === 'flight' ? 'post-it flight-card' : 'post-it';
-        div.style.left = note.x + 'px'; div.style.top = note.y + 'px'; div.style.transform = `rotate(${note.rot}deg)`;
+        
+        // Kompatibilität: Wandelt alte feste Pixel in saubere Prozente um
+        let posX = note.x > 100 ? (note.x / 1000) * 100 : note.x;
+        let posY = note.y > 100 ? (note.y / 600) * 100 : note.y;
+
+        div.style.left = posX + '%'; 
+        div.style.top = posY + '%'; 
+        div.style.transform = `rotate(${note.rot}deg)`;
         
         if (note.type === 'flight') {
             div.innerHTML = `<div class="post-it-pin"></div><div class="post-it-del" onclick="deleteNote(${note.id})">✖</div>${note.text}<button class="flight-load-btn" onclick="loadPinnedFlight(${note.id})">📂 Flug laden</button>`;
@@ -1162,21 +1141,30 @@ function makeDraggable(element, noteId) {
         const clientX = e.touches ? e.touches[0].clientX : e.clientX, clientY = e.touches ? e.touches[0].clientY : e.clientY;
         pos1 = pos3 - clientX; pos2 = pos4 - clientY; pos3 = clientX; pos4 = clientY;
         
+        const board = document.getElementById('pinboard');
         let newTop = element.offsetTop - pos2, newLeft = element.offsetLeft - pos1;
-        const board = document.getElementById('pinboard'), padding = 15; 
+        const padding = 10; 
         const minLeft = padding, maxLeft = board.offsetWidth - element.offsetWidth - padding;
         const minTop = padding, maxTop = board.offsetHeight - element.offsetHeight - padding;
         
         if (newLeft < minLeft) newLeft = minLeft; if (newLeft > maxLeft) newLeft = maxLeft;
         if (newTop < minTop) newTop = minTop; if (newTop > maxTop) newTop = maxTop;
         
-        element.style.top = newTop + "px"; element.style.left = newLeft + "px";
+        // FIX: Wir weisen die Position schon während des Ziehens stur in % zu!
+        // Dadurch kleben die Post-Its bombenfest an der Textur des Brettes, egal was der Monitor macht.
+        element.style.top = (newTop / board.offsetHeight * 100) + "%"; 
+        element.style.left = (newLeft / board.offsetWidth * 100) + "%";
     }
 
     function closeDragElement() {
         document.onmouseup = null; document.ontouchend = null; document.onmousemove = null; document.ontouchmove = null;
         let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
         const noteIndex = notes.findIndex(n => n.id === noteId);
-        if(noteIndex > -1) { notes[noteIndex].x = element.offsetLeft; notes[noteIndex].y = element.offsetTop; localStorage.setItem('ga_pinboard', JSON.stringify(notes)); }
+        if(noteIndex > -1) { 
+            const board = document.getElementById('pinboard');
+            notes[noteIndex].x = (element.offsetLeft / board.offsetWidth) * 100; 
+            notes[noteIndex].y = (element.offsetTop / board.offsetHeight) * 100; 
+            localStorage.setItem('ga_pinboard', JSON.stringify(notes)); 
+        }
     }
 }
