@@ -1,17 +1,59 @@
 /* =========================================================
    1. THEME TOGGLE & NOTIZEN TOGGLE
    ========================================================= */
-function toggleTheme() {
-    const toggle = document.getElementById('themeToggle');
-    if(toggle && toggle.checked) {
+function changeThemeFromSlider(val) {
+    const v = parseInt(val);
+    if (v === 0) setTheme('classic');
+    else if (v === 1) setTheme('retro');
+    else if (v === 2) setTheme('navcom');
+}
+
+function setTheme(mode) {
+    document.body.classList.remove('theme-retro', 'theme-navcom');
+    const lblClassic = document.getElementById('lbl-classic');
+    const lblRetro = document.getElementById('lbl-retro');
+    const lblNavcom = document.getElementById('lbl-navcom');
+    const slider = document.getElementById('themeSlider');
+    
+    if(lblClassic) lblClassic.style.color = '#888'; 
+    if(lblRetro) lblRetro.style.color = '#888'; 
+    if(lblNavcom) lblNavcom.style.color = '#888';
+
+    if (mode === 'retro') {
         document.body.classList.add('theme-retro');
         localStorage.setItem('ga_theme', 'retro');
+        if(slider) slider.value = 1;
+        if(lblRetro) lblRetro.style.color = '#d93829';
+    } else if (mode === 'navcom') {
+        document.body.classList.add('theme-navcom', 'theme-retro'); 
+        localStorage.setItem('ga_theme', 'navcom');
+        if(slider) slider.value = 2;
+        if(lblNavcom) lblNavcom.style.color = '#33ff33';
     } else {
-        document.body.classList.remove('theme-retro');
         localStorage.setItem('ga_theme', 'classic');
+        if(slider) slider.value = 0;
+        if(lblClassic) lblClassic.style.color = '#4da6ff';
     }
     updateDynamicColors();
     refreshAllDrums();
+}
+
+function syncToNavCom(radioId, value) {
+    if(document.getElementById(radioId)) document.getElementById(radioId).value = value;
+}
+
+// NEU: Lässt die Encoder-Knöpfe rotieren und löst den Sync aus!
+function cycleRadioOption(selectId) {
+    const selectEl = document.getElementById(selectId);
+    if (!selectEl) return;
+    
+    // Nächste Option auswählen
+    let nextIndex = selectEl.selectedIndex + 1;
+    if (nextIndex >= selectEl.options.length) nextIndex = 0; // Wrap around
+    selectEl.selectedIndex = nextIndex;
+    
+    // Wir werfen manuell ein 'change' Event, damit die originalen Formulare aktualisiert werden
+    selectEl.dispatchEvent(new Event('change'));
 }
 
 function toggleNotes() {
@@ -28,13 +70,16 @@ function toggleNotes() {
 }
 
 function updateDynamicColors() {
-    const isRetro = document.body.classList.contains('theme-retro');
-    const primColor = isRetro ? 'var(--piper-white)' : 'var(--blue)';
-    const titleColor = isRetro ? 'var(--piper-white)' : 'var(--blue)';
-    const hlColor = isRetro ? 'var(--piper-yellow)' : 'var(--green)';
+    const isNavcom = document.body.classList.contains('theme-navcom');
+    const isRetro = document.body.classList.contains('theme-retro') && !isNavcom;
+    
+    const primColor = isNavcom ? '#33ff33' : (isRetro ? 'var(--piper-white)' : 'var(--blue)');
+    const titleColor = isNavcom ? '#33ff33' : (isRetro ? 'var(--piper-white)' : 'var(--blue)');
+    const hlColor = isNavcom ? '#33ff33' : (isRetro ? 'var(--piper-yellow)' : 'var(--green)');
+    
     const mainTitle = document.getElementById('mainTitle');
-    if (mainTitle) mainTitle.style.color = isRetro ? '' : titleColor;
-    document.querySelectorAll('.theme-color-text').forEach(el => el.style.color = isRetro ? '' : primColor);
+    if (mainTitle) mainTitle.style.color = isRetro || isNavcom ? '' : titleColor;
+    document.querySelectorAll('.theme-color-text').forEach(el => el.style.color = isRetro || isNavcom ? '' : primColor);
     document.querySelectorAll('.theme-green-text').forEach(el => el.style.color = hlColor);
 }
 
@@ -73,15 +118,7 @@ let miniMap, miniRoutePolyline, miniMapMarkers = [];
 
 window.onload = () => {
     const savedTheme = localStorage.getItem('ga_theme') || 'retro'; 
-    const themeToggleBtn = document.getElementById('themeToggle');
-    if (savedTheme === 'retro') {
-        document.body.classList.add('theme-retro');
-        if(themeToggleBtn) themeToggleBtn.checked = true;
-    } else {
-        document.body.classList.remove('theme-retro');
-        if(themeToggleBtn) themeToggleBtn.checked = false;
-    }
-    updateDynamicColors();
+    setTheme(savedTheme);
     applySavedPanelTheme(); 
 
     const lastDest = localStorage.getItem('last_icao_dest');
@@ -111,6 +148,12 @@ window.onload = () => {
     requestAnimationFrame(() => {
         setTimeout(() => { refreshAllDrums(); }, 50);
     });
+
+    // Sync beim Start, damit das NavCom die korrekten Standardwerte zeigt
+    syncToNavCom('startLocRadio', document.getElementById('startLoc').value);
+    syncToNavCom('tasRadio', document.getElementById('tasSlider').value);
+    syncToNavCom('gphRadio', document.getElementById('gphSlider').value);
+    syncToNavCom('maxSeatsRadio', document.getElementById('maxSeats').value);
 };
 
 function saveApiKey() { localStorage.setItem('ga_gemini_key', document.getElementById('apiKeyInput').value.trim()); }
@@ -208,7 +251,11 @@ function setDrumCounter(elementId, valueStr) {
     digits.forEach((digit, index) => { const translateY = -(parseInt(digit) * digitHeight); finalStrips[index].style.transform = `translateY(${translateY}px)`; });
 }
 
-function handleSliderChange(type, val) { setDrumCounter(type + 'Drum', val); recalculatePerformance(); }
+function handleSliderChange(type, val) { 
+    setDrumCounter(type + 'Drum', val); 
+    recalculatePerformance(); 
+    syncToNavCom(type + 'Radio', val);
+}
 
 function recalculatePerformance() {
     if (!currentMissionData) return;
@@ -226,6 +273,9 @@ function applyPreset(t, g, s, n) {
     document.getElementById('tasSlider').value=t; document.getElementById('gphSlider').value=g; 
     document.getElementById('maxSeats').value=s; selectedAC=n;
     handleSliderChange('tas', t); handleSliderChange('gph', g);
+    syncToNavCom('tasRadio', t);
+    syncToNavCom('gphRadio', g);
+    syncToNavCom('maxSeatsRadio', s);
 }
 
 function copyCoords(elementId) {
@@ -242,7 +292,11 @@ function checkBearing(b, dirPref) {
     return false;
 }
 
-function resetBtn(btn) { btn.disabled = false; btn.innerText = "Auftrag generieren"; }
+function resetBtn(btn) { 
+    if(btn) { btn.disabled = false; btn.innerText = "Auftrag generieren"; }
+    const rBtn = document.getElementById('radioGenerateBtn');
+    if(rBtn) { rBtn.disabled = false; rBtn.innerText = "DISPATCH"; }
+}
 
 function calcNav(lat1, lon1, lat2, lon2) {
     const R = 3440, dLat = (lat2-lat1)*Math.PI/180, dLon = (lon2-lon1)*Math.PI/180;
@@ -464,7 +518,9 @@ function updateApiFuelMeter() {
 
 async function generateMission() {
     const btn = document.getElementById('generateBtn'); 
-    btn.disabled = true; btn.innerText = "Sucht Route & Daten...";
+    const rBtn = document.getElementById('radioGenerateBtn');
+    if(btn) { btn.disabled = true; btn.innerText = "Sucht Route & Daten..."; }
+    if(rBtn) { rBtn.disabled = true; rBtn.innerText = "CALC..."; }
     document.getElementById("briefingBox").style.display = "none";
     
     const page1 = document.getElementById('notePage1'), page2 = document.getElementById('notePage2');

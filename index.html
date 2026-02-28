@@ -29,76 +29,194 @@
     <h1 id="mainTitle">GA Dispatcher</h1>
     <div id="searchIndicator">System bereit.</div>
     
-    <div class="grid-2">
-        <div><label>Start</label><input type="text" id="startLoc" value="EDTW" maxlength="4" oninput="this.value=this.value.toUpperCase()" onchange="updateMapFromInputs()"></div>
-        <div><label>Ziel (Opt.)</label><input type="text" id="destLoc" placeholder="Zufall" maxlength="4" oninput="this.value=this.value.toUpperCase()" onchange="updateMapFromInputs()"></div>
-    </div>
-    
-    <div class="grid-2">
-        <div><label>Typ</label><select id="targetType">
-            <option value="apt">Flugplatz (A ➔ B)</option>
-            <option value="poi">POI (Rundflug)</option>
-        </select></div>
-        <div><label>Distanz (Total)</label><select id="distRange">
-            <option value="any">Egal (Zufall)</option>
-            <option value="short">Short (10-50 NM)</option>
-            <option value="medium">Medium (50-100 NM)</option>
-            <option value="long">Long (100-250 NM)</option>
-        </select></div>
-    </div>
-    
-    <div class="grid-3">
-        <div><label>Region</label><select id="regionFilter">
-            <option value="any">Europaweit</option>
-            <option value="de" selected>Nur DE</option>
-            <option value="int">Nur Ausland</option>
-        </select></div>
-        <div><label>Richtung</label><select id="dirPref">
-            <option value="any">Egal</option>
-            <option value="N">Norden</option>
-            <option value="E">Osten</option>
-            <option value="S">Süden</option>
-            <option value="W">Westen</option>
-        </select></div>
-        <div><label>Sitze</label><select id="maxSeats"><option value="2">2</option><option value="4" selected>4</option><option value="6">6</option></select></div>
-    </div>
-
-    <div class="preset-row">
-        <button class="btn-preset" onclick="applyPreset(115, 9, 4, 'C172')">C172</button>
-        <button class="btn-preset" onclick="applyPreset(160, 14, 4, 'PA-24')">Comanche</button>
-        <button class="btn-preset" onclick="applyPreset(220, 25, 6, 'AERO')">Aerostar</button>
-    </div>
-
-    <div class="slider-container">
-        <div class="slider-header">
-            <label class="slider-label">GPH</label>
-            <span id="gphDrum" class="drum-readout-container theme-color-text" style="font-weight:bold;">14</span>
-        </div>
-        <input type="range" id="gphSlider" min="5" max="35" value="14" oninput="handleSliderChange('gph', this.value)">
-    </div>
-
-    <div class="slider-container">
-        <div class="slider-header">
-            <label class="slider-label">TAS (kts)</label>
-            <span id="tasDrum" class="drum-readout-container theme-color-text" style="font-weight:bold;">160</span>
-        </div>
-        <input type="range" id="tasSlider" min="80" max="260" value="160" step="5" oninput="handleSliderChange('tas', this.value)">
-    </div>
-    
-    <div class="action-bar">
-        <button class="btn-main" id="generateBtn" onclick="generateMission()">Auftrag generieren</button>
-        
-        <div class="emergency-reset" onclick="resetApp()" title="Briefing verwerfen & Reset">
-            <div class="emergency-reset-inner">↻</div>
+    <div id="classicInputs">
+        <div class="grid-2">
+            <div><label>Start</label><input type="text" id="startLoc" value="EDTW" maxlength="4" oninput="this.value=this.value.toUpperCase(); syncToNavCom('startLocRadio', this.value)" onchange="updateMapFromInputs()"></div>
+            <div><label>Ziel (Opt.)</label><input type="text" id="destLoc" placeholder="Zufall" maxlength="4" oninput="this.value=this.value.toUpperCase(); syncToNavCom('destLocRadio', this.value)" onchange="updateMapFromInputs()"></div>
         </div>
         
-        <div class="analog-meter" id="searchMeter" title="Signalstärke">
-            <div class="meter-face">
-                <div class="meter-scale"></div>
-                <div class="meter-label">SIG</div>
+        <div class="grid-2">
+            <div><label>Typ</label><select id="targetType" onchange="syncToNavCom('targetTypeRadio', this.value)">
+                <option value="apt">Flugplatz (A ➔ B)</option>
+                <option value="poi">POI (Rundflug)</option>
+            </select></div>
+            <div><label>Distanz (Total)</label><select id="distRange" onchange="syncToNavCom('distRangeRadio', this.value)">
+                <option value="any">Egal (Zufall)</option>
+                <option value="short">Short (10-50 NM)</option>
+                <option value="medium">Medium (50-100 NM)</option>
+                <option value="long">Long (100-250 NM)</option>
+            </select></div>
+        </div>
+        
+        <div class="grid-3">
+            <div><label>Region</label><select id="regionFilter" onchange="syncToNavCom('regionFilterRadio', this.value)">
+                <option value="any">Europaweit</option>
+                <option value="de" selected>Nur DE</option>
+                <option value="int">Nur Ausland</option>
+            </select></div>
+            <div><label>Richtung</label><select id="dirPref" onchange="syncToNavCom('dirPrefRadio', this.value)">
+                <option value="any">Egal</option>
+                <option value="N">Norden</option>
+                <option value="E">Osten</option>
+                <option value="S">Süden</option>
+                <option value="W">Westen</option>
+            </select></div>
+            <div><label>Sitze</label><select id="maxSeats" onchange="syncToNavCom('maxSeatsRadio', this.value)">
+                <option value="2">2</option><option value="4" selected>4</option><option value="6">6</option>
+            </select></div>
+        </div>
+
+        <div class="preset-row">
+            <button class="btn-preset" onclick="applyPreset(115, 9, 4, 'C172')">C172</button>
+            <button class="btn-preset" onclick="applyPreset(160, 14, 4, 'PA-24')">Comanche</button>
+            <button class="btn-preset" onclick="applyPreset(220, 25, 6, 'AERO')">Aerostar</button>
+        </div>
+
+        <div class="slider-container">
+            <div class="slider-header">
+                <label class="slider-label">GPH</label>
+                <span id="gphDrum" class="drum-readout-container theme-color-text" style="font-weight:bold;">14</span>
             </div>
-            <div class="meter-needle" id="meterNeedle"></div>
-            <div class="meter-led" id="meterLed"></div>
+            <input type="range" id="gphSlider" min="5" max="35" value="14" oninput="handleSliderChange('gph', this.value)">
+        </div>
+
+        <div class="slider-container">
+            <div class="slider-header">
+                <label class="slider-label">TAS (kts)</label>
+                <span id="tasDrum" class="drum-readout-container theme-color-text" style="font-weight:bold;">160</span>
+            </div>
+            <input type="range" id="tasSlider" min="80" max="260" value="160" step="5" oninput="handleSliderChange('tas', this.value)">
+        </div>
+        
+        <div class="action-bar" id="classicActionBar">
+            <button class="btn-main" id="generateBtn" onclick="generateMission()">Auftrag generieren</button>
+            
+            <div class="emergency-reset" onclick="resetApp()" title="Briefing verwerfen & Reset">
+                <div class="emergency-reset-inner">↻</div>
+            </div>
+            
+            <div class="analog-meter" id="searchMeter" title="Signalstärke">
+                <div class="meter-face">
+                    <div class="meter-scale"></div>
+                    <div class="meter-label">SIG</div>
+                </div>
+                <div class="meter-needle" id="meterNeedle"></div>
+                <div class="meter-led" id="meterLed"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="navcomInputs" class="radio-stack">
+        
+        <div class="radio-row">
+            <div class="radio-module half-module">
+                <div class="radio-module-right-screws"></div>
+                <div class="radio-label">COM 1 - DEP</div>
+                <div class="radio-display-container">
+                    <div style="width: 100%; text-align: center;">
+                        <span class="lcd-label">ICAO</span>
+                        <input type="text" id="startLocRadio" class="lcd-input" value="EDTW" maxlength="4" style="width:100%;" oninput="this.value=this.value.toUpperCase(); document.getElementById('startLoc').value = this.value; updateMapFromInputs();">
+                    </div>
+                </div>
+                <div class="radio-knob"></div>
+            </div>
+            <div class="radio-module half-module">
+                <div class="radio-module-right-screws"></div>
+                <div class="radio-label">COM 2 - DEST</div>
+                <div class="radio-display-container">
+                    <div style="width: 100%; text-align: center;">
+                        <span class="lcd-label">ICAO</span>
+                        <input type="text" id="destLocRadio" class="lcd-input" placeholder="----" maxlength="4" style="width:100%;" oninput="this.value=this.value.toUpperCase(); document.getElementById('destLoc').value = this.value; updateMapFromInputs();">
+                    </div>
+                </div>
+                <div class="radio-knob"></div>
+            </div>
+        </div>
+
+        <div class="radio-row">
+            <div class="radio-module half-module">
+                <div class="radio-module-right-screws"></div>
+                <div class="radio-label">NAV 1 - TYPE</div>
+                <div class="radio-display-container">
+                    <div style="width: 100%; text-align: center;">
+                        <select id="targetTypeRadio" class="lcd-input" style="width:100%;" onchange="document.getElementById('targetType').value = this.value">
+                            <option value="apt">APT</option>
+                            <option value="poi">POI</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="radio-knob" onclick="cycleRadioOption('targetTypeRadio')" title="Klicken für nächste Option"></div>
+            </div>
+            <div class="radio-module half-module">
+                <div class="radio-module-right-screws"></div>
+                <div class="radio-label">NAV 2 - DIST</div>
+                <div class="radio-display-container">
+                    <div style="width: 100%; text-align: center;">
+                        <select id="distRangeRadio" class="lcd-input" style="width:100%;" onchange="document.getElementById('distRange').value = this.value">
+                            <option value="any">RNDM</option>
+                            <option value="short">10-50</option>
+                            <option value="medium">50-99</option>
+                            <option value="long">100+</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="radio-knob" onclick="cycleRadioOption('distRangeRadio')" title="Klicken für nächste Option"></div>
+            </div>
+        </div>
+
+        <div class="radio-row">
+            <div class="radio-module half-module">
+                <div class="radio-module-right-screws"></div>
+                <div class="radio-label">ADF 1 - REGN</div>
+                <div class="radio-display-container">
+                    <div style="width: 100%; text-align: center;">
+                        <select id="regionFilterRadio" class="lcd-input" style="width:100%;" onchange="document.getElementById('regionFilter').value = this.value">
+                            <option value="any">ALL</option>
+                            <option value="de" selected>GER</option>
+                            <option value="int">INT</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="radio-knob" onclick="cycleRadioOption('regionFilterRadio')" title="Klicken für nächste Option"></div>
+            </div>
+            <div class="radio-module half-module">
+                <div class="radio-module-right-screws"></div>
+                <div class="radio-label">ADF 2 - HDG°</div>
+                <div class="radio-display-container">
+                    <div style="width: 100%; text-align: center;">
+                        <select id="dirPrefRadio" class="lcd-input" style="width:100%;" onchange="document.getElementById('dirPref').value = this.value">
+                            <option value="any">ANY</option>
+                            <option value="N">N</option>
+                            <option value="E">E</option>
+                            <option value="S">S</option>
+                            <option value="W">W</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="radio-knob" onclick="cycleRadioOption('dirPrefRadio')" title="Klicken für nächste Option"></div>
+            </div>
+        </div>
+
+        <div class="radio-module">
+            <div class="radio-module-right-screws"></div>
+            <div class="radio-label">XPDR - AIRCRAFT</div>
+            <div class="radio-display-container" style="gap: 15px; flex-grow: 1; justify-content: center;">
+                <div style="text-align: center;">
+                    <span class="lcd-label">TAS</span>
+                    <input type="text" id="tasRadio" class="lcd-input" value="160" maxlength="3" style="width:50px;" oninput="document.getElementById('tasSlider').value = this.value; handleSliderChange('tas', this.value);">
+                </div>
+                <div style="text-align: center;">
+                    <span class="lcd-label">GPH</span>
+                    <input type="text" id="gphRadio" class="lcd-input" value="14" maxlength="3" style="width:40px;" oninput="document.getElementById('gphSlider').value = this.value; handleSliderChange('gph', this.value);">
+                </div>
+                <div style="text-align: center;">
+                    <span class="lcd-label">PAX</span>
+                    <select id="maxSeatsRadio" class="lcd-input" style="width:30px;" onchange="document.getElementById('maxSeats').value = this.value">
+                        <option value="2">2</option><option value="4" selected>4</option><option value="6">6</option>
+                    </select>
+                </div>
+            </div>
+            <button class="radio-btn-exec" id="radioGenerateBtn" onclick="generateMission()">DISPATCH</button>
         </div>
     </div>
     
@@ -226,13 +344,13 @@
         </div>
     </div>
 
-    <div class="theme-switch-wrapper">
-        <span class="switch-label">Modern</span>
-        <label class="switch">
-            <input type="checkbox" id="themeToggle" onchange="toggleTheme()" checked>
-            <span class="slider"></span>
-        </label>
-        <span class="switch-label" style="color: #d93829;">Analog</span>
+    <div class="theme-switch-wrapper" style="flex-direction: column; align-items: center; border-top: 2px dashed #444; margin-top: 30px; padding-top: 15px;">
+        <div style="display: flex; justify-content: space-between; width: 150px; font-size: 10px; font-weight: bold; text-transform: uppercase;">
+            <span id="lbl-classic" style="color: #888; cursor: pointer;" onclick="changeThemeFromSlider(0)">Modern</span>
+            <span id="lbl-retro" style="color: #888; cursor: pointer;" onclick="changeThemeFromSlider(1)">Analog</span>
+            <span id="lbl-navcom" style="color: #888; cursor: pointer;" onclick="changeThemeFromSlider(2)">NavCom</span>
+        </div>
+        <input type="range" id="themeSlider" min="0" max="2" value="1" style="width: 150px; margin-top: 10px; cursor: pointer;" oninput="changeThemeFromSlider(this.value)">
     </div>
 </div>
 
