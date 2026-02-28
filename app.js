@@ -767,8 +767,12 @@ function initMapBase() {
     // 2. OVERLAY MAP (VFR Infos)
     const aeroOverlay = L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { 
         attribution: 'AeroData / Navigraph',
-        opacity: 0.65 
+        opacity: 0.65,
+        maxNativeZoom: 12 // Stoppt das Neuladen bei Stufe 12 und vergrößert ab da nur noch digital
     });
+
+    // Da das VFR-Overlay beim Start aktiv ist, blenden wir die Topo-Karte direkt ab
+    topoMap.setOpacity(0.5);
 
     // Startet standardmäßig mit Topo-Karte UND dem transparenten VFR-Overlay darüber
     map = L.map('map', { layers: [topoMap, aeroOverlay], attributionControl: false }).setView([51.1657, 10.4515], 6);
@@ -786,6 +790,22 @@ function initMapBase() {
     };
 
     L.control.layers(baseMaps, overlayMaps).addTo(map);
+
+    // ==========================================
+    // Automatik für das Abblenden der Karte
+    // ==========================================
+    map.on('overlayadd', function(e) {
+        if (e.name === "🛩️ VFR Lufträume (Overlay)") {
+            topoMap.setOpacity(0.5); // Topo wird blass, damit die Lufträume gut lesbar sind
+        }
+    });
+
+    map.on('overlayremove', function(e) {
+        if (e.name === "🛩️ VFR Lufträume (Overlay)") {
+            topoMap.setOpacity(1.0); // Topo wird wieder 100% kräftig, wenn VFR aus ist
+        }
+    });
+    // ==========================================
     
     const fsControl = L.control({position: 'topleft'});
     fsControl.onAdd = function() {
@@ -856,7 +876,10 @@ function updateMiniMap() {
         
         // Stapelt die Karten für den perfekten Aviation-Look auf dem Foto
         L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png').addTo(miniMap);
-        L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { opacity: 0.65 }).addTo(miniMap);
+        L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { 
+            opacity: 0.65, 
+            maxNativeZoom: 12 
+        }).addTo(miniMap);
     }
     
     if (routeWaypoints && routeWaypoints.length > 0) {
