@@ -401,11 +401,12 @@ body.theme-retro .wp-data { color: var(--piper-yellow); }
         display: block !important; 
         overflow: auto !important; 
         -webkit-overflow-scrolling: touch; 
-        padding: 20px !important; 
+        padding: 10px !important; /* Weniger schwarzer Rand für mehr Nutzhöhe */
     }
     .pinboard-content {
         width: 900px !important; 
-        height: 600px !important; 
+        /* Passt sich exakt der Handy-Bildschirmhöhe an, fällt aber nie unter 750px */
+        height: max(750px, calc(100vh - 70px)) !important; 
         margin: 0 auto !important; 
         max-width: none !important;
         max-height: none !important;
