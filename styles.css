@@ -310,7 +310,8 @@ body.theme-retro .api-fuel-meter .api-scale { border-left: 3px solid #d93829 !im
 
 /* --- FLIGHT POST-ITS (GESPEICHERTE FLÜGE) --- */
 .briefing-save-pin { position: absolute; top: 12px; right: 12px; font-size: 22px; cursor: pointer; z-index: 10; transition: transform 0.2s; filter: drop-shadow(1px 2px 2px rgba(0,0,0,0.5)); }
-.briefing-save-pin:hover { transform: scale(1.2) rotate(10deg); }
+.briefing-export-pin { position: absolute; top: 12px; right: 42px; font-size: 20px; cursor: pointer; z-index: 10; transition: transform 0.2s; filter: drop-shadow(1px 2px 2px rgba(0,0,0,0.5)); }
+.briefing-save-pin:hover, .briefing-export-pin:hover { transform: scale(1.2) rotate(10deg); }
 .post-it.flight-card { background: #e6f7ff; border: 1px solid #b3e0ff; }
 .flight-load-btn { background: var(--blue); color: #fff; border: 1px solid #222; padding: 6px; width: 100%; margin-top: 10px; cursor: pointer; font-weight: bold; border-radius: 3px; font-family: sans-serif; transition: background 0.2s; }
 .flight-load-btn:hover { background: #3388dd; }

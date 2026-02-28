@@ -988,6 +988,70 @@ function loadPinnedFlight(id) {
     }
 }
 
+// ==========================================
+// MISSION EXPORT & IMPORT (Community Feature)
+// ==========================================
+function exportMission() {
+    if (document.getElementById("briefingBox").style.display !== "block" || !currentMissionData) return;
+    
+    // Aktuellen Status komplett einfrieren
+    const state = {
+        mTitle: document.getElementById('mTitle').innerHTML, mStory: document.getElementById('mStory').innerText,
+        mDepICAO: document.getElementById("mDepICAO").innerText, mDepName: document.getElementById("mDepName").innerText,
+        mDepCoords: document.getElementById("mDepCoords").innerText, mDepRwy: document.getElementById("mDepRwy").innerText,
+        destIcon: document.getElementById("destIcon").innerText, mDestICAO: document.getElementById("mDestICAO").innerText,
+        mDestName: document.getElementById("mDestName").innerText, mDestCoords: document.getElementById("mDestCoords").innerText,
+        mDestRwy: document.getElementById("mDestRwy").innerText, mPay: document.getElementById("mPay").innerText,
+        mWeight: document.getElementById("mWeight").innerText, mDistNote: document.getElementById("mDistNote").innerText,
+        mHeadingNote: document.getElementById("mHeadingNote").innerText, mETENote: document.getElementById("mETENote").innerText,
+        wikiDescText: document.getElementById("wikiDescText").innerText, isPOI: document.getElementById("destRwyContainer").style.display === "none",
+        currentMissionData: currentMissionData, routeWaypoints: routeWaypoints, currentStartICAO: currentStartICAO,
+        currentDestICAO: currentDestICAO, currentSName: currentSName, currentDName: currentDName
+    };
+
+    // In einen Base64-String komprimieren (encodeURIComponent schützt Emojis und Umlaute)
+    const code = btoa(encodeURIComponent(JSON.stringify(state)));
+    
+    // In die Zwischenablage kopieren
+    navigator.clipboard.writeText(code).then(() => {
+        alert("🔗 Mission Code kopiert!\n\nDu kannst ihn jetzt einfügen und an deine Fliegerkollegen schicken.");
+    }).catch(err => {
+        prompt("Dein Browser blockiert das automatische Kopieren. Bitte kopiere den Code hier:", code);
+    });
+}
+
+function importMission() {
+    const code = prompt("Füge hier den Mission Code ein:");
+    if (!code || code.trim() === "") return;
+    
+    try {
+        // Code entschlüsseln
+        const state = JSON.parse(decodeURIComponent(atob(code.trim())));
+        if (!state || !state.currentMissionData) throw new Error("Ungültiges Format");
+        
+        let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
+        if (notes.filter(n => n.type === 'flight').length >= 10) {
+            alert("Das Board ist voll! Du kannst maximal 10 Flüge anheften. Bitte lösche alte Flüge (✖).");
+            return;
+        }
+        
+        const routeText = `${state.currentStartICAO} ➔ ${state.currentDestICAO === "POI" ? state.currentMissionData.poiName : state.currentDestICAO}`;
+        notes.push({
+            id: Date.now(), type: "flight", flightData: state,
+            text: `✈️ <b>${routeText}</b><br><span style="font-size:11px; color:#555;">${state.currentMissionData.mission}</span><br><span style="font-size:11px;">${state.mDistNote}</span>`,
+            x: 350 + Math.floor(Math.random() * 100), y: 150 + Math.floor(Math.random() * 100), rot: Math.floor(Math.random() * 9) - 4
+        });
+        
+        localStorage.setItem('ga_pinboard', JSON.stringify(notes));
+        renderNotes();
+        alert("📥 Flugauftrag erfolgreich empfangen und ans Brett geheftet!");
+        
+    } catch (e) {
+        alert("❌ Fehler: Der Code ist ungültig oder beschädigt.");
+        console.error("Import Error:", e);
+    }
+}
+
 function renderNotes() {
     const board = document.getElementById('pinboard');
     if (!board) return;
