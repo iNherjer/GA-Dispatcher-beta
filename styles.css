@@ -396,20 +396,20 @@ body.theme-retro .wp-data { color: var(--piper-yellow); }
     .maptable-content { width: 100% !important; height: 100% !important; border-radius: 0 !important; }
     #map { width: 92% !important; height: 92% !important; border-radius: 6px !important; }
 
-    /* Pinnwand in alle Richtungen scrollbar machen (Pan-Canvas) */
+    /* Pinnwand NUR horizontal scrollbar machen, Höhe exakt ans Display anpassen */
     #pinboardOverlay .pinboard-scroll-area {
         display: block !important; 
-        overflow: auto !important; 
+        overflow-x: auto !important; /* Erlaubt das Wischen nach links/rechts */
+        overflow-y: hidden !important; /* Blockiert das Wischen nach oben/unten */
         -webkit-overflow-scrolling: touch; 
-        padding: 10px !important; /* Weniger schwarzer Rand für mehr Nutzhöhe */
+        padding: 0 !important; /* Komplett bündig ohne schwarze Balken */
     }
     .pinboard-content {
-        width: 900px !important; 
-        /* Passt sich exakt der Handy-Bildschirmhöhe an, fällt aber nie unter 750px */
-        height: max(750px, calc(100vh - 70px)) !important; 
-        margin: 0 auto !important; 
+        width: 1000px !important; /* Gibt genug Breite für das Panorama-Wischen */
+        height: 100% !important; /* Füllt exakt die Höhe bis zur unteren Displaykante */
+        margin: 0 !important; 
         max-width: none !important;
         max-height: none !important;
-        border-radius: 8px !important;
+        border-radius: 0 !important; /* Ecke an Ecke mit dem Displayrand */
     }
 }
