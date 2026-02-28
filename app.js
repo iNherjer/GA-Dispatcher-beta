@@ -67,6 +67,9 @@ function cyclePanelColor() {
    ========================================================= */
 let map, polyline, markers = [], currentStartICAO, currentDestICAO, currentMissionData = null, selectedAC = "PA-24";
 let globalAirports = null, runwayCache = {};
+let measureMode = false, measurePoints = [], measurePolyline = null, measureMarkers = [], measureTooltip = null;
+let routeWaypoints = [], routeMarkers = [], currentSName = "", currentDName = "";
+let miniMap, miniRoutePolyline, miniMapMarkers = [];
 
 window.onload = () => {
     const savedTheme = localStorage.getItem('ga_theme') || 'retro'; 
@@ -92,7 +95,7 @@ window.onload = () => {
     if(aiToggleBtn) { aiToggleBtn.checked = (aiEnabled !== 'false'); }
 
     renderLog();
-    updateApiFuelMeter(); // API Zähler starten
+    updateApiFuelMeter(); 
 
     // INITIALISIERUNG: Pinnwand Tutorial für neue Nutzer
     if (!localStorage.getItem('ga_pinboard_init')) {
@@ -355,7 +358,7 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
     const apiKey = apiKeyInput ? apiKeyInput.value.trim() : "";
     if (!apiKey) return null; 
 
-    const prompt = `Du bist ein Dispatcher für die allgemeine Luftfahrt (General Aviation).
+    const prompt = `Du bist ein erfahrener Dispatcher für die allgemeine Luftfahrt (General Aviation).
     Erstelle ein realistisches Einsatzbriefing:
     Start: ${startName}
     Ziel/Fokus: ${destName} ${isPOI ? '(POI / Wendepunkt)' : '(Zielflughafen)'}
@@ -364,12 +367,15 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
 
     WICHTIGE REGELN:
     1. Antworte IMMER auf Deutsch!
-    2. Schreibe knapp und professionell im Ton eines echten Dispatcher-Briefings auf dem Klemmbrett.
-    3. Baue echte geografische oder historische Fakten zur Region ein.
+    2. Schreibe knapp, professionell und im rauen Ton eines echten Dispatchers.
+    3. Baue zwingend echte geografische, infrastrukturelle oder historische Fakten zur Zielregion ein.
     ${isPOI ? 
     `4. RUNDFLUG-REGELN: Start/Landung ist ${startName}. Am POI (${destName}) wird NICHTS gelandet! 
-    5. AUFGABE: Klassische Rundflug-Motive (Fotoflug, LiDAR). TRAININGS-FALLBACK: Übungsflug bei langweiligem POI.` 
-    : `4. ROUTEN-REGELN: Normaler Streckenflug von ${startName} nach ${destName}. Typische GA-Aufgaben.`}
+    5. AUFGABE: Passe den Flug an den Ort an! Nutze die volle Bandbreite: Struktur-/Trassenprüfung, Stau-Report, Abgas/Emissions-Messung, Lidar/Topo-Scan, Forst-Patrouille (Waldbrand/Wildtiere), VIP-Touren, Denkmalschutz oder Film-Drehs.
+    6. WILDCARD: In ca. 20% der Fälle darfst du komplett eskalieren und dir ein wildes, ungewöhnliches aber in der Realität der General Aviation mögliches Szenario ausdenken (z.B. entflohenes Zootier aus der Luft suchen, illegale Rave-Party im Wald scouten, UFO-Sichtung überprüfen).` 
+    : `4. ROUTEN-REGELN: Flug von ${startName} nach ${destName}.
+    5. AUFGABE: Wähle eine Mission aus diesen Bereichen: Privat/Verein ($100 Hamburger, Fly-In), Logistik/Business (AOG-Ersatzteil, Organtransport, Laborproben, VIP-Transfer, verletztes Reitpferd) ODER detailliertes Flugtraining (VOR-Navigation, Engine-Out Simulation, Short Field Landing, Steep Turns).
+    6. WILDCARD: In ca. 20% der Fälle darfst du dir einen völlig verrückten, einzigartigen Auftrag ausdenken (z.B. Rockstar flieht vor Paparazzi, eiliger Kurierflug mit streng geheimen Dokumenten, verdeckte Ermittler absetzen).`}
 
     Antworte AUSSCHLIESSLICH als JSON. Keine Markdown-Formatierung.
     Struktur: {"title": "Kurzer, knackiger Titel", "story": "Das Briefing (max 3-4 Sätze)"}`;
@@ -404,11 +410,11 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
             return { t: parsed.title, s: parsed.story, i: "📋", cat: "std", _source: "Gemini 2.5 Flash Lite" };
         } else {
             console.warn("Lite API Fehler (Code: " + resLite.status + "). Wechsle zu lokaler Datenbank.");
-            return null; // Gibt Null zurück -> Lokale Datenbank springt ein
+            return null;
         }
     } catch (e) {
         console.warn("Gemini Lite fehlgeschlagen:", e);
-        return null; // Gibt Null zurück -> Lokale Datenbank springt ein
+        return null; 
     }
 }
 
@@ -417,7 +423,6 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
    ========================================================= */
 function getQuotaDay() {
     const now = new Date();
-    // Vor 09:00 Uhr zählt noch zum Vortag
     if (now.getHours() < 9) now.setDate(now.getDate() - 1);
     return now.toISOString().split('T')[0];
 }
@@ -426,7 +431,7 @@ function getApiUsage() {
     const today = getQuotaDay();
     let data = JSON.parse(localStorage.getItem('ga_api_fuel'));
     
-    // Wenn keine Daten da sind, ein neuer Tag ist, ODER das alte Format (ohne 'flash') noch im Speicher hängt: Reset!
+    // Wenn keine Daten da sind, ein neuer Tag ist, ODER das alte Format noch im Speicher hängt
     if (!data || data.date !== today || data.flash === undefined) { 
         data = { date: today, flash: 0, lite: 0 }; 
         localStorage.setItem('ga_api_fuel', JSON.stringify(data)); 
@@ -448,12 +453,11 @@ function updateApiFuelMeter() {
     if(!needle) return;
     const data = getApiUsage();
     let used = data.flash + data.lite;
-    const maxCalls = 40; // 20x Flash + 20x Flash Lite
+    const maxCalls = 40; 
     
     if(used > maxCalls) used = maxCalls;
     let percentage = used / maxCalls;
     
-    // Nadel-Berechnung: +45° (Voll/F/Rechts) bis -45° (Leer/E/Links)
     let angle = 45 - (percentage * 90); 
     needle.style.transform = `translateX(-50%) rotate(${angle}deg)`;
 }
@@ -549,12 +553,26 @@ async function generateMission() {
 
     if (m) { dataSource = m._source; } else {
         indicator.innerText = `Lade Auftrag aus lokaler Datenbank...`;
-        dataSource = "Lokale DB"; // Setze Fallback-Quelle explizit
+        dataSource = "Lokale DB"; 
         if (isPOI) {
             m = generateDynamicPOIMission(dest.n, maxSeats); paxText = m.payloadText; cargoText = m.cargoText; dataSource = "Wikipedia GeoSearch";
         } else if (typeof missions !== 'undefined') {
-            const availM = missions.filter(ms => (nav.dist < 50 || ms.cat === "std"));
-            m = availM[Math.floor(Math.random()*availM.length)] || missions[0];
+            let availM = missions.filter(ms => (nav.dist < 50 || ms.cat === "std"));
+            
+            // SHUFFLE-BAG SYSTEM: Bereits gespielte Missionen aussortieren
+            let history = JSON.parse(localStorage.getItem('ga_std_history')) || [];
+            let freshM = availM.filter(ms => !history.includes(ms.t));
+            
+            // Wenn der Stapel leer ist, History löschen und neu mischen!
+            if (freshM.length === 0) { freshM = availM; history = []; }
+            
+            m = freshM[Math.floor(Math.random() * freshM.length)] || missions[0];
+            
+            // Gespielte Mission merken (max. die letzten 30 merken)
+            history.push(m.t);
+            if(history.length > 30) history.shift();
+            localStorage.setItem('ga_std_history', JSON.stringify(history));
+
             if(dataSource === "Generiert") dataSource = "GitHub Airport DB";
             if (m.cat === "trn" || m.cat === "cargo") { paxText = "0 PAX"; }
         }
@@ -612,7 +630,6 @@ async function generateMission() {
             else { led.classList.add('led-red'); } 
         }
         
-        // AUTOMATISCH SPEICHERN
         setTimeout(() => saveMissionState(), 1000);
     }, 800); 
 }
@@ -620,9 +637,6 @@ async function generateMission() {
 /* =========================================================
    7. KARTE (LEAFLET, KARTENTISCH & MESS-WERKZEUG)
    ========================================================= */
-let measureMode = false, measurePoints = [], measurePolyline = null, measureMarkers = [], measureTooltip = null;
-let routeWaypoints = [], routeMarkers = [], currentSName = "", currentDName = "";
-
 const hitBoxHtml = (color) => `<div class="pin-hitbox"><div class="pin-dot" style="background-color: ${color};"></div></div>`;
 const hitBoxIcon = (color) => L.divIcon({ className: 'custom-pin', html: hitBoxHtml(color), iconSize: [34, 34], iconAnchor: [17, 17] });
 
@@ -741,14 +755,37 @@ function updateRoutePerformance() {
 
 function initMapBase() {
     if(map) return;
-    const aeroMap = L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { attribution: 'AeroData / Navigraph' });
-    const darkMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: 'CartoDB' });
+    
+    // 1. BASE MAPS (Untergrund)
     const topoMap = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: 'OpenTopoMap' });
+    // NEU: Reine 3D-Geländekarte ohne störenden Text!
+    const topoLightMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' }); 
     const satMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' });
+    const darkMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: 'CartoDB' });
+    const lightMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: 'CartoDB' });
 
-    map = L.map('map', { layers: [aeroMap], attributionControl: false }).setView([51.1657, 10.4515], 6);
-    const baseMaps = { "🛩️ VFR Lufträume (Aero)": aeroMap, "⛰️ Topografie (VFR)": topoMap, "🌑 Dark Mode (Clean)": darkMap, "🛰️ Satellit (Esri)": satMap };
-    L.control.layers(baseMaps).addTo(map);
+    // 2. OVERLAY MAP (VFR Infos)
+    const aeroOverlay = L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { 
+        attribution: 'AeroData / Navigraph',
+        opacity: 0.65 
+    });
+
+    // Startet standardmäßig mit Topo-Karte UND dem transparenten VFR-Overlay darüber
+    map = L.map('map', { layers: [topoMap, aeroOverlay], attributionControl: false }).setView([51.1657, 10.4515], 6);
+    
+    const baseMaps = { 
+        "⛰️ Topografie (Mit Text)": topoMap, 
+        "🗺️ Terrain (Ohne Text)": topoLightMap,
+        "🛰️ Satellit": satMap, 
+        "🌑 Dark Mode (Clean)": darkMap,
+        "📝 Blank Mode (Weiß)": lightMap
+    };
+    
+    const overlayMaps = {
+        "🛩️ VFR Lufträume (Overlay)": aeroOverlay
+    };
+
+    L.control.layers(baseMaps, overlayMaps).addTo(map);
     
     const fsControl = L.control({position: 'topleft'});
     fsControl.onAdd = function() {
@@ -810,15 +847,16 @@ function toggleMapTable() {
 /* =========================================================
    8. POLAROID MINIMAP
    ========================================================= */
-let miniMap, miniRoutePolyline, miniMapMarkers = [];
-
 function updateMiniMap() {
     const miniContainer = document.getElementById('miniMap');
     if (!miniContainer || miniContainer.offsetParent === null) return; 
     
     if (!miniMap) {
         miniMap = L.map('miniMap', { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, attributionControl: false });
+        
+        // Stapelt die Karten für den perfekten Aviation-Look auf dem Foto
         L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png').addTo(miniMap);
+        L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { opacity: 0.65 }).addTo(miniMap);
     }
     
     if (routeWaypoints && routeWaypoints.length > 0) {
@@ -882,7 +920,7 @@ function loadTutorialNotes() {
         let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
         let timeOffset = Date.now();
         tutorialNotes.forEach((tn, idx) => {
-            notes.push({ ...tn, id: timeOffset + idx }); // Neue IDs vergeben, um Konflikte zu vermeiden
+            notes.push({ ...tn, id: timeOffset + idx });
         });
         localStorage.setItem('ga_pinboard', JSON.stringify(notes));
         renderNotes();
@@ -939,7 +977,6 @@ function pinCurrentFlight() {
         return;
     }
 
-    // Aktuellen Status komplett einfrieren (identisch zu Auto-Save)
     const state = {
         mTitle: document.getElementById('mTitle').innerHTML, mStory: document.getElementById('mStory').innerText,
         mDepICAO: document.getElementById("mDepICAO").innerText, mDepName: document.getElementById("mDepName").innerText,
@@ -963,10 +1000,8 @@ function pinCurrentFlight() {
     
     localStorage.setItem('ga_pinboard', JSON.stringify(notes));
     
-    // Pinnwand sofort aktualisieren, damit der Zettel live aufploppt!
     renderNotes();
     
-    // Nerviges Alert-Popup NUR anzeigen, wenn das Brett gerade unsichtbar ist
     if (!document.getElementById('pinboardOverlay').classList.contains('active')) {
         alert("📌 Flugauftrag erfolgreich ans schwarze Brett geheftet!");
     }
@@ -977,9 +1012,8 @@ function loadPinnedFlight(id) {
     const note = notes.find(n => n.id === id);
     if (note && note.flightData) {
         restoreMissionState(note.flightData);
-        togglePinboard(); // Pinnwand schließen
+        togglePinboard(); 
         setTimeout(() => {
-            // Karte fokussieren, falls Wegpunkte geladen wurden
             if (map && routeWaypoints.length >= 2) {
                 map.fitBounds(L.latLngBounds(routeWaypoints), { padding: [40, 40] });
                 updateMiniMap();
@@ -994,25 +1028,26 @@ function loadPinnedFlight(id) {
 function exportMission() {
     if (document.getElementById("briefingBox").style.display !== "block" || !currentMissionData) return;
     
-    // Aktuellen Status komplett einfrieren
-    const state = {
-        mTitle: document.getElementById('mTitle').innerHTML, mStory: document.getElementById('mStory').innerText,
-        mDepICAO: document.getElementById("mDepICAO").innerText, mDepName: document.getElementById("mDepName").innerText,
-        mDepCoords: document.getElementById("mDepCoords").innerText, mDepRwy: document.getElementById("mDepRwy").innerText,
-        destIcon: document.getElementById("destIcon").innerText, mDestICAO: document.getElementById("mDestICAO").innerText,
-        mDestName: document.getElementById("mDestName").innerText, mDestCoords: document.getElementById("mDestCoords").innerText,
-        mDestRwy: document.getElementById("mDestRwy").innerText, mPay: document.getElementById("mPay").innerText,
-        mWeight: document.getElementById("mWeight").innerText, mDistNote: document.getElementById("mDistNote").innerText,
-        mHeadingNote: document.getElementById("mHeadingNote").innerText, mETENote: document.getElementById("mETENote").innerText,
-        wikiDescText: document.getElementById("wikiDescText").innerText, isPOI: document.getElementById("destRwyContainer").style.display === "none",
-        currentMissionData: currentMissionData, routeWaypoints: routeWaypoints, currentStartICAO: currentStartICAO,
-        currentDestICAO: currentDestICAO, currentSName: currentSName, currentDName: currentDName
-    };
+    // 1. Wegpunkte komprimieren: Aus Objekten {lat: 51, lng: 10} werden winzige Arrays [51, 10]
+    const wps = routeWaypoints.map(wp => [parseFloat(wp.lat.toFixed(4)), parseFloat((wp.lng||wp.lon).toFixed(4))]);
 
-    // In einen Base64-String komprimieren (encodeURIComponent schützt Emojis und Umlaute)
-    const code = btoa(encodeURIComponent(JSON.stringify(state)));
+    // 2. Array-Kompression: Wir werfen alle langen JSON-Namen weg und speichern nur die rohen Werte!
+    const pack = [
+        document.getElementById('mTitle').innerHTML, document.getElementById('mStory').innerText,
+        document.getElementById("mDepICAO").innerText, document.getElementById("mDepName").innerText,
+        document.getElementById("mDepCoords").innerText, document.getElementById("mDepRwy").innerText,
+        document.getElementById("destIcon").innerText, document.getElementById("mDestICAO").innerText,
+        document.getElementById("mDestName").innerText, document.getElementById("mDestCoords").innerText,
+        document.getElementById("mDestRwy").innerText, document.getElementById("mPay").innerText,
+        document.getElementById("mWeight").innerText, document.getElementById("mDistNote").innerText,
+        document.getElementById("mHeadingNote").innerText, document.getElementById("mETENote").innerText,
+        document.getElementById("wikiDescText").innerText, document.getElementById("destRwyContainer").style.display === "none" ? 1 : 0,
+        currentMissionData, wps, currentStartICAO, currentDestICAO, currentSName, currentDName
+    ];
+
+    // 3. Stringify, URL-Safe machen und Base64 encodieren
+    const code = btoa(encodeURIComponent(JSON.stringify(pack)));
     
-    // In die Zwischenablage kopieren
     navigator.clipboard.writeText(code).then(() => {
         alert("🔗 Mission Code kopiert!\n\nDu kannst ihn jetzt einfügen und an deine Fliegerkollegen schicken.");
     }).catch(err => {
@@ -1026,8 +1061,23 @@ function importMission() {
     
     try {
         // Code entschlüsseln
-        const state = JSON.parse(decodeURIComponent(atob(code.trim())));
-        if (!state || !state.currentMissionData) throw new Error("Ungültiges Format");
+        const pack = JSON.parse(decodeURIComponent(atob(code.trim())));
+        
+        // Sicherheits-Check: Ist es unser neues Array-Format?
+        if (!Array.isArray(pack) || pack.length < 24) throw new Error("Ungültiges oder veraltetes Format");
+
+        // Wegpunkte wieder in das Format ausklappen, das die Leaflet-Karte versteht
+        const wps = pack[19].map(p => ({ lat: p[0], lng: p[1] }));
+
+        // Das Array wieder in das große, lesbare Status-Objekt übersetzen
+        const state = {
+            mTitle: pack[0], mStory: pack[1], mDepICAO: pack[2], mDepName: pack[3], mDepCoords: pack[4], mDepRwy: pack[5],
+            destIcon: pack[6], mDestICAO: pack[7], mDestName: pack[8], mDestCoords: pack[9], mDestRwy: pack[10],
+            mPay: pack[11], mWeight: pack[12], mDistNote: pack[13], mHeadingNote: pack[14], mETENote: pack[15],
+            wikiDescText: pack[16], isPOI: pack[17] === 1,
+            currentMissionData: pack[18], routeWaypoints: wps, 
+            currentStartICAO: pack[20], currentDestICAO: pack[21], currentSName: pack[22], currentDName: pack[23]
+        };
         
         let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
         if (notes.filter(n => n.type === 'flight').length >= 10) {
@@ -1059,7 +1109,6 @@ function renderNotes() {
     let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
     notes.forEach(note => {
         const div = document.createElement('div'); 
-        // Normale Notiz = gelb, Flug = blau
         div.className = note.type === 'flight' ? 'post-it flight-card' : 'post-it';
         div.style.left = note.x + 'px'; div.style.top = note.y + 'px'; div.style.transform = `rotate(${note.rot}deg)`;
         
@@ -1077,7 +1126,6 @@ function makeDraggable(element, noteId) {
     element.onmousedown = dragMouseDown; element.ontouchstart = dragMouseDown;
 
     function dragMouseDown(e) {
-        // Knöpfe von der Drag-Bewegung ausklammern
         if(e.target.className === 'post-it-del' || e.target.className === 'post-it-edit' || e.target.className === 'flight-load-btn') return; 
         e.preventDefault();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX, clientY = e.touches ? e.touches[0].clientY : e.clientY;
