@@ -94,6 +94,12 @@ window.onload = () => {
     renderLog();
     updateApiFuelMeter(); // API Zähler starten
 
+    // INITIALISIERUNG: Pinnwand Tutorial für neue Nutzer
+    if (!localStorage.getItem('ga_pinboard_init')) {
+        localStorage.setItem('ga_pinboard', JSON.stringify(tutorialNotes));
+        localStorage.setItem('ga_pinboard_init', 'true');
+    }
+
     const activeMission = localStorage.getItem('ga_active_mission');
     if (activeMission) {
         setTimeout(() => restoreMissionState(JSON.parse(activeMission)), 300);
@@ -617,12 +623,12 @@ async function generateMission() {
 let measureMode = false, measurePoints = [], measurePolyline = null, measureMarkers = [], measureTooltip = null;
 let routeWaypoints = [], routeMarkers = [], currentSName = "", currentDName = "";
 
-const hitBoxHtml = (color) => `<div style="background-color: transparent; width: 34px; height: 34px; display:flex; justify-content:center; align-items:center;"><div style="background-color: ${color}; border: 2px solid #222; width: 14px; height: 14px; border-radius: 50%;"></div></div>`;
+const hitBoxHtml = (color) => `<div class="pin-hitbox"><div class="pin-dot" style="background-color: ${color};"></div></div>`;
 const hitBoxIcon = (color) => L.divIcon({ className: 'custom-pin', html: hitBoxHtml(color), iconSize: [34, 34], iconAnchor: [17, 17] });
 
 const startIcon = hitBoxIcon('#44ff44'), destIcon  = hitBoxIcon('#ff4444');
-const wpIcon    = L.divIcon({ className: 'custom-pin', html: `<div style="background-color: transparent; width: 34px; height: 34px; display:flex; justify-content:center; align-items:center; cursor: move;"><div style="background-color: #fdfd86; border: 2px solid #222; width: 14px; height: 14px; border-radius: 50%;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
-const measureIcon = L.divIcon({ className: 'custom-pin', html: `<div style="background-color: transparent; width: 34px; height: 34px; display:flex; justify-content:center; align-items:center; cursor: move;"><div style="background-color: #fff; border: 2px solid #222; width: 12px; height: 12px; border-radius: 50%;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
+const wpIcon    = L.divIcon({ className: 'custom-pin', html: `<div class="pin-hitbox" style="cursor: move;"><div class="pin-dot" style="background-color: #fdfd86;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
+const measureIcon = L.divIcon({ className: 'custom-pin', html: `<div class="pin-hitbox" style="cursor: move;"><div class="pin-dot" style="background-color: #fff; width: 12px; height: 12px; min-width: 12px; min-height: 12px;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
 
 function toggleMeasureMode() {
     measureMode = !measureMode; const btn = document.getElementById('measureBtn');
@@ -735,40 +741,14 @@ function updateRoutePerformance() {
 
 function initMapBase() {
     if(map) return;
-    
-    // 1. BASE MAPS (Untergrund - per Radiobutton wählbar)
-    const topoMap = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: 'OpenTopoMap' });
-    // NEU: Blasse Version der Topo-Karte für perfekte Lesbarkeit
-    const topoLightMap = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: 'OpenTopoMap', opacity: 0.35 });
-    
-    const satMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' });
+    const aeroMap = L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { attribution: 'AeroData / Navigraph' });
     const darkMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: 'CartoDB' });
-    const lightMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: 'CartoDB' }); // Blanke/Helle Karte
+    const topoMap = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: 'OpenTopoMap' });
+    const satMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' });
 
-   // 2. OVERLAY MAP (VFR Infos - per Checkbox on top schaltbar)
-    const aeroOverlay = L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { 
-        attribution: 'AeroData / Navigraph',
-        opacity: 0.65,
-        maxNativeZoom: 12, // Höchste Zoom-Stufe, die der Server physisch hat
-        maxZoom: 20        // Erlaubt unserer App das digitale "Überzoomen" bis Stufe 20
-    });
-
-    // Wir starten jetzt standardmäßig mit der blassen Topo-Karte!
-    map = L.map('map', { layers: [topoLightMap, aeroOverlay], attributionControl: false }).setView([51.1657, 10.4515], 6);
-    
-    const baseMaps = { 
-        "🏔️ Topo Light (Blass)": topoLightMap, 
-        "⛰️ Topo (Stark)": topoMap, 
-        "🛰️ Satellit": satMap, 
-        "🗺️ Light Mode (Blank)": lightMap,
-        "🌑 Dark Mode": darkMap
-    };
-    
-    const overlayMaps = {
-        "🛩️ VFR Lufträume (Overlay)": aeroOverlay
-    };
-
-    L.control.layers(baseMaps, overlayMaps).addTo(map);
+    map = L.map('map', { layers: [aeroMap], attributionControl: false }).setView([51.1657, 10.4515], 6);
+    const baseMaps = { "🛩️ VFR Lufträume (Aero)": aeroMap, "⛰️ Topografie (VFR)": topoMap, "🌑 Dark Mode (Clean)": darkMap, "🛰️ Satellit (Esri)": satMap };
+    L.control.layers(baseMaps).addTo(map);
     
     const fsControl = L.control({position: 'topleft'});
     fsControl.onAdd = function() {
@@ -838,10 +818,7 @@ function updateMiniMap() {
     
     if (!miniMap) {
         miniMap = L.map('miniMap', { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, attributionControl: false });
-        
-        // Stapelt die Karten für den perfekten Aviation-Look auf dem Foto
         L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png').addTo(miniMap);
-        L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { opacity: 0.65 }).addTo(miniMap);
     }
     
     if (routeWaypoints && routeWaypoints.length > 0) {
@@ -889,8 +866,29 @@ function renderLog() {
 function clearLog() { if(confirm("Gesamtes Logbuch löschen?")) { localStorage.removeItem('ga_logbook'); localStorage.removeItem('last_icao_dest'); renderLog(); } }
 
 /* =========================================================
-   10. HANGAR PINNWAND (LOKAL)
+   10. HANGAR PINNWAND (LOKAL & TUTORIAL)
    ========================================================= */
+const tutorialNotes = [
+    { id: 101, text: "👋 WILLKOMMEN!\n\nZiehe diese Zettel umher, bearbeite sie (✏️) oder lösch sie (✖). Nutze das Brett für Checklisten oder Funk-Notizen.", x: 50, y: 50, rot: -2 },
+    { id: 102, text: "✈️ AUFTRÄGE\n\nStelle Start, Ziel und Distanz ein. Der Dispatcher sucht dir eine realistische Route oder einen coolen POI (für Rundflüge).", x: 260, y: 60, rot: 3 },
+    { id: 103, text: "🗺️ KARTENTISCH\n\n- Layer-Icon (oben rechts) für Topo/Satellit\n- Wegpunkte auf der Route verschieben\n- Neue Punkte: auf rote Linie klicken\n- Lineal: Distanzen messen", x: 500, y: 40, rot: -1 },
+    { id: 104, text: "🌤️ WETTER & AIP\n\nIm Briefing-Fenster (auf der Frontseite) findest du kleine Kippschalter. Damit öffnest du direkt METAR/TAF und die passenden Anflugkarten (AIP).", x: 80, y: 250, rot: 1 },
+    { id: 105, text: "🎨 COCKPIT DESIGN\n\nGeheimtipp:\nKlicke auf die SCHRAUBE oben links am Hauptpanel, um die Lackierung (Hintergrundfarbe) des Cockpits zu ändern!", x: 300, y: 260, rot: -3 },
+    { id: 106, text: "🤖 GEMINI API\n\nHol dir einen kostenlosen Google AI Studio Key. Trag ihn unten ein, und die KI generiert dir individuelle, historisch korrekte Flugaufträge zur Region!", x: 520, y: 240, rot: 2 }
+];
+
+function loadTutorialNotes() {
+    if(confirm("Möchtest du die Tutorial-Zettel laden? (Bestehende Zettel bleiben an der Pinnwand)")) {
+        let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
+        let timeOffset = Date.now();
+        tutorialNotes.forEach((tn, idx) => {
+            notes.push({ ...tn, id: timeOffset + idx }); // Neue IDs vergeben, um Konflikte zu vermeiden
+        });
+        localStorage.setItem('ga_pinboard', JSON.stringify(notes));
+        renderNotes();
+    }
+}
+
 function togglePinboard() {
     const board = document.getElementById('pinboardOverlay');
     const mapBoard = document.getElementById('mapTableOverlay');
@@ -933,15 +931,79 @@ function editNote(id) {
     }
 }
 
+function pinCurrentFlight() {
+    if (document.getElementById("briefingBox").style.display !== "block" || !currentMissionData) return;
+    let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
+    if (notes.filter(n => n.type === 'flight').length >= 10) {
+        alert("Das Board ist voll! Du kannst maximal 10 Flüge anheften. Bitte lösche alte Flüge von der Pinnwand (✖).");
+        return;
+    }
+
+    // Aktuellen Status komplett einfrieren (identisch zu Auto-Save)
+    const state = {
+        mTitle: document.getElementById('mTitle').innerHTML, mStory: document.getElementById('mStory').innerText,
+        mDepICAO: document.getElementById("mDepICAO").innerText, mDepName: document.getElementById("mDepName").innerText,
+        mDepCoords: document.getElementById("mDepCoords").innerText, mDepRwy: document.getElementById("mDepRwy").innerText,
+        destIcon: document.getElementById("destIcon").innerText, mDestICAO: document.getElementById("mDestICAO").innerText,
+        mDestName: document.getElementById("mDestName").innerText, mDestCoords: document.getElementById("mDestCoords").innerText,
+        mDestRwy: document.getElementById("mDestRwy").innerText, mPay: document.getElementById("mPay").innerText,
+        mWeight: document.getElementById("mWeight").innerText, mDistNote: document.getElementById("mDistNote").innerText,
+        mHeadingNote: document.getElementById("mHeadingNote").innerText, mETENote: document.getElementById("mETENote").innerText,
+        wikiDescText: document.getElementById("wikiDescText").innerText, isPOI: document.getElementById("destRwyContainer").style.display === "none",
+        currentMissionData: currentMissionData, routeWaypoints: routeWaypoints, currentStartICAO: currentStartICAO,
+        currentDestICAO: currentDestICAO, currentSName: currentSName, currentDName: currentDName
+    };
+
+    const routeText = `${currentStartICAO} ➔ ${currentDestICAO === "POI" ? currentMissionData.poiName : currentDestICAO}`;
+    notes.push({
+        id: Date.now(), type: "flight", flightData: state,
+        text: `✈️ <b>${routeText}</b><br><span style="font-size:11px; color:#555;">${currentMissionData.mission}</span><br><span style="font-size:11px;">${state.mDistNote}</span>`,
+        x: 350 + Math.floor(Math.random() * 100), y: 150 + Math.floor(Math.random() * 100), rot: Math.floor(Math.random() * 9) - 4
+    });
+    
+    localStorage.setItem('ga_pinboard', JSON.stringify(notes));
+    
+    // Pinnwand sofort aktualisieren, damit der Zettel live aufploppt!
+    renderNotes();
+    
+    // Nerviges Alert-Popup NUR anzeigen, wenn das Brett gerade unsichtbar ist
+    if (!document.getElementById('pinboardOverlay').classList.contains('active')) {
+        alert("📌 Flugauftrag erfolgreich ans schwarze Brett geheftet!");
+    }
+}
+
+function loadPinnedFlight(id) {
+    let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
+    const note = notes.find(n => n.id === id);
+    if (note && note.flightData) {
+        restoreMissionState(note.flightData);
+        togglePinboard(); // Pinnwand schließen
+        setTimeout(() => {
+            // Karte fokussieren, falls Wegpunkte geladen wurden
+            if (map && routeWaypoints.length >= 2) {
+                map.fitBounds(L.latLngBounds(routeWaypoints), { padding: [40, 40] });
+                updateMiniMap();
+            }
+        }, 300);
+    }
+}
+
 function renderNotes() {
     const board = document.getElementById('pinboard');
     if (!board) return;
     board.innerHTML = ''; 
     let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
     notes.forEach(note => {
-        const div = document.createElement('div'); div.className = 'post-it';
+        const div = document.createElement('div'); 
+        // Normale Notiz = gelb, Flug = blau
+        div.className = note.type === 'flight' ? 'post-it flight-card' : 'post-it';
         div.style.left = note.x + 'px'; div.style.top = note.y + 'px'; div.style.transform = `rotate(${note.rot}deg)`;
-        div.innerHTML = `<div class="post-it-pin"></div><div class="post-it-edit" onclick="editNote(${note.id})">✏️</div><div class="post-it-del" onclick="deleteNote(${note.id})">✖</div>${note.text.replace(/\n/g, '<br>')}`;
+        
+        if (note.type === 'flight') {
+            div.innerHTML = `<div class="post-it-pin"></div><div class="post-it-del" onclick="deleteNote(${note.id})">✖</div>${note.text}<button class="flight-load-btn" onclick="loadPinnedFlight(${note.id})">📂 Flug laden</button>`;
+        } else {
+            div.innerHTML = `<div class="post-it-pin"></div><div class="post-it-edit" onclick="editNote(${note.id})">✏️</div><div class="post-it-del" onclick="deleteNote(${note.id})">✖</div>${note.text.replace(/\n/g, '<br>')}`;
+        }
         makeDraggable(div, note.id); board.appendChild(div);
     });
 }
@@ -951,7 +1013,8 @@ function makeDraggable(element, noteId) {
     element.onmousedown = dragMouseDown; element.ontouchstart = dragMouseDown;
 
     function dragMouseDown(e) {
-        if(e.target.className === 'post-it-del' || e.target.className === 'post-it-edit') return; 
+        // Knöpfe von der Drag-Bewegung ausklammern
+        if(e.target.className === 'post-it-del' || e.target.className === 'post-it-edit' || e.target.className === 'flight-load-btn') return; 
         e.preventDefault();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX, clientY = e.touches ? e.touches[0].clientY : e.clientY;
         pos3 = clientX; pos4 = clientY;

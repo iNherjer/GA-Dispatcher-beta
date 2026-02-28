@@ -66,8 +66,9 @@ input[type=range]::-webkit-slider-thumb { appearance: none; height: 18px; width:
 #map { height: 200px; width: 100%; border-radius: 12px; margin-top: 15px; border: 1px solid #444; display: none; background: #f4f4f4; transition: filter 0.3s; }
 .map-fullscreen { position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 99999 !important; margin: 0 !important; border-radius: 0 !important; filter: none !important; }
 
-.custom-pin { display: flex; justify-content: center; align-items: center; }
-.custom-pin div { width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 6px rgba(0,0,0,0.8); }
+.custom-pin { display: flex; justify-content: center; align-items: center; background: transparent !important; border: none !important; }
+.pin-hitbox { width: 34px; height: 34px; display: flex; justify-content: center; align-items: center; background: transparent; cursor: pointer; }
+.pin-dot { width: 14px; height: 14px; min-width: 14px; min-height: 14px; border-radius: 50%; border: 2px solid #222; box-shadow: 0 0 6px rgba(0,0,0,0.8); box-sizing: border-box; flex-shrink: 0; }
 
 .briefing { margin-top: 15px; padding: 15px; background-color: #252525; border-radius: 10px; border: 1px solid #444; display: none; transition: all 0.3s; }
 .aero-info-box { background: #1e252b; padding: 14px 12px; border-radius: 8px; border-left: 4px solid var(--warn); margin-bottom: 12px; transition: all 0.3s; }
@@ -306,6 +307,13 @@ body.theme-retro .api-fuel-meter .api-scale { border-left: 3px solid #d93829 !im
 .post-it-edit { position: absolute; top: -8px; left: -8px; background: #4da6ff; color: white; width: 20px; height: 20px; border-radius: 50%; text-align: center; line-height: 20px; font-size: 10px; cursor: pointer; font-family: sans-serif; box-shadow: 1px 1px 3px rgba(0,0,0,0.5); transition: transform 0.1s; }
 .post-it-edit:hover, .post-it-del:hover { transform: scale(1.1); }
 .post-it-pin { position: absolute; top: 2px; left: 50%; transform: translateX(-50%); width: 8px; height: 8px; border-radius: 50%; background: #444; box-shadow: inset -1px -1px 2px rgba(0,0,0,0.5); }
+
+/* --- FLIGHT POST-ITS (GESPEICHERTE FLÜGE) --- */
+.briefing-save-pin { position: absolute; top: 12px; right: 12px; font-size: 22px; cursor: pointer; z-index: 10; transition: transform 0.2s; filter: drop-shadow(1px 2px 2px rgba(0,0,0,0.5)); }
+.briefing-save-pin:hover { transform: scale(1.2) rotate(10deg); }
+.post-it.flight-card { background: #e6f7ff; border: 1px solid #b3e0ff; }
+.flight-load-btn { background: var(--blue); color: #fff; border: 1px solid #222; padding: 6px; width: 100%; margin-top: 10px; cursor: pointer; font-weight: bold; border-radius: 3px; font-family: sans-serif; transition: background 0.2s; }
+.flight-load-btn:hover { background: #3388dd; }
 
 /* ==========================================================================
    11. KARTENTISCH (MAP TABLE)
