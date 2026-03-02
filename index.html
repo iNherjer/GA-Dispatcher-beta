@@ -154,7 +154,7 @@
                     </div>
                 </div>
                 <button class="radio-transfer-btn" onclick="swapDepDest()" title="DEP &harr; DEST tauschen">↔</button>
-                <div class="radio-knob"></div>
+                <div class="radio-knob" id="com2Knob" title="Klicken: Ziel löschen"></div>
             </div>
         </div>
 
@@ -266,10 +266,14 @@
         <div class="radio-module kln90b-module" id="kln90bModule" style="display:none;">
             <div class="radio-label">KLN 90B TSO</div>
             <div class="kln90b-body">
-                <!-- Volldisplay (volle Breite, kein Split) -->
+                <!-- Split-Display: links | divider | rechts -->
                 <div class="kln90b-display" id="gpsDisplay">
-                    <div class="kln90b-content" id="gpsContent">
-                        <div class="kln90b-line dim">NO DATA</div>
+                    <div class="kln90b-left" id="gpsLeft">
+                        <div class="kln90b-line dim">---</div>
+                    </div>
+                    <div class="kln90b-divider"></div>
+                    <div class="kln90b-right" id="gpsRight">
+                        <div class="kln90b-line">NO DATA</div>
                     </div>
                     <div class="kln90b-statusbar">
                         <span id="gpsModeLbl">FPL</span>
