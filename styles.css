@@ -432,31 +432,67 @@ body.theme-retro .wp-data { color: var(--piper-yellow); }
 .emergency-reset:active .emergency-reset-inner { transform: scale(0.9); box-shadow: inset 0 4px 8px rgba(0,0,0,0.8); }
 
 /* ==========================================================================
-   15. MOBILE OPTIMIERUNG (SMARTPHONES)
+   15. MOBILE OPTIMIERUNG (SMARTPHONES & TABLETS)
    ========================================================================== */
-@media (max-width: 850px) {
-    #mapTableOverlay .pinboard-scroll-area { padding: 0 !important; }
-    .maptable-content { width: 100% !important; height: 100% !important; border-radius: 0 !important; }
-    #map { width: 92% !important; height: 92% !important; border-radius: 6px !important; }
 
-    /* Pinnwand NUR horizontal scrollbar machen, Höhe exakt ans Display anpassen */
+/* ── iPhone (≤767px): Karte Vollbild, Pinnwand horizontal panbar ── */
+@media (max-width: 767px) {
+    #mapTableOverlay .pinboard-scroll-area { padding: 0 !important; }
+    .maptable-content { width: 100% !important; height: 100% !important; border-radius: 0 !important; background-size: 100% 100% !important; }
+    #map { width: 100% !important; height: 100% !important; border-radius: 0 !important; border: none !important; }
+
+    /* Pinnwand: nur horizontal panbar, kein Pinch-Zoom */
+    #pinboardOverlay { touch-action: pan-x; }
     #pinboardOverlay .pinboard-scroll-area {
-        display: block !important; 
-        overflow-x: auto !important; 
-        overflow-y: hidden !important; 
-        -webkit-overflow-scrolling: touch; 
-        padding: 0 !important; 
-        height: calc(100vh - 70px) !important; /* Exakte Displayhöhe abzüglich Menüleiste */
+        display: block !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        -webkit-overflow-scrolling: touch;
+        padding: 0 !important;
+        height: calc(100vh - 70px) !important;
     }
     .pinboard-content {
-        height: 100% !important; /* Zieht sich bis zum oberen und unteren Bildschirmrand */
-        width: auto !important; /* Breite wird nun magisch durch das Aspect-Ratio berechnet! */
-        aspect-ratio: 16 / 10 !important; /* Zwingt das Brett stur in sein natürliches Format */
-        background-size: 100% 100% !important; /* Spannt die Grafik EXAKT auf das div, kein Abschneiden mehr */
-        margin: 0 !important; 
+        height: 100% !important;
+        width: auto !important;
+        aspect-ratio: 16 / 10 !important;
+        background-size: 100% 100% !important;
+        margin: 0 !important;
         max-width: none !important;
         max-height: none !important;
-        border-radius: 0 !important; 
+        border-radius: 0 !important;
+    }
+}
+
+/* ── iPad (768px–1249px): Bild passt ans Display – kein Scroll, kein Pinch-Zoom ── */
+@media (min-width: 768px) and (max-width: 1249px) {
+    /* Kein Browser-Scroll und kein Pinch-Zoom auf den Overlays */
+    #mapTableOverlay, #pinboardOverlay { touch-action: none; }
+
+    /* Karte: Vollbild, Hintergrundbild gestreckt auf das Div */
+    #mapTableOverlay .pinboard-scroll-area { padding: 0 !important; }
+    .maptable-content { width: 100% !important; height: 100% !important; border-radius: 0 !important; background-size: 100% 100% !important; }
+    #map { width: 92% !important; height: 92% !important; border-radius: 6px !important; }
+
+    /* Pinnwand: zentriert, passt sich komplett ans Display an – nichts abgeschnitten */
+    #pinboardOverlay .pinboard-scroll-area {
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        overflow: hidden !important;
+        padding: 0 !important;
+        height: calc(100vh - 70px) !important;
+    }
+    .pinboard-content {
+        /* Nimmt die kleinste passende Dimension: entweder volle Breite
+           oder so breit, dass die Höhe ins Display passt – nie abgeschnitten */
+        width: min(100vw, calc((100vh - 70px) * 16 / 10)) !important;
+        height: auto !important;
+        aspect-ratio: 16 / 10 !important;
+        background-size: 100% 100% !important;
+        margin: 0 !important;
+        max-width: none !important;
+        max-height: none !important;
+        border-radius: 0 !important;
     }
 }
 
@@ -999,6 +1035,21 @@ body.theme-navcom .kln90b-module .radio-label {
 
 /* Drag Knobs Cursor */
 .drag-knob { cursor: ns-resize; } /* Zeigt Pfeile nach oben/unten an */
+
+/* KLN Loading-Animation: drei Punkte blinken nacheinander */
+@keyframes kln-dot {
+    0%, 60%, 100% { opacity: 0.15; }
+    30%            { opacity: 1;    }
+}
+.kln-loading-dots span {
+    display: inline-block;
+    animation: kln-dot 1.2s infinite;
+    font-size: 14px;
+    letter-spacing: 2px;
+}
+.kln-loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.kln-loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
 
 /* KLN 90B: mehr Höhe auf schmalen Mobilgeräten (iPhone Portrait) */
 @media (max-width: 480px) {

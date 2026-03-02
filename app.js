@@ -2019,7 +2019,7 @@ async function renderAirportInfo(left, right, type) {
         `<div class="kln90b-line dim" style="font-size:9px;">${lon}</div>`;
 
     // Runway-Daten: Overpass sofort parallel starten, Wikipedia im Hintergrund
-    right.innerHTML = '<div class="kln90b-line dim">LOADING...</div>';
+    right.innerHTML = '<div class="kln90b-line dim kln-loading-dots" style="margin-top:8px;"><span>●</span><span>●</span><span>●</span></div>';
 
     if (!runwayCache[icao] && data) {
         const trans = {asphalt:'Asphalt',concrete:'Beton',grass:'Gras',paved:'Asphalt',unpaved:'Unbefestigt',dirt:'Erde',gravel:'Schotter'};
