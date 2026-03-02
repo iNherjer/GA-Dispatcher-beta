@@ -75,17 +75,17 @@
         <div class="slider-container">
             <div class="slider-header">
                 <label class="slider-label">GPH</label>
-                <span id="gphDrum" class="drum-readout-container theme-color-text" style="font-weight:bold;">14</span>
+                <span id="gphDrum" class="drum-readout-container theme-color-text" style="font-weight:bold;">9</span>
             </div>
-            <input type="range" id="gphSlider" min="5" max="35" value="14" oninput="handleSliderChange('gph', this.value)">
+            <input type="range" id="gphSlider" min="5" max="35" value="9" oninput="handleSliderChange('gph', this.value)">
         </div>
 
         <div class="slider-container">
             <div class="slider-header">
                 <label class="slider-label">TAS (kts)</label>
-                <span id="tasDrum" class="drum-readout-container theme-color-text" style="font-weight:bold;">160</span>
+                <span id="tasDrum" class="drum-readout-container theme-color-text" style="font-weight:bold;">115</span>
             </div>
-            <input type="range" id="tasSlider" min="80" max="260" value="160" step="5" oninput="handleSliderChange('tas', this.value)">
+            <input type="range" id="tasSlider" min="80" max="260" value="115" step="5" oninput="handleSliderChange('tas', this.value)">
         </div>
         
         <div class="action-bar" id="classicActionBar">
@@ -108,51 +108,79 @@
 
     <div id="navcomInputs" class="radio-stack">
         
-        <div class="radio-row">
-            <div class="radio-module half-module">
-                <div class="radio-module-right-screws"></div>
-                <div class="radio-label">COM 1 - DEP</div>
-                <div class="radio-display-container">
-                    <div style="width: 100%; text-align: center;">
-                        <span class="lcd-label">ICAO</span>
-                        <input type="text" id="startLocRadio" class="lcd-input" value="EDTW" maxlength="4" style="width:100%;" oninput="this.value=this.value.toUpperCase(); document.getElementById('startLoc').value = this.value; updateMapFromInputs();">
-                    </div>
+        <div class="radio-module audio-panel" style="padding: 10px 12px;">
+            <div class="radio-module-right-screws"></div>
+            
+            <div class="audio-panel-inner">
+                <div class="marker-lights">
+                    <div class="marker-light mk-outer" id="mkO">O</div>
+                    <div class="marker-light mk-middle" id="mkM">M</div>
+                    <div class="marker-light mk-inner" id="mkI">I</div>
                 </div>
-                <div class="radio-knob"></div>
-            </div>
-            <div class="radio-module half-module">
-                <div class="radio-module-right-screws"></div>
-                <div class="radio-label">COM 2 - DEST</div>
-                <div class="radio-display-container">
-                    <div style="width: 100%; text-align: center;">
-                        <span class="lcd-label">ICAO</span>
-                        <input type="text" id="destLocRadio" class="lcd-input" placeholder="----" maxlength="4" style="width:100%;" oninput="this.value=this.value.toUpperCase(); document.getElementById('destLoc').value = this.value; updateMapFromInputs();">
-                    </div>
+                
+                <div class="audio-btn-grid">
+                    <div class="audio-btn active" id="btnAC-C172" onclick="applyNavComPreset(115, 9, 4, 'C172', this)">C172<div class="audio-led"></div></div>
+                    <div class="audio-btn" id="btnAC-PA24" onclick="applyNavComPreset(160, 14, 4, 'PA-24', this)">PA24<div class="audio-led"></div></div>
+                    <div class="audio-btn" id="btnAC-AERO" onclick="applyNavComPreset(220, 25, 6, 'AERO', this)">AERO<div class="audio-led"></div></div>
+                    <div class="audio-btn" id="btnToggleAI" onclick="toggleNavComAI(this)">KI Mode<div class="audio-led"></div></div>
+                    
+                    <div class="audio-btn" onclick="exportMission()">SAVE<div class="audio-led"></div></div>
+                    <div class="audio-btn" onclick="importMission()">LOAD<div class="audio-led"></div></div>
+                    <div class="audio-btn" id="btnToggleGPS" onclick="toggleGPSModule(this)">GPS<div class="audio-led"></div></div>
                 </div>
-                <div class="radio-knob"></div>
             </div>
         </div>
 
         <div class="radio-row">
             <div class="radio-module half-module">
                 <div class="radio-module-right-screws"></div>
-                <div class="radio-label">NAV 1 - TYPE</div>
+                <div class="radio-label">COM 1</div>
                 <div class="radio-display-container">
-                    <div style="width: 100%; text-align: center;">
-                        <select id="targetTypeRadio" class="lcd-input" style="width:100%;" onchange="document.getElementById('targetType').value = this.value">
+                    <div class="radio-disp-inner">
+                        <span class="lcd-label">DEP</span>
+                        <input type="text" id="startLocRadio" class="lcd-input" value="EDTW" maxlength="4" oninput="this.value=this.value.toUpperCase(); document.getElementById('startLoc').value = this.value; updateMapFromInputs();">
+                    </div>
+                </div>
+                <button class="radio-transfer-btn" onclick="swapDepDest()" title="DEP &harr; DEST tauschen">↔</button>
+                <div class="radio-knob"></div>
+            </div>
+            <div class="radio-module half-module">
+                <div class="radio-module-right-screws"></div>
+                <div class="radio-label">COM 2</div>
+                <div class="radio-display-container">
+                    <div class="radio-disp-inner">
+                        <span class="lcd-label">DEST</span>
+                        <input type="text" id="destLocRadio" class="lcd-input" placeholder="----" maxlength="4" oninput="this.value=this.value.toUpperCase(); document.getElementById('destLoc').value = this.value; updateMapFromInputs();">
+                    </div>
+                </div>
+                <button class="radio-transfer-btn" onclick="swapDepDest()" title="DEP &harr; DEST tauschen">↔</button>
+                <div class="radio-knob" id="com2Knob" title="Klicken: Ziel löschen"></div>
+            </div>
+        </div>
+
+        <div class="radio-row">
+            <div class="radio-module half-module">
+                <div class="radio-module-right-screws"></div>
+                <div class="radio-label">NAV 1</div>
+                <div class="radio-display-container">
+                    <div class="radio-disp-inner">
+                        <span class="lcd-label">TYPE</span>
+                        <select id="targetTypeRadio" class="lcd-input" onchange="document.getElementById('targetType').value = this.value">
                             <option value="apt">APT</option>
                             <option value="poi">POI</option>
                         </select>
                     </div>
                 </div>
+                <button class="radio-transfer-btn" onclick="cycleRadioOption('targetTypeRadio')" title="Nächste Option">↔</button>
                 <div class="radio-knob" onclick="cycleRadioOption('targetTypeRadio')" title="Klicken für nächste Option"></div>
             </div>
             <div class="radio-module half-module">
                 <div class="radio-module-right-screws"></div>
-                <div class="radio-label">NAV 2 - DIST</div>
+                <div class="radio-label">NAV 2</div>
                 <div class="radio-display-container">
-                    <div style="width: 100%; text-align: center;">
-                        <select id="distRangeRadio" class="lcd-input" style="width:100%;" onchange="document.getElementById('distRange').value = this.value">
+                    <div class="radio-disp-inner">
+                        <span class="lcd-label">DIST</span>
+                        <select id="distRangeRadio" class="lcd-input" onchange="document.getElementById('distRange').value = this.value">
                             <option value="any">RNDM</option>
                             <option value="short">10-50</option>
                             <option value="medium">50-99</option>
@@ -160,6 +188,7 @@
                         </select>
                     </div>
                 </div>
+                <button class="radio-transfer-btn" onclick="cycleRadioOption('distRangeRadio')" title="Nächste Option">↔</button>
                 <div class="radio-knob" onclick="cycleRadioOption('distRangeRadio')" title="Klicken für nächste Option"></div>
             </div>
         </div>
@@ -167,24 +196,27 @@
         <div class="radio-row">
             <div class="radio-module half-module">
                 <div class="radio-module-right-screws"></div>
-                <div class="radio-label">ADF 1 - REGN</div>
+                <div class="radio-label">ADF 1</div>
                 <div class="radio-display-container">
-                    <div style="width: 100%; text-align: center;">
-                        <select id="regionFilterRadio" class="lcd-input" style="width:100%;" onchange="document.getElementById('regionFilter').value = this.value">
+                    <div class="radio-disp-inner">
+                        <span class="lcd-label">REGN</span>
+                        <select id="regionFilterRadio" class="lcd-input" onchange="document.getElementById('regionFilter').value = this.value">
                             <option value="any">ALL</option>
                             <option value="de" selected>GER</option>
                             <option value="int">INT</option>
                         </select>
                     </div>
                 </div>
+                <button class="radio-transfer-btn" onclick="cycleRadioOption('regionFilterRadio')" title="Nächste Option">↔</button>
                 <div class="radio-knob" onclick="cycleRadioOption('regionFilterRadio')" title="Klicken für nächste Option"></div>
             </div>
             <div class="radio-module half-module">
                 <div class="radio-module-right-screws"></div>
-                <div class="radio-label">ADF 2 - HDG°</div>
+                <div class="radio-label">ADF 2</div>
                 <div class="radio-display-container">
-                    <div style="width: 100%; text-align: center;">
-                        <select id="dirPrefRadio" class="lcd-input" style="width:100%;" onchange="document.getElementById('dirPref').value = this.value">
+                    <div class="radio-disp-inner">
+                        <span class="lcd-label">HDG°</span>
+                        <select id="dirPrefRadio" class="lcd-input" onchange="document.getElementById('dirPref').value = this.value">
                             <option value="any">ANY</option>
                             <option value="N">N</option>
                             <option value="E">E</option>
@@ -193,6 +225,7 @@
                         </select>
                     </div>
                 </div>
+                <button class="radio-transfer-btn" onclick="cycleRadioOption('dirPrefRadio')" title="Nächste Option">↔</button>
                 <div class="radio-knob" onclick="cycleRadioOption('dirPrefRadio')" title="Klicken für nächste Option"></div>
             </div>
         </div>
@@ -200,23 +233,86 @@
         <div class="radio-module">
             <div class="radio-module-right-screws"></div>
             <div class="radio-label">XPDR - AIRCRAFT</div>
-            <div class="radio-display-container" style="gap: 15px; flex-grow: 1; justify-content: center;">
-                <div style="text-align: center;">
-                    <span class="lcd-label">TAS</span>
-                    <input type="text" id="tasRadio" class="lcd-input" value="160" maxlength="3" style="width:50px;" oninput="document.getElementById('tasSlider').value = this.value; handleSliderChange('tas', this.value);">
+            
+            <div class="radio-display-container" style="gap: 5px; flex-grow: 1; align-items: center; justify-content: space-around; padding: 4px 10px;">
+                
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="text-align: center;">
+                        <span class="lcd-label">TAS</span>
+                        <div id="tasRadioDisplay" class="lcd-input" style="width: 45px; pointer-events: none;">115</div>
+                    </div>
+                    <div class="radio-knob drag-knob" id="tasDragKnob" title="Ziehen zum Ändern"></div>
                 </div>
-                <div style="text-align: center;">
-                    <span class="lcd-label">GPH</span>
-                    <input type="text" id="gphRadio" class="lcd-input" value="14" maxlength="3" style="width:40px;" oninput="document.getElementById('gphSlider').value = this.value; handleSliderChange('gph', this.value);">
+
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="text-align: center;">
+                        <span class="lcd-label">GPH</span>
+                        <div id="gphRadioDisplay" class="lcd-input" style="width: 35px; pointer-events: none;">9</div>
+                    </div>
+                    <div class="radio-knob drag-knob" id="gphDragKnob" title="Ziehen zum Ändern"></div>
                 </div>
-                <div style="text-align: center;">
+
+                <div style="text-align: center; border-left: 2px solid #222; padding-left: 10px;">
                     <span class="lcd-label">PAX</span>
                     <select id="maxSeatsRadio" class="lcd-input" style="width:30px;" onchange="document.getElementById('maxSeats').value = this.value">
                         <option value="2">2</option><option value="4" selected>4</option><option value="6">6</option>
                     </select>
                 </div>
+
             </div>
-            <button class="radio-btn-exec" id="radioGenerateBtn" onclick="generateMission()">DISPATCH</button>
+        </div>
+
+        <!-- KLN 90B GPS Module -->
+        <div class="radio-module kln90b-module" id="kln90bModule" style="display:none;">
+            <div class="radio-label">KLN 90B TSO</div>
+            <div class="kln90b-body">
+                <!-- Split-Display: links | divider | rechts -->
+                <div class="kln90b-display" id="gpsDisplay">
+                    <div class="kln90b-left" id="gpsLeft">
+                        <div class="kln90b-line dim">---</div>
+                    </div>
+                    <div class="kln90b-divider"></div>
+                    <div class="kln90b-right" id="gpsRight">
+                        <div class="kln90b-line">NO DATA</div>
+                    </div>
+                    <div class="kln90b-statusbar">
+                        <span id="gpsModeLbl">FPL</span>
+                        <span id="gpsPageLbl">PG 1/1</span>
+                    </div>
+                </div>
+                <!-- Mode-Taster -->
+                <div class="kln90b-buttons">
+                    <button class="kln90b-btn active" data-mode="FPL">FPL</button>
+                    <button class="kln90b-btn" data-mode="DEP">DEP</button>
+                    <button class="kln90b-btn" data-mode="DEST">DEST</button>
+                    <button class="kln90b-btn" data-mode="AIP">AIP</button>
+                    <button class="kln90b-btn" data-mode="WX">WX</button>
+                </div>
+                <!-- Encoder-Reihe: links = zurück, rechts = vor -->
+                <div class="kln90b-encoder-row">
+                    <div class="kln90b-encoder" id="gpsEncoderL" title="Vorherige Seite ◂">
+                        <div class="kln90b-enc-inner"></div>
+                    </div>
+                    <div class="kln90b-encoder" id="gpsEncoderR" title="Nächste Seite ▸">
+                        <div class="kln90b-enc-inner"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="radio-module navcom-action-bar">
+            <div class="radio-module-right-screws"></div>
+            <div class="radio-label">CMD</div>
+            <div class="navcom-action-btns">
+                <div class="audio-btn navcom-exec-btn" id="radioGenerateBtn" onclick="generateMission()">
+                    <span class="audio-btn-label">DISPATCH</span>
+                    <div class="audio-led"></div>
+                </div>
+                <div class="audio-btn navcom-clear-btn" id="radioClearBtn" onclick="resetApp()">
+                    <span class="audio-btn-label">CLEAR</span>
+                    <div class="audio-led"></div>
+                </div>
+            </div>
         </div>
     </div>
     
