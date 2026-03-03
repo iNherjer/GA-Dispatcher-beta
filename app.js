@@ -869,18 +869,24 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
     ];
     
     const aptCategories = [
-        "Kulinarischer Ausflug ($100 Hamburger/Kuchen)", "Gemütlicher Vereinsausflug / Treffen", 
-        "Business-Charter (Alltäglich)", "Eilige, aber unspektakuläre Kleinfracht", 
-        "Promi / VIP-Transport", "Tierrettung / Tiertransport", 
-        "Spezielles Flugtraining (Seitenwind, Navigation)", "Flugplatz-Logistik (Ersatzteile, Crew-Shuttle)", 
-        "Kurioses / Ungewöhnlicher Privatflug"
+        "Kulinarischer Ausflug ($100 Burger, legendäre Pizza, Steak oder BBQ am Ziel)",
+        "Kaffee & Kuchen Run (Klassischer Nachmittagsausflug zum Flugplatz-Café)",
+        "Tagesausflug mit Freunden (Wandern, Action oder einfach abhängen am Zielort)",
+        "Städtetrip (Sightseeing, Kultur, 1-2 echte Highlights der Zielstadt erkunden)",
+        "Wellness-Urlaub / Romantischer Wochenendausflug mit der Frau/dem Partner",
+        "Besuch bei einem befreundeten Fliegerverein (Stammtisch, Fly-In, Austausch)",
+        "Flugplatz-Logistik (Ersatzteil für die Vereinsmaschine holen, Mechaniker-Shuttle)",
+        "Spezielles Flugtraining (Seitenwind, Navigation, Platzrunden-Drill am fremden Platz)",
+        "Business-Charter (Alltäglicher Flug für einen Architekten, Anwalt oder Bauleiter)",
+        "Eilige, aber unspektakuläre Kleinfracht (Dokumente, Ersatzteile)",
+        "Kurioses / Verrückter, aber friedlicher Privatflug",
+        "Tierrettung / Tiertransport" // Steht jetzt nur noch 1x drin, taucht also viel seltener auf
     ];
     
     const randomTheme = isPOI 
         ? poiCategories[Math.floor(Math.random() * poiCategories.length)] 
         : aptCategories[Math.floor(Math.random() * aptCategories.length)];
 
-    // Wir extrahieren die generierte Zahl aus "3 PAX", damit die KI ein Limit hat
     const maxPaxLimit = paxText.split(' ')[0];
 
     const prompt = `Du bist ein freundlicher, entspannter Flugdienstleiter in einem lokalen Fliegerclub oder kleinen Charterunternehmen.
@@ -908,6 +914,22 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
     const payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { response_mime_type: "application/json" } };
     const reqOptions = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) };
 
+    // VERSUCH 1: Gemini 3.0 Flash (Primary)
+    try {
+        const resFlash3 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`, reqOptions);
+        if (resFlash3.ok) {
+            const data = await resFlash3.json();
+            const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
+            incrementApiUsage('flash'); 
+            return { t: parsed.title, s: parsed.story, pax: parsed.pax, cargo: parsed.cargo, i: "📋", cat: "std", _source: "Gemini 3.0 Flash" };
+        } else {
+            console.warn("Gemini 3.0 Flash API Fehler/Quota. Wechsle zu 2.5 Flash...");
+        }
+    } catch (e) {
+        console.warn("Gemini 3.0 Flash fehlgeschlagen:", e);
+    }
+
+    // VERSUCH 2: Gemini 2.5 Flash (Fallback 1)
     try {
         const resFlash = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, reqOptions);
         if (resFlash.ok) {
@@ -915,15 +937,14 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
             const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
             incrementApiUsage('flash'); 
             return { t: parsed.title, s: parsed.story, pax: parsed.pax, cargo: parsed.cargo, i: "📋", cat: "std", _source: "Gemini 2.5 Flash" };
-        } else if (resFlash.status === 429) {
-            console.warn("Flash API Quota erreicht. Wechsle zu Lite...");
         } else {
-            throw new Error('Flash API Fehler: ' + resFlash.status);
+            console.warn("Gemini 2.5 Flash API Fehler/Quota. Wechsle zu Lite...");
         }
     } catch (e) {
-        console.warn("Gemini Flash fehlgeschlagen:", e);
+        console.warn("Gemini 2.5 Flash fehlgeschlagen:", e);
     }
 
+    // VERSUCH 3: Gemini 2.5 Flash Lite (Fallback 2)
     try {
         const resLite = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`, reqOptions);
         if (resLite.ok) {
@@ -1154,13 +1175,11 @@ async function generateMission() {
 
     document.getElementById("briefingBox").style.display = "block";
 
-    // Ziel-ICAO in Classic- und NavCom-Inputs eintragen (nur bei echtem Zielflughafen)
-    if (!isPOI) {
-        const destLocEl      = document.getElementById('destLoc');
-        const destLocRadioEl = document.getElementById('destLocRadio');
-        if (destLocEl)      destLocEl.value      = currentDestICAO;
-        if (destLocRadioEl) destLocRadioEl.value = currentDestICAO;
-    }
+    // Ziel-Feld (COM2 / Classic) nach dem Generieren direkt wieder leeren
+    const destLocEl      = document.getElementById('destLoc');
+    const destLocRadioEl = document.getElementById('destLocRadio');
+    if (destLocEl)      destLocEl.value      = '';
+    if (destLocRadioEl) destLocRadioEl.value = '';
 
     updateMap(start.lat, start.lon, dest.lat, dest.lon, currentStartICAO, dest.n);
 
@@ -1178,17 +1197,22 @@ async function generateMission() {
         if(needle) needle.style.transform = `translateX(-50%) rotate(-45deg)`; 
         
         if (led) { 
-            led.classList.remove('led-green', 'led-blue', 'led-red');
-            if (dataSource === "Gemini 2.5 Flash") { led.classList.add('led-blue'); } 
+            led.classList.remove('led-green', 'led-blue', 'led-red', 'led-flash3');
+            if (dataSource === "Gemini 3.0 Flash") { led.classList.add('led-flash3'); } 
+            else if (dataSource === "Gemini 2.5 Flash") { led.classList.add('led-blue'); } 
             else if (dataSource === "Gemini 2.5 Flash Lite") { led.classList.add('led-green'); } 
             else { led.classList.add('led-red'); } 
         }
 
         // Marker Lights: Blinken stoppen und finale Quelle anzeigen
         document.querySelectorAll('.marker-light').forEach(l => l.classList.remove('blinking', 'on'));
-        if (dataSource === "Gemini 2.5 Flash") document.getElementById('mkO').classList.add('on'); // Blau
-        else if (dataSource === "Gemini 2.5 Flash Lite") document.getElementById('mkM').classList.add('on'); // Amber
-        else document.getElementById('mkI').classList.add('on'); // Weiß (Lokal)
+        if (dataSource === "Gemini 3.0 Flash") { 
+            document.getElementById('mkO').classList.add('on'); // Blau
+            document.getElementById('mkM').classList.add('on'); // Amber (Grün gibt es beim KMA 26 nicht)
+        }
+        else if (dataSource === "Gemini 2.5 Flash") document.getElementById('mkO').classList.add('on'); 
+        else if (dataSource === "Gemini 2.5 Flash Lite") document.getElementById('mkM').classList.add('on'); 
+        else document.getElementById('mkI').classList.add('on');
         
         setTimeout(() => saveMissionState(), 1000);
         refreshGPSAfterDispatch();
