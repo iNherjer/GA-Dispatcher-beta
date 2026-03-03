@@ -861,27 +861,52 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
     const apiKey = apiKeyInput ? apiKeyInput.value.trim() : "";
     if (!apiKey) return null; 
 
-    const prompt = `Du bist ein erfahrener Dispatcher für die allgemeine Luftfahrt (General Aviation).
-    Erstelle ein realistisches Einsatzbriefing:
+    // TRICK: Wir zwingen die KI jedes Mal in eine andere Richtung, 
+    // damit sie nicht immer dieselben Standard-Missionen (wie AOG oder Lidar) nimmt!
+    const poiCategories = [
+        "Tourismus & Sightseeing", 
+        "Natur- & Umweltschutz (Beobachtung)", 
+        "Luftbildfotografie (Medien/Immobilien)", 
+        "Infrastruktur-Inspektion (Straßen/Brücken/Leitungen)", 
+        "Wissenschaftliche Datenerfassung", 
+        "Lokales Event / Großveranstaltung von oben",
+        "Kurioses / Verrückte Suchaktion"
+    ];
+    
+    const aptCategories = [
+        "Kulinarischer Ausflug ($100 Hamburger/Kuchen)", 
+        "Gemütlicher Vereinsausflug / Treffen", 
+        "Business-Charter (Alltäglich)", 
+        "Eilige, aber unspektakuläre Kleinfracht", 
+        "Promi / VIP-Transport", 
+        "Tierrettung / Tiertransport", 
+        "Spezielles Flugtraining (Seitenwind, Navigation)", 
+        "Flugplatz-Logistik (Ersatzteile, Crew-Shuttle)", 
+        "Kurioses / Ungewöhnlicher Privatflug"
+    ];
+    
+    const randomTheme = isPOI 
+        ? poiCategories[Math.floor(Math.random() * poiCategories.length)] 
+        : aptCategories[Math.floor(Math.random() * aptCategories.length)];
+
+    const prompt = `Du bist ein freundlicher, entspannter Flugdienstleiter in einem lokalen Fliegerclub oder kleinen Charterunternehmen.
+    Erstelle ein realistisches Einsatzbriefing für diesen Flug:
     Start: ${startName}
-    Ziel/Fokus: ${destName} ${isPOI ? '(POI / Wendepunkt)' : '(Zielflughafen)'}
+    Ziel: ${destName} ${isPOI ? '(POI / Wendepunkt)' : '(Zielflughafen)'}
     Distanz (Gesamt): ${dist} NM
     Zuladung: ${paxText}, ${cargoText} Fracht.
 
     WICHTIGE REGELN:
-    1. Antworte IMMER auf Deutsch!
-    2. Schreibe knapp, professionell und im rauen Ton eines echten Dispatchers.
-    3. Baue zwingend echte geografische, infrastrukturelle oder historische Fakten zur Zielregion ein.
+    1. Antworte IMMER auf Deutsch.
+    2. TONFALL: Entspannt, kumpelhaft und alltäglich. Keine übertriebene Dramatik, keine Actionfilm-Rhetorik! Fliegen ist Routine und macht Spaß.
+    3. THEMA VORGEGEBEN: Dein Auftrag MUSS sich zwingend um dieses Thema drehen: "${randomTheme}".
+    4. LOKALES WISSEN: Baue 1-2 echte geografische, infrastrukturelle oder kulturelle Fakten zu "${destName}" ganz natürlich in den Text ein, damit es authentisch wirkt.
     ${isPOI ? 
-    `4. RUNDFLUG-REGELN: Start/Landung ist ${startName}. Am POI (${destName}) wird NICHTS gelandet! 
-    5. AUFGABE: Passe den Flug an den Ort an! Nutze die volle Bandbreite: Struktur-/Trassenprüfung, Stau-Report, Abgas/Emissions-Messung, Lidar/Topo-Scan, Forst-Patrouille (Waldbrand/Wildtiere), VIP-Touren, Denkmalschutz oder Film-Drehs.
-    6. WILDCARD: In ca. 20% der Fälle darfst du komplett eskalieren und dir ein wildes, ungewöhnliches aber in der Realität der General Aviation mögliches Szenario ausdenken (z.B. entflohenes Zootier aus der Luft suchen, illegale Rave-Party im Wald scouten, UFO-Sichtung überprüfen).` 
-    : `4. ROUTEN-REGELN: Flug von ${startName} nach ${destName}.
-    5. AUFGABE: Wähle eine Mission aus diesen Bereichen: Privat/Verein ($100 Hamburger, Fly-In), Logistik/Business (AOG-Ersatzteil, Organtransport, Laborproben, VIP-Transfer, verletztes Reitpferd) ODER detailliertes Flugtraining (VOR-Navigation, Engine-Out Simulation, Short Field Landing, Steep Turns).
-    6. WILDCARD: In ca. 20% der Fälle darfst du dir einen völlig verrückten, einzigartigen Auftrag ausdenken (z.B. Rockstar flieht vor Paparazzi, eiliger Kurierflug mit streng geheimen Dokumenten, verdeckte Ermittler absetzen).`}
+    `5. RUNDFLUG-REGELN: Start und Landung ist ${startName}. Am POI (${destName}) wird NICHT gelandet, nur gekreist/beobachtet.` 
+    : `5. ROUTEN-REGELN: Normaler Streckenflug von ${startName} nach ${destName}.`}
 
     Antworte AUSSCHLIESSLICH als JSON. Keine Markdown-Formatierung.
-    Struktur: {"title": "Kurzer, knackiger Titel", "story": "Das Briefing (max 3-4 Sätze)"}`;
+    Struktur: {"title": "Kreativer, passender Titel (z.B. 'Kuchen-Express zum Bodensee' oder 'Brücken-Inspektion')", "story": "Das Briefing (max 3-4 Sätze, lockerer Ton)"}`;
 
     const payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { response_mime_type: "application/json" } };
     const reqOptions = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) };
@@ -892,7 +917,7 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
         if (resFlash.ok) {
             const data = await resFlash.json();
             const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
-            incrementApiUsage('flash'); // Zähler für die Tankanzeige
+            incrementApiUsage('flash'); 
             return { t: parsed.title, s: parsed.story, i: "📋", cat: "std", _source: "Gemini 2.5 Flash" };
         } else if (resFlash.status === 429) {
             console.warn("Flash API Quota erreicht (429). Wechsle zu Lite Modell...");
@@ -909,7 +934,7 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
         if (resLite.ok) {
             const data = await resLite.json();
             const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
-            incrementApiUsage('lite'); // Zähler für die Tankanzeige
+            incrementApiUsage('lite'); 
             return { t: parsed.title, s: parsed.story, i: "📋", cat: "std", _source: "Gemini 2.5 Flash Lite" };
         } else {
             console.warn("Lite API Fehler (Code: " + resLite.status + "). Wechsle zu lokaler Datenbank.");
