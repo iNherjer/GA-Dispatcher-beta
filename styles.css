@@ -449,7 +449,24 @@ body.theme-retro .wp-data { color: var(--piper-yellow); }
 @media (max-width: 767px) {
     #mapTableOverlay .pinboard-scroll-area { padding: 0 !important; }
     .maptable-content { width: 100% !important; height: 100% !important; border-radius: 0 !important; background-size: 100% 100% !important; }
-    #map { width: 100% !important; height: 100% !important; border-radius: 0 !important; border: none !important; }
+    
+    /* Karte mit 20px Rand, damit der Tisch sichtbar bleibt + abgerundete Ecken */
+    body:not(.map-is-fullscreen) #map { 
+        width: calc(100% - 40px) !important; 
+        height: calc(100% - 50px) !important; /* Unten etwas mehr Luft für die Home-Bar beim iPhone */
+        border-radius: 8px !important; 
+        border: 1px solid rgba(0,0,0,0.4) !important; 
+        box-shadow: 0 5px 15px rgba(0,0,0,0.6) !important;
+    }
+    
+    /* Im echten Vollbild-Modus (⛶) wieder den kompletten Screen ausfüllen */
+    body.map-is-fullscreen #map { 
+        width: 100% !important; 
+        height: 100% !important; 
+        border-radius: 0 !important; 
+        border: none !important; 
+        box-shadow: none !important;
+    }
 
     /* Pinnwand: nur horizontal panbar, kein Pinch-Zoom */
     #pinboardOverlay { touch-action: pan-x; }
