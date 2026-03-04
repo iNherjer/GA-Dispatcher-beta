@@ -45,7 +45,6 @@ function syncGPSWithTheme(newMode, wasNavcom) {
     const fp  = document.querySelector('.flightplan-container');
     const mod = document.getElementById('kln90bModule');
     if (newMode === 'navcom') {
-        // NavCom aktiv: GPS-Status wiederherstellen
         if (gpsState.visible) {
             if (mod) mod.style.display = 'flex';
             if (fp)  fp.style.display  = 'none';
@@ -55,7 +54,6 @@ function syncGPSWithTheme(newMode, wasNavcom) {
             if (fp)  fp.style.display  = '';
         }
     } else {
-        // Anderes Design: GPS immer ausblenden, Flugplan immer zeigen
         if (mod) mod.style.display = 'none';
         if (fp)  fp.style.display  = '';
     }
@@ -67,33 +65,25 @@ function syncToNavCom(radioId, value) {
     if (el.tagName === 'INPUT' || el.tagName === 'SELECT') {
         el.value = value;
     } else {
-        el.innerText = value; // Für die neuen DIV Displays (TAS/GPH)
+        el.innerText = value; 
     }
 }
 
-// NEU: Audio Panel Preset Klick-Logik
 function applyNavComPreset(t, g, s, n, btnElement) {
-    applyPreset(t, g, s, n); // Nutzt deine bestehende Funktion
-
-    // LEDs umschalten (Nur die ersten 3 Buttons sind Flugzeuge)
+    applyPreset(t, g, s, n); 
     document.getElementById('btnAC-C172').classList.remove('active');
     document.getElementById('btnAC-PA24').classList.remove('active');
     document.getElementById('btnAC-AERO').classList.remove('active');
     btnElement.classList.add('active');
-
-    // Werte für GPH und TAS anpassen
     document.getElementById('tasSlider').value = t;
     document.getElementById('gphSlider').value = g;
     handleSliderChange('tas', t);
     handleSliderChange('gph', g);
-
-    // Aktualisiere die NavCom-Anzeigen
     syncToNavCom('tasRadioDisplay', t);
     syncToNavCom('gphRadioDisplay', g);
     saveAudioButtonStates();
 }
 
-// NEU: Audio Panel AI Klick-Logik
 function toggleNavComAI(btnElement) {
     const aiToggleBtn = document.getElementById('aiToggle');
     if(aiToggleBtn) {
@@ -105,8 +95,6 @@ function toggleNavComAI(btnElement) {
     }
 }
 
-// NEU: Lässt die Encoder-Knöpfe rotieren und löst den Sync aus!
-// Transfer-Button: DEP ↔ DEST tauschen (Rückflug-Funktion)
 function swapDepDest() {
     const depRadio  = document.getElementById('startLocRadio');
     const destRadio = document.getElementById('destLocRadio');
@@ -114,11 +102,9 @@ function swapDepDest() {
     const destClassic = document.getElementById('destLoc');
     if (!depRadio || !destRadio) return;
 
-    // Wenn Ziel leer: Start = Ziel (gleicher Platz), auf POI umschalten
     if (!destRadio.value || !destRadio.value.trim()) {
         destRadio.value = depRadio.value;
         if (destClassic) destClassic.value = depRadio.value;
-        // Zieltyp auf POI umschalten
         const targetTypeSel = document.getElementById('targetType');
         if (targetTypeSel) {
             targetTypeSel.value = 'poi';
@@ -131,72 +117,61 @@ function swapDepDest() {
     const tempVal = depRadio.value;
     depRadio.value  = destRadio.value;
     destRadio.value = tempVal;
-
-    // Classic-Inputs synchron halten
     if (depClassic)  depClassic.value  = depRadio.value;
     if (destClassic) destClassic.value = destRadio.value;
-
     updateMapFromInputs();
 }
 
 function cycleRadioOption(selectId) {
     const selectEl = document.getElementById(selectId);
     if (!selectEl) return;
-    
-    // Nächste Option auswählen
     let nextIndex = selectEl.selectedIndex + 1;
-    if (nextIndex >= selectEl.options.length) nextIndex = 0; // Wrap around
+    if (nextIndex >= selectEl.options.length) nextIndex = 0; 
     selectEl.selectedIndex = nextIndex;
-    
-    // Wir werfen manuell ein 'change' Event, damit die originalen Formulare aktualisiert werden
     selectEl.dispatchEvent(new Event('change'));
 }
 
 function toggleNotes() {
-    const page1 = document.getElementById('notePage1');
-    const page2 = document.getElementById('notePage2');
-    if (!page1 || !page2) return;
-    if(page1.classList.contains('front-note')) {
-        page1.classList.replace('front-note', 'back-note');
-        page2.classList.replace('back-note', 'front-note');
+    const p1 = document.getElementById('notePage1');
+    const p2 = document.getElementById('notePage2');
+    const p3 = document.getElementById('notePage3');
+    if (!p1 || !p2 || !p3) return;
+
+    if(p1.classList.contains('front-note')) {
+        p1.className = 'mission-note-page third-note';
+        p2.className = 'mission-note-page front-note';
+        p3.className = 'mission-note-page back-note';
+    } else if(p2.classList.contains('front-note')) {
+        p2.className = 'mission-note-page third-note';
+        p3.className = 'mission-note-page front-note';
+        p1.className = 'mission-note-page back-note';
     } else {
-        page1.classList.replace('back-note', 'front-note');
-        page2.classList.replace('front-note', 'back-note');
+        p3.className = 'mission-note-page third-note';
+        p1.className = 'mission-note-page front-note';
+        p2.className = 'mission-note-page back-note';
     }
 }
 
-function toggleWikiPhoto(event) {
-    event.stopPropagation(); // Verhindert das Umblättern der Notizseite
-    const container = document.getElementById('wikiImageContainer');
+function toggleWikiPhoto(event, containerId) {
+    event.stopPropagation();
+    const container = document.getElementById(containerId);
+    if(!container) return;
     container.classList.toggle('photo-zoomed');
     
     let backdrop = document.getElementById('photo-backdrop');
     if (container.classList.contains('photo-zoomed')) {
-        // Bild ist vergrößert -> Dunklen Hintergrundschleier erzeugen
         if (!backdrop) {
             backdrop = document.createElement('div');
             backdrop.id = 'photo-backdrop';
             backdrop.style = 'position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); border-radius: 4px; z-index: 50; opacity: 0; transition: opacity 0.4s;';
-            
-            // Schleier an Seite 2 heften
-            document.getElementById('notePage2').appendChild(backdrop);
-            
-            // Kurzer Reflow-Trick, damit die Fade-Animation flüssig läuft
+            container.parentElement.appendChild(backdrop);
             void backdrop.offsetWidth;
             backdrop.style.opacity = '1';
-            
-            // Klick auf den Hintergrundschleier schließt das Bild ebenfalls
-            backdrop.onclick = function(e) {
-                e.stopPropagation();
-                toggleWikiPhoto(e);
-            };
+            backdrop.onclick = function(e) { e.stopPropagation(); toggleWikiPhoto(e, containerId); };
         }
-    } else {
-        // Bild wird verkleinert -> Hintergrundschleier ausblenden
-        if (backdrop) {
-            backdrop.style.opacity = '0';
-            setTimeout(() => backdrop.remove(), 400); // Warten bis Animation fertig ist
-        }
+    } else if (backdrop) {
+        backdrop.style.opacity = '0';
+        setTimeout(() => backdrop.remove(), 400);
     }
 }
 
@@ -244,7 +219,6 @@ function cyclePanelColor() {
 let map, polyline, markers = [], currentStartICAO, currentDestICAO, currentMissionData = null, selectedAC = "PA-24";
 let globalAirports = null, runwayCache = {};
 
-// Fetch mit Timeout-Schutz
 async function fetchWithTimeout(url, ms = 6000) {
     const ctrl = new AbortController();
     const tid  = setTimeout(() => ctrl.abort(), ms);
@@ -260,7 +234,7 @@ let routeWaypoints = [], routeMarkers = [], currentSName = "", currentDName = ""
 let miniMap, miniRoutePolyline, miniMapMarkers = [];
 
 /* =========================================================
-   DRAG-KNOB LOGIK (TAS & GPH durch Ziehen ändern)
+   DRAG-KNOB LOGIK
    ========================================================= */
 function initDragKnob(knobId, displayId, sliderId, min, max, type) {
     const knob = document.getElementById(knobId);
@@ -278,7 +252,7 @@ function initDragKnob(knobId, displayId, sliderId, min, max, type) {
         startY = e.touches ? e.touches[0].clientY : e.clientY;
         startX = e.touches ? e.touches[0].clientX : e.clientX;
         startVal = parseInt(slider.value) || min;
-        document.body.style.cursor = 'ns-resize'; // Mauszeiger fixieren
+        document.body.style.cursor = 'ns-resize'; 
         e.preventDefault();
     }
 
@@ -287,26 +261,20 @@ function initDragKnob(knobId, displayId, sliderId, min, max, type) {
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         
-        // Berechnung: Ziehen nach oben/rechts erhöht, unten/links verringert
-        // Faktor: ca. 1 Pixel = 1 Einheit (TAS) oder 0.2 Einheiten (GPH)
         let delta = Math.round((startY - clientY) + (clientX - startX));
-        if (type === 'gph') delta = Math.round(delta * 0.3); // GPH ändert sich langsamer
+        if (type === 'gph') delta = Math.round(delta * 0.3); 
         
         let newVal = startVal + delta;
         if (newVal < min) newVal = min;
         if (newVal > max) newVal = max;
 
-        // Display updaten
         display.innerText = newVal;
         slider.value = newVal;
         
-        // Knopf drehen (1 Einheit = 5 Grad Rotation)
         currentRotation = delta * 5; 
         knob.style.transform = `rotate(${currentRotation}deg)`;
 
-        // Live die restlichen System-Zähler updaten
         handleSliderChange(type, newVal);
-        // GPS FPL-Seite live aktualisieren (Fuel/Zeit-Berechnung)
         if (gpsState.visible && gpsState.mode === 'FPL') {
             refreshGPSAfterDispatch();
         }
@@ -315,7 +283,6 @@ function initDragKnob(knobId, displayId, sliderId, min, max, type) {
     function onEnd() {
         isDragging = false;
         document.body.style.cursor = 'default';
-        // Knopf federt optisch wieder zurück in Ausgangsstellung (Optional, aber cool)
         knob.style.transition = 'transform 0.3s ease';
         knob.style.transform = `rotate(0deg)`;
         setTimeout(() => knob.style.transition = '', 300);
@@ -347,7 +314,6 @@ window.onload = () => {
     renderLog();
     updateApiFuelMeter(); 
 
-    // INITIALISIERUNG: Pinnwand Tutorial für neue Nutzer
     if (!localStorage.getItem('ga_pinboard_init')) {
         localStorage.setItem('ga_pinboard', JSON.stringify(tutorialNotes));
         localStorage.setItem('ga_pinboard_init', 'true');
@@ -362,17 +328,14 @@ window.onload = () => {
         setTimeout(() => { refreshAllDrums(); }, 50);
     });
 
-    // Sync beim Start, damit das NavCom die korrekten Standardwerte zeigt
     syncToNavCom('startLocRadio', document.getElementById('startLoc').value);
     syncToNavCom('tasRadioDisplay', document.getElementById('tasSlider').value);
     syncToNavCom('gphRadioDisplay', document.getElementById('gphSlider').value);
     syncToNavCom('maxSeatsRadio', document.getElementById('maxSeats').value);
 
-    // Initialisiere die Drag-Knobs für das Audio Panel
     initDragKnob('tasDragKnob', 'tasRadioDisplay', 'tasSlider', 80, 260, 'tas');
     initDragKnob('gphDragKnob', 'gphRadioDisplay', 'gphSlider', 5, 35, 'gph');
     
-    // Setze die Audio-LED für KI entsprechend des Schalters
     if(aiToggleBtn && aiToggleBtn.checked) {
         const btnAI = document.getElementById('btnToggleAI');
         if(btnAI) btnAI.classList.add('active');
@@ -388,9 +351,10 @@ function saveAiToggle() { const t = document.getElementById('aiToggle'); if(t) l
 function saveMissionState() {
     if (document.getElementById("briefingBox").style.display !== "block") return;
     
-    // NEU: Bild-URL für das Polaroid auslesen und merken
-    const imgEl = document.getElementById("wikiImage");
-    const imgUrl = (imgEl && imgEl.style.backgroundImage !== 'url("")') ? imgEl.style.backgroundImage : "";
+    const imgDepEl = document.getElementById("wikiDepImage");
+    const imgDepUrl = (imgDepEl && imgDepEl.style.backgroundImage !== 'url("")') ? imgDepEl.style.backgroundImage : "";
+    const imgDestEl = document.getElementById("wikiDestImage");
+    const imgDestUrl = (imgDestEl && imgDestEl.style.backgroundImage !== 'url("")') ? imgDestEl.style.backgroundImage : "";
 
     const state = {
         mTitle: document.getElementById('mTitle').innerHTML,
@@ -398,19 +362,21 @@ function saveMissionState() {
         mDepICAO: document.getElementById("mDepICAO").innerText,
         mDepName: document.getElementById("mDepName").innerText,
         mDepCoords: document.getElementById("mDepCoords").innerText,
-        mDepRwy: '',   // Runway-Daten werden bei Restore neu geladen, nicht gecacht
+        mDepRwy: '',   
         destIcon: document.getElementById("destIcon").innerText,
         mDestICAO: document.getElementById("mDestICAO").innerText,
         mDestName: document.getElementById("mDestName").innerText,
         mDestCoords: document.getElementById("mDestCoords").innerText,
-        mDestRwy: '',  // Runway-Daten werden bei Restore neu geladen, nicht gecacht
+        mDestRwy: '',  
         mPay: document.getElementById("mPay").innerText,
         mWeight: document.getElementById("mWeight").innerText,
         mDistNote: document.getElementById("mDistNote").innerText,
         mHeadingNote: document.getElementById("mHeadingNote").innerText,
         mETENote: document.getElementById("mETENote").innerText,
-        wikiDescText: document.getElementById("wikiDescText").innerText,
-        wikiImageUrl: imgUrl, // <--- HIER wird das Bild gespeichert
+        wikiDepDescText: document.getElementById("wikiDepDescText") ? document.getElementById("wikiDepDescText").innerText : "",
+        wikiDestDescText: document.getElementById("wikiDestDescText") ? document.getElementById("wikiDestDescText").innerText : "",
+        wikiDepImageUrl: imgDepUrl,
+        wikiDestImageUrl: imgDestUrl, 
         isPOI: document.getElementById("destRwyContainer").style.display === "none",
         currentMissionData: currentMissionData,
         routeWaypoints: routeWaypoints,
@@ -431,17 +397,23 @@ async function restoreMissionState(state) {
     document.getElementById("mDestRwy").innerText = state.isPOI ? "" : "Sucht Pisten..."; document.getElementById("mPay").innerText = state.mPay;
     document.getElementById("mWeight").innerText = state.mWeight; document.getElementById("mDistNote").innerText = state.mDistNote;
     document.getElementById("mHeadingNote").innerText = state.mHeadingNote; document.getElementById("mETENote").innerText = state.mETENote;
-    document.getElementById("wikiDescText").innerText = state.wikiDescText;
     
-    // NEU: Bild wiederherstellen, falls vorhanden
-    const imgContainer = document.getElementById("wikiImageContainer");
-    const imgEl = document.getElementById("wikiImage");
-    if (state.wikiImageUrl && imgContainer && imgEl) {
-        imgEl.style.backgroundImage = state.wikiImageUrl;
-        imgContainer.style.display = 'block';
-    } else if (imgContainer) {
-        imgContainer.style.display = 'none';
-    }
+    if (document.getElementById("wikiDepDescText")) document.getElementById("wikiDepDescText").innerText = state.wikiDepDescText || "";
+    if (document.getElementById("wikiDestDescText")) document.getElementById("wikiDestDescText").innerText = state.wikiDestDescText || "";
+    
+    const imgDepContainer = document.getElementById("wikiDepImageContainer");
+    const imgDepEl = document.getElementById("wikiDepImage");
+    if (state.wikiDepImageUrl && imgDepContainer && imgDepEl) {
+        imgDepEl.style.backgroundImage = state.wikiDepImageUrl;
+        imgDepContainer.style.display = 'block';
+    } else if (imgDepContainer) { imgDepContainer.style.display = 'none'; }
+
+    const imgDestContainer = document.getElementById("wikiDestImageContainer");
+    const imgDestEl = document.getElementById("wikiDestImage");
+    if (state.wikiDestImageUrl && imgDestContainer && imgDestEl) {
+        imgDestEl.style.backgroundImage = state.wikiDestImageUrl;
+        imgDestContainer.style.display = 'block';
+    } else if (imgDestContainer) { imgDestContainer.style.display = 'none'; }
 
     document.getElementById("destRwyContainer").style.display = state.isPOI ? "none" : "block";
     const destSwitchRow = document.getElementById("destSwitchRow"); if(destSwitchRow) destSwitchRow.style.display = state.isPOI ? "none" : "flex";
@@ -450,7 +422,6 @@ async function restoreMissionState(state) {
     currentStartICAO = state.currentStartICAO; currentDestICAO = state.currentDestICAO;
     currentSName = state.currentSName; currentDName = state.currentDName;
 
-    // Formular-Inputs synchronisieren (Classic + NavCom Radio)
     const startLocEl = document.getElementById('startLoc');
     const destLocEl  = document.getElementById('destLoc');
     const startLocRadioEl = document.getElementById('startLocRadio');
@@ -463,7 +434,7 @@ async function restoreMissionState(state) {
     document.getElementById("briefingBox").style.display = "block";
     renderMainRoute(); setDrumCounter('distDrum', state.currentMissionData.dist);
     recalculatePerformance(); document.getElementById('searchIndicator').innerText = "📋 Gespeichertes Briefing geladen.";
-    // GPS-State für den geladenen Flug zurücksetzen
+    
     gpsState.mode = 'FPL';
     gpsState.subPage = 0;
     gpsState.maxPages = { FPL: 1, DEP: 2, DEST: 2, AIP: 2, WX: 2 };
@@ -471,9 +442,9 @@ async function restoreMissionState(state) {
     gpsState.metarCache = {};
     runwayCache = {};
     document.querySelectorAll('.kln90b-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'FPL'));
-    // GPS nach Mission-Restore aktualisieren
+    
     setTimeout(() => refreshGPSAfterDispatch(), 200);
-    // Pistendaten frisch laden (nicht aus altem localStorage-Cache)
+    
     if (currentStartICAO) {
         getAirportData(currentStartICAO).then(d => {
             if (d) fetchRunwayDetails(d.lat, d.lon, 'mDepRwy', currentStartICAO);
@@ -492,19 +463,21 @@ function resetApp() {
     currentMissionData = null; routeWaypoints = [];
     if(map) { routeMarkers.forEach(m => map.removeLayer(m)); if (polyline) map.removeLayer(polyline); if (window.hitBoxPolyline) map.removeLayer(window.hitBoxPolyline); }
     if (miniMap) { if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline); miniMapMarkers.forEach(m => miniMap.removeLayer(m)); miniMapMarkers = []; }
-    // Zielfeld leeren (Classic + NavCom Radio)
+    
     const destLocEl      = document.getElementById('destLoc');
     const destLocRadioEl = document.getElementById('destLocRadio');
+    const p1 = document.getElementById('notePage1'), p2 = document.getElementById('notePage2'), p3 = document.getElementById('notePage3');
+    if(p1 && p2 && p3) { p1.className = 'mission-note-page front-note'; p2.className = 'mission-note-page back-note'; p3.className = 'mission-note-page third-note'; }
     if (destLocEl)      destLocEl.value      = '';
     if (destLocRadioEl) destLocRadioEl.value = '';
 
     document.getElementById('searchIndicator').innerText = "System bereit."; setDrumCounter('distDrum', 0); recalculatePerformance();
     const rBtn = document.getElementById('radioGenerateBtn');
     if(rBtn) rBtn.classList.remove('active');
-    // GPS-State und alle Caches zurücksetzen
+    
     gpsState.wikiCache = {};
     gpsState.metarCache = {};
-    runwayCache = {}; // Pisten-Cache leeren, damit Wikipedia neu abgefragt wird
+    runwayCache = {}; 
     gpsState.mode = 'FPL';
     gpsState.subPage = 0;
     gpsState.maxPages = { FPL: 1, DEP: 2, DEST: 2, AIP: 2, WX: 2 };
@@ -549,7 +522,6 @@ function recalculatePerformance() {
     if (!currentMissionData) return;
     const tas = parseInt(document.getElementById("tasSlider").value), gph = parseInt(document.getElementById("gphSlider").value), dist = currentMissionData.dist;
     setDrumCounter('timeDrum', Math.round((dist / tas) * 60)); setDrumCounter('fuelDrum', Math.ceil((dist / tas * gph) + (0.75 * gph)));
-    // GPS FPL live aktualisieren (zeigt Fuel/Zeit/Distanz)
     if (gpsState.visible && gpsState.mode === 'FPL') renderGPS();
     setTimeout(() => saveMissionState(), 500);
 }
@@ -617,7 +589,6 @@ async function loadGlobalAirports() {
 }
 
 async function getAirportData(icao) {
-    // Priorität: 1. GitHub-Datenbank  2. Nominatim  3. coreDB (letzter Ausweg)
     await loadGlobalAirports();
     if (globalAirports[icao]) return { icao: icao, n: globalAirports[icao].name || globalAirports[icao].city, lat: globalAirports[icao].lat, lon: globalAirports[icao].lon };
     try {
@@ -658,29 +629,25 @@ async function findWikipediaPOI(lat, lon, minNM, maxNM, dirPref) {
     return null;
 }
 
-async function fetchAreaDescription(lat, lon, elementId, exactTitle = null, icaoCode = null) {
-    // Reset Bild beim Neuladen
-    const imgContainer = document.getElementById('wikiImageContainer');
-    const imgElement = document.getElementById('wikiImage');
+async function fetchAreaDescription(lat, lon, elementId, exactTitle = null, icaoCode = null, imgContainerId = 'wikiDestImageContainer', imgElId = 'wikiDestImage') {
+    const imgContainer = document.getElementById(imgContainerId);
+    const imgElement = document.getElementById(imgElId);
+    const textElement = document.getElementById(elementId);
     if (imgContainer) imgContainer.style.display = 'none';
+    if (!textElement) return; // Fail safe
 
     try {
         let titleToFetch = exactTitle;
-        
-        // Nutze unsere clevere Flughafen-Suche für exakte Treffer!
-        if (!titleToFetch && icaoCode) {
-            titleToFetch = await getWikiTitleForAirport(icaoCode, lat, lon);
-        }
+        if (!titleToFetch && icaoCode) titleToFetch = await getWikiTitleForAirport(icaoCode, lat, lon);
 
         if (!titleToFetch) {
             const geoRes = await fetch(`https://de.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}|${lon}&gsradius=10000&gslimit=1&format=json&origin=*`);
             const geoData = await geoRes.json();
             if (geoData?.query?.geosearch?.length > 0) titleToFetch = geoData.query.geosearch[0].title;
-            else { document.getElementById(elementId).innerText = "Keine regionalen Wikipedia-Daten gefunden."; return; }
+            else { textElement.innerText = "Keine regionalen Wikipedia-Daten gefunden."; return; }
         }
 
         if (titleToFetch) {
-            // NEU: prop=extracts|pageimages holt Text UND das Titelbild!
             const extRes = await fetch(`https://de.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=true&explaintext=true&exsentences=4&pithumbsize=400&titles=${encodeURIComponent(titleToFetch)}&format=json&origin=*`);
             const extData = await extRes.json();
             
@@ -688,9 +655,8 @@ async function fetchAreaDescription(lat, lon, elementId, exactTitle = null, icao
                 const pageId = Object.keys(extData.query.pages)[0];
                 if (pageId !== "-1" && extData.query.pages[pageId].extract) {
                     let prefix = exactTitle ? "" : `Region (${titleToFetch}):\n\n`;
-                    document.getElementById(elementId).innerText = prefix + extData.query.pages[pageId].extract;
+                    textElement.innerText = prefix + extData.query.pages[pageId].extract;
                     
-                    // BILD VERARBEITUNG
                     const imgUrl = extData.query.pages[pageId].thumbnail?.source;
                     if (imgUrl && imgContainer && imgElement) {
                         imgElement.style.backgroundImage = `url('${imgUrl}')`;
@@ -700,25 +666,34 @@ async function fetchAreaDescription(lat, lon, elementId, exactTitle = null, icao
                 }
             }
         }
-        document.getElementById(elementId).innerText = "Der Artikel konnte nicht von Wikipedia abgerufen werden.";
-    } catch(e) { document.getElementById(elementId).innerText = "Wiki-Daten konnten nicht geladen werden."; }
+        textElement.innerText = "Der Artikel konnte nicht von Wikipedia abgerufen werden.";
+    } catch(e) { textElement.innerText = "Wiki-Daten konnten nicht geladen werden."; }
 }
 
 async function fetchRunwayDetails(lat, lon, elementId, icaoCode) {
     const domEl = document.getElementById(elementId);
+    if (!domEl) return;
     const hColor = document.body.classList.contains('theme-retro') ? 'var(--piper-yellow)' : 'var(--warn)';
-    if (icaoCode && runwayCache[icaoCode]) { domEl.innerText = runwayCache[icaoCode]; domEl.style.color = hColor; return; }
+    
+    // Check Cache first
+    if (icaoCode && runwayCache[icaoCode]) { 
+        domEl.innerText = runwayCache[icaoCode]; 
+        domEl.style.color = hColor; 
+        if (icaoCode === currentStartICAO && document.getElementById('wikiDepRwyText')) document.getElementById('wikiDepRwyText').innerText = 'Pisten: ' + domEl.innerText;
+        if (icaoCode === currentDestICAO && document.getElementById('wikiDestRwyText')) document.getElementById('wikiDestRwyText').innerText = 'Pisten: ' + domEl.innerText;
+        return; 
+    }
 
-    // Primär: Wikipedia-Abfrage
     const wikiResult = await fetchRunwayFromWikipedia(icaoCode, lat, lon);
     if (wikiResult) {
         if (icaoCode) runwayCache[icaoCode] = wikiResult;
         domEl.innerText = wikiResult;
         domEl.style.color = hColor;
+        if (icaoCode === currentStartICAO && document.getElementById('wikiDepRwyText')) document.getElementById('wikiDepRwyText').innerText = 'Pisten: ' + domEl.innerText;
+        if (icaoCode === currentDestICAO && document.getElementById('wikiDestRwyText')) document.getElementById('wikiDestRwyText').innerText = 'Pisten: ' + domEl.innerText;
         return;
     }
 
-    // Fallback: OpenStreetMap Overpass – alle Pisten sammeln, nicht nur die erste
     try {
         const res = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(`[out:json][timeout:5];way["aeroway"="runway"](around:2000,${lat},${lon});out tags;`)}`);
         const data = await res.json();
@@ -736,22 +711,26 @@ async function fetchRunwayDetails(lat, lon, elementId, icaoCode) {
                 const len  = el.tags.length  ? ` · ${Math.round(el.tags.length)}m` : '';
                 parts.push(`${key} – ${surf}${len}`);
             }
-            if (parts.length > 0) { domEl.innerText = parts.join('\n'); domEl.style.color = hColor; return; }
+            if (parts.length > 0) { 
+                domEl.innerText = parts.join('\n'); 
+                domEl.style.color = hColor; 
+                if (icaoCode === currentStartICAO && document.getElementById('wikiDepRwyText')) document.getElementById('wikiDepRwyText').innerText = 'Pisten: ' + domEl.innerText;
+                if (icaoCode === currentDestICAO && document.getElementById('wikiDestRwyText')) document.getElementById('wikiDestRwyText').innerText = 'Pisten: ' + domEl.innerText;
+                return; 
+            }
         }
     } catch (e) {}
     domEl.innerText = "Keine Daten gefunden"; domEl.style.color = "#888";
+    if (icaoCode === currentStartICAO && document.getElementById('wikiDepRwyText')) document.getElementById('wikiDepRwyText').innerText = 'Pisten: ' + domEl.innerText;
+    if (icaoCode === currentDestICAO && document.getElementById('wikiDestRwyText')) document.getElementById('wikiDestRwyText').innerText = 'Pisten: ' + domEl.innerText;
 }
 
-// Globaler Cache
 const wikiTitleCache = {};
 
-// NEU: Zentrale, smarte Titelsuche mit High-Speed Wikidata!
 async function getWikiTitleForAirport(icao, lat, lon) {
     if (wikiTitleCache[icao]) return wikiTitleCache[icao];
 
     try {
-        // 1. ABSOLUTE PRIORITÄT: Wikidata P239 (ICAO) Suchmaschine.
-        // Das ist die "Lichtgeschwindigkeits"-Suche, die fast immer exakt 100% den richtigen Artikel trifft!
         const wdRes = await fetchWithTimeout(`https://de.wikipedia.org/w/api.php?action=query&list=search&srsearch=haswbstatement:P239=${icao}&format=json&origin=*`, 4000);
         const wdData = await wdRes.json();
         if (wdData?.query?.search?.length > 0) {
@@ -759,8 +738,6 @@ async function getWikiTitleForAirport(icao, lat, lon) {
             return wdData.query.search[0].title;
         }
 
-        // 2. Erweiterter Geosearch-Fallback (falls ICAO nicht in Wikidata gepflegt ist)
-        // Suchbegriffe erweitert um Segelflug und Landeplatz für kleine Plätze aus der CoreDB!
         const isAirport = (t) => ['flugplatz', 'flughafen', 'airport', 'air base', 'aerodrome', 'segelflug', 'landeplatz', 'fliegerhorst', icao.toLowerCase()].some(kw => t.toLowerCase().includes(kw));
         
         const geoRes = await fetchWithTimeout(`https://de.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}|${lon}&gsradius=10000&gslimit=10&format=json&origin=*`, 4000);
@@ -773,7 +750,6 @@ async function getWikiTitleForAirport(icao, lat, lon) {
             return hit.title;
         }
 
-        // 3. Fallback: Textsuche
         const txtRes = await fetchWithTimeout(`https://de.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(icao + ' Flughafen OR Flugplatz')}&srlimit=5&format=json&origin=*`, 4000);
         const txtData = await txtRes.json();
         const txtResults = txtData?.query?.search || [];
@@ -789,6 +765,7 @@ async function getWikiTitleForAirport(icao, lat, lon) {
     } catch (e) {}
     return null;
 }
+
 async function fetchRunwayFromWikipedia(icaoCode, lat, lon) {
     if (!icaoCode) return null;
     try {
@@ -810,20 +787,16 @@ async function fetchRunwayFromWikipedia(icaoCode, lat, lon) {
 
 function parseRunwayFromWikitext(wikitext) {
     const runways = [];
-    
-    // 1. Text bereinigen (Killt HTML-Kommentare, wandelt geschützte HTML-Leerzeichen um)
     const commentRegex = new RegExp('<' + '!--[\\s\\S]*?--' + '>', 'g');
     let text = wikitext.replace(commentRegex, '');
     text = text.replace(/<br\s*\/?>/gi, ' ');
     text = text.replace(/&#160;/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&times;/gi, '×');
-    text = text.replace(/\[\[([^\]|]+\|)?([^\]]+)\]\]/g, '$2'); // Wiki-Links auflösen
-    text = text.replace(/<[^>]+>/g, ' '); // Sämtliche HTML-Tags löschen
-    text = text.replace(/\s+/g, ' '); // Alles auf eine Zeile normieren
+    text = text.replace(/\[\[([^\]|]+\|)?([^\]]+)\]\]/g, '$2'); 
+    text = text.replace(/<[^>]+>/g, ' '); 
+    text = text.replace(/\s+/g, ' '); 
 
-    // 2. Präzise Suchmuster
     const HDG_PATTERN = /\b((?:0?[1-9]|[12]\d|3[0-6])[LRC]?\s*\/\s*(?:0?[1-9]|[12]\d|3[0-6])[LRC]?)\b/g;
     const SURFACES = /\b(asphalt|beton|gras|grass|schotter|gravel|concrete|paved|unpaved|dirt|erde|sand|wasser|water|eis|ice)\b/i;
-    // Sucht z.B. "3200m", "3200 m" oder auch "3200 m x 45 m"
     const LEN_PATTERN = /(?:(?:länge|length|len)\d*\s*=\s*([1-9][\d.,]*))|(?:([1-9][\d.,]*)\s*(?:m|Meter)\b)|(?:([1-9][\d.,]*)\s*(?:x|×)\s*\d+)/i;
 
     let matches = [];
@@ -831,26 +804,21 @@ function parseRunwayFromWikitext(wikitext) {
     while ((match = HDG_PATTERN.exec(text)) !== null) {
         let cleanHdg = match[1].replace(/\s+/g, '');
         let parts = cleanHdg.split('/');
-        
-        // 180-Grad Test (Ignoriert Brüche und Öffnungszeiten)
         if (Math.abs(parseInt(parts[0], 10) - parseInt(parts[1], 10)) === 18) {
             matches.push({ hdg: cleanHdg, index: match.index, raw: match[1] });
         }
     }
 
-    // 3. VORWÄRTS-PRIORITÄT (Verhindert das Stehlen von Nachbar-Attributen!)
     for (let i = 0; i < matches.length; i++) {
         const hdg = matches[i].hdg;
         const startIdx = matches[i].index;
         
-        // VORWÄRTS-Fenster (Nur bis zur nächsten Piste schauen!)
         let endIdx = Math.min(startIdx + 200, text.length);
         if (i + 1 < matches.length) {
             if (matches[i+1].index < endIdx) endIdx = matches[i+1].index;
         }
         let contextFwd = text.substring(startIdx, endIdx);
         
-        // RÜCKWÄRTS-Fenster (Nur als Fallback, stoppt strikt an der vorherigen Piste!)
         let preStartIdx = Math.max(0, startIdx - 60);
         if (i > 0) {
             const prevEnd = matches[i-1].index + matches[i-1].raw.length;
@@ -861,14 +829,12 @@ function parseRunwayFromWikitext(wikitext) {
         let length = '';
         let surface = '';
 
-        // Zuerst FWD suchen, NUR WENN nichts gefunden wird BWD suchen
         let lenMatch = contextFwd.match(LEN_PATTERN);
         if (!lenMatch) lenMatch = contextBwd.match(LEN_PATTERN); 
         
         let rawLen = lenMatch ? (lenMatch[1] || lenMatch[2] || lenMatch[3]) : null;
         
         if (!rawLen) {
-            // Nackte Zahlen in formatlosen Tabellen fangen
             let isolatedNum = contextFwd.match(/(?:\||\s|^)([1-9][\d.]{2,3})(?:\s|\||$)/);
             if (!isolatedNum) isolatedNum = contextBwd.match(/(?:\||\s|^)([1-9][\d.]{2,3})(?:\s|\||$)/);
             if (isolatedNum) rawLen = isolatedNum[1];
@@ -876,7 +842,6 @@ function parseRunwayFromWikitext(wikitext) {
 
         if (rawLen) length = rawLen.replace(/[.,]/g, '') + 'm';
 
-        // Belag genauso priorisiert suchen
         let surfMatch = contextFwd.match(SURFACES);
         if (!surfMatch) surfMatch = contextBwd.match(SURFACES);
         
@@ -889,9 +854,7 @@ function parseRunwayFromWikitext(wikitext) {
 
     if (runways.length === 0) return null;
     
-    // 4. Intelligente Deduplizierung & Historien-Blocker
     const uniqueRunways = [...new Set(runways)];
-    // Längste Strings zuerst prüfen (Infobox vs. unvollständiger Text)
     uniqueRunways.sort((a, b) => b.length - a.length);
     
     const finalRunways = [];
@@ -909,7 +872,6 @@ function parseRunwayFromWikitext(wikitext) {
             const existingParts = existing.split(' · ');
             if (existingParts[0] === currentHdg) {
                 
-                // Prüfen ob Subset
                 let allAttrMatch = true;
                 for (let j = 1; j < parts.length; j++) {
                     if (!existing.includes(parts[j])) {
@@ -923,7 +885,6 @@ function parseRunwayFromWikitext(wikitext) {
                     break;
                 }
 
-                // Historien-Blocker: Verwirft alte Umbauten bei gleicher Kennung (EDDV Hannover)
                 const existingSurfMatch = existing.match(new RegExp(SURFACES.source, 'i'));
                 const existingSurf = existingSurfMatch ? existingSurfMatch[1].toLowerCase() : null;
 
@@ -940,29 +901,6 @@ function parseRunwayFromWikitext(wikitext) {
     }
     
     return finalRunways.slice(0, 5).join(' | ');
-}
-
-
-async function fetchAndCacheWikiPages(icao, lat, lon) {
-    try {
-        // Nutzt jetzt die selbe smarte Geo-Suche wie die Runway-Funktion!
-        const title = await getWikiTitleForAirport(icao, lat, lon);
-
-        if (!title) {
-            gpsState.wikiCache[icao] = ['Keine Wikipedia-Daten gefunden.'];
-            return;
-        }
-
-        const extRes = await fetchWithTimeout(`https://de.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=true&explaintext=true&exsentences=12&titles=${encodeURIComponent(title)}&format=json&origin=*`, 5000);
-        const extData = await extRes.json();
-        
-        const pageId = Object.keys(extData.query.pages)[0];
-        const txt = extData.query.pages[pageId]?.extract?.trim() || 'Keine Information verfügbar.';
-
-        gpsState.wikiCache[icao] = splitTextIntoPages(txt, 170);
-    } catch (e) {
-        gpsState.wikiCache[icao] = ['Fetch-Fehler – bitte erneut versuchen.'];
-    }
 }
 
 async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, cargoText) {
@@ -991,7 +929,7 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
         "Business-Charter (Alltäglicher Flug für einen Architekten, Anwalt oder Bauleiter)",
         "Eilige, aber unspektakuläre Kleinfracht (Dokumente, Ersatzteile)",
         "Kurioses / Verrückter, aber friedlicher Privatflug",
-        "Tierrettung / Tiertransport" // Steht jetzt nur noch 1x drin, taucht also viel seltener auf
+        "Tierrettung / Tiertransport" 
     ];
     
     const randomTheme = isPOI 
@@ -1025,7 +963,6 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
     const payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { response_mime_type: "application/json" } };
     const reqOptions = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) };
 
-    // VERSUCH 1: Gemini 3.0 Flash (Primary)
     try {
         const resFlash3 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`, reqOptions);
         if (resFlash3.ok) {
@@ -1033,14 +970,9 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
             const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
             incrementApiUsage('flash'); 
             return { t: parsed.title, s: parsed.story, pax: parsed.pax, cargo: parsed.cargo, i: "📋", cat: "std", _source: "Gemini 3.0 Flash" };
-        } else {
-            console.warn("Gemini 3.0 Flash API Fehler/Quota. Wechsle zu 2.5 Flash...");
-        }
-    } catch (e) {
-        console.warn("Gemini 3.0 Flash fehlgeschlagen:", e);
-    }
+        } 
+    } catch (e) {}
 
-    // VERSUCH 2: Gemini 2.5 Flash (Fallback 1)
     try {
         const resFlash = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, reqOptions);
         if (resFlash.ok) {
@@ -1048,14 +980,9 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
             const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
             incrementApiUsage('flash'); 
             return { t: parsed.title, s: parsed.story, pax: parsed.pax, cargo: parsed.cargo, i: "📋", cat: "std", _source: "Gemini 2.5 Flash" };
-        } else {
-            console.warn("Gemini 2.5 Flash API Fehler/Quota. Wechsle zu Lite...");
         }
-    } catch (e) {
-        console.warn("Gemini 2.5 Flash fehlgeschlagen:", e);
-    }
+    } catch (e) {}
 
-    // VERSUCH 3: Gemini 2.5 Flash Lite (Fallback 2)
     try {
         const resLite = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`, reqOptions);
         if (resLite.ok) {
@@ -1064,9 +991,7 @@ async function fetchGeminiMission(startName, destName, dist, isPOI, paxText, car
             incrementApiUsage('lite'); 
             return { t: parsed.title, s: parsed.story, pax: parsed.pax, cargo: parsed.cargo, i: "📋", cat: "std", _source: "Gemini 2.5 Flash Lite" };
         }
-    } catch (e) {
-        console.warn("Gemini Lite fehlgeschlagen:", e);
-    }
+    } catch (e) {}
     return null;
 }
 
@@ -1083,7 +1008,6 @@ function getApiUsage() {
     const today = getQuotaDay();
     let data = JSON.parse(localStorage.getItem('ga_api_fuel'));
     
-    // Wenn keine Daten da sind, ein neuer Tag ist, ODER das alte Format noch im Speicher hängt
     if (!data || data.date !== today || data.flash === undefined) { 
         data = { date: today, flash: 0, lite: 0 }; 
         localStorage.setItem('ga_api_fuel', JSON.stringify(data)); 
@@ -1131,14 +1055,16 @@ async function generateMission() {
     
     document.getElementById("mDepRwy").innerText = "Sucht Pisten-Infos..."; document.getElementById("mDepRwy").style.color = "#fff";
     document.getElementById("mDestRwy").innerText = "Sucht Pisten-Infos..."; document.getElementById("mDestRwy").style.color = "#fff";
-    document.getElementById("wikiDescText").innerText = "Lade Region-Info...";
+    
+    // FIX für Crash: Aktualisiert die Texte auf beiden neuen Seiten!
+    if(document.getElementById("wikiDepDescText")) document.getElementById("wikiDepDescText").innerText = "Lade Start-Info...";
+    if(document.getElementById("wikiDestDescText")) document.getElementById("wikiDestDescText").innerText = "Lade Ziel-Info...";
 
     const indicator = document.getElementById('searchIndicator');
     const needle = document.getElementById('meterNeedle');
     const led = document.getElementById('meterLed');
     if (led) led.classList.remove('led-green', 'led-blue', 'led-red');
     
-    // Marker Lights anfangen zu blinken
     document.querySelectorAll('.marker-light').forEach(l => { 
         l.classList.remove('on'); 
         l.classList.add('blinking'); 
@@ -1165,7 +1091,6 @@ async function generateMission() {
     const selectedGph = parseInt(document.getElementById("gphSlider").value) || 14;
     
     let targetDest = document.getElementById("destLoc").value.toUpperCase();
-    // DEP == DEST: Zielflugplatz ignorieren → POI verwenden
     let forcePOI = false;
     if (targetDest && targetDest === currentStartICAO) {
         targetDest = '';
@@ -1225,8 +1150,8 @@ async function generateMission() {
 
     if (m) { 
         dataSource = m._source; 
-        if (m.pax) paxText = m.pax;       // Nimmt den KI-Text für Passagiere
-        if (m.cargo) cargoText = m.cargo; // Nimmt den KI-Text für Fracht
+        if (m.pax) paxText = m.pax;       
+        if (m.cargo) cargoText = m.cargo; 
     } else {
         indicator.innerText = `Lade Auftrag aus lokaler Datenbank...`;
         dataSource = "Lokale DB"; 
@@ -1235,16 +1160,13 @@ async function generateMission() {
         } else if (typeof missions !== 'undefined') {
             let availM = missions.filter(ms => (nav.dist < 50 || ms.cat === "std"));
             
-            // SHUFFLE-BAG SYSTEM: Bereits gespielte Missionen aussortieren
             let history = JSON.parse(localStorage.getItem('ga_std_history')) || [];
             let freshM = availM.filter(ms => !history.includes(ms.t));
             
-            // Wenn der Stapel leer ist, History löschen und neu mischen!
             if (freshM.length === 0) { freshM = availM; history = []; }
             
             m = freshM[Math.floor(Math.random() * freshM.length)] || missions[0];
             
-            // Gespielte Mission merken (max. die letzten 30 merken)
             history.push(m.t);
             if(history.length > 30) history.shift();
             localStorage.setItem('ga_std_history', JSON.stringify(history));
@@ -1286,7 +1208,6 @@ async function generateMission() {
 
     document.getElementById("briefingBox").style.display = "block";
 
-    // Ziel-Feld (COM2 / Classic) nach dem Generieren direkt wieder leeren
     const destLocEl      = document.getElementById('destLoc');
     const destLocRadioEl = document.getElementById('destLocRadio');
     if (destLocEl)      destLocEl.value      = '';
@@ -1299,7 +1220,10 @@ async function generateMission() {
     
     setTimeout(() => {
         if (!isPOI) fetchRunwayDetails(dest.lat, dest.lon, 'mDestRwy', currentDestICAO);
-        fetchAreaDescription(dest.lat, dest.lon, 'wikiDescText', isPOI ? dest.n : null, isPOI ? null : currentDestICAO);
+        
+        fetchAreaDescription(start.lat, start.lon, 'wikiDepDescText', null, currentStartICAO, 'wikiDepImageContainer', 'wikiDepImage');
+        fetchAreaDescription(dest.lat, dest.lon, 'wikiDestDescText', isPOI ? dest.n : null, isPOI ? null : currentDestICAO, 'wikiDestImageContainer', 'wikiDestImage');
+        
         indicator.innerText = `Briefing komplett.`; resetBtn(btn);
         const rBtnLed = document.getElementById('radioGenerateBtn');
         if(rBtnLed) rBtnLed.classList.add('active');
@@ -1315,11 +1239,10 @@ async function generateMission() {
             else { led.classList.add('led-red'); } 
         }
 
-        // Marker Lights: Blinken stoppen und finale Quelle anzeigen
         document.querySelectorAll('.marker-light').forEach(l => l.classList.remove('blinking', 'on'));
         if (dataSource === "Gemini 3.0 Flash") { 
-            document.getElementById('mkO').classList.add('on'); // Blau
-            document.getElementById('mkM').classList.add('on'); // Amber (Grün gibt es beim KMA 26 nicht)
+            document.getElementById('mkO').classList.add('on'); 
+            document.getElementById('mkM').classList.add('on'); 
         }
         else if (dataSource === "Gemini 2.5 Flash") document.getElementById('mkO').classList.add('on'); 
         else if (dataSource === "Gemini 2.5 Flash Lite") document.getElementById('mkM').classList.add('on'); 
@@ -1448,32 +1371,26 @@ function updateRoutePerformance() {
 
     setTimeout(() => saveMissionState(), 500);
 
-    // GPS FPL-Seite sofort aktualisieren wenn sichtbar
     if (gpsState.visible && gpsState.mode === 'FPL') renderGPS();
 }
 
 function initMapBase() {
     if(map) return;
     
-    // 1. BASE MAPS (Untergrund)
     const topoMap = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: 'OpenTopoMap' });
-    // NEU: Reine 3D-Geländekarte ohne störenden Text!
     const topoLightMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' }); 
     const satMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' });
     const darkMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: 'CartoDB' });
     const lightMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: 'CartoDB' });
 
-    // 2. OVERLAY MAP (VFR Infos)
     const aeroOverlay = L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { 
         attribution: 'AeroData / Navigraph',
         opacity: 0.65,
-        maxNativeZoom: 12 // Stoppt das Neuladen bei Stufe 12 und vergrößert ab da nur noch digital
+        maxNativeZoom: 12 
     });
 
-    // Da das VFR-Overlay beim Start aktiv ist, blenden wir die Topo-Karte direkt ab
     topoMap.setOpacity(0.5);
 
-    // Startet standardmäßig mit Topo-Karte UND dem transparenten VFR-Overlay darüber
     map = L.map('map', { layers: [topoMap, aeroOverlay], attributionControl: false }).setView([51.1657, 10.4515], 6);
     
     const baseMaps = { 
@@ -1490,21 +1407,17 @@ function initMapBase() {
 
     L.control.layers(baseMaps, overlayMaps).addTo(map);
 
-    // ==========================================
-    // Automatik für das Abblenden der Karte
-    // ==========================================
     map.on('overlayadd', function(e) {
         if (e.name === "🛩️ VFR Lufträume (Overlay)") {
-            topoMap.setOpacity(0.5); // Topo wird blass, damit die Lufträume gut lesbar sind
+            topoMap.setOpacity(0.5); 
         }
     });
 
     map.on('overlayremove', function(e) {
         if (e.name === "🛩️ VFR Lufträume (Overlay)") {
-            topoMap.setOpacity(1.0); // Topo wird wieder 100% kräftig, wenn VFR aus ist
+            topoMap.setOpacity(1.0); 
         }
     });
-    // ==========================================
     
     const fsControl = L.control({position: 'topleft'});
     fsControl.onAdd = function() {
@@ -1547,11 +1460,9 @@ async function updateMapFromInputs() {
     }
 }
 
-/* iOS-Scroll-Lock: verhindert, dass die Seite unter einem Overlay scrollt und
-   stellt sicher, dass das Overlay immer mittig im Viewport erscheint. */
 let _scrollLockY = 0;
 function lockBodyScroll() {
-    if (window.innerWidth >= 1250) return; // Desktop nutzt CSS-Transform, kein Lock nötig
+    if (window.innerWidth >= 1250) return; 
     _scrollLockY = window.scrollY;
     document.body.style.position = 'fixed';
     document.body.style.top = '-' + _scrollLockY + 'px';
@@ -1597,8 +1508,6 @@ function updateMiniMap() {
     
     if (!miniMap) {
         miniMap = L.map('miniMap', { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, attributionControl: false });
-        
-        // Stapelt die Karten für den perfekten Aviation-Look auf dem Foto
         L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png').addTo(miniMap);
         L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { 
             opacity: 0.65, 
@@ -1660,12 +1569,14 @@ function clearLog() { if(confirm("Gesamtes Logbuch löschen?")) { localStorage.r
    10. HANGAR PINNWAND (LOKAL & TUTORIAL & SKALIERUNG)
    ========================================================= */
 const tutorialNotes = [
-    { id: 101, text: "👋 WILLKOMMEN!\n\nZiehe diese Zettel umher, bearbeite sie (✏️) oder lösch sie (✖).", x: 5, y: 8, rot: -2 },
-    { id: 102, text: "✈️ AUFTRÄGE\n\nStelle Start, Ziel und Distanz ein. Der Dispatcher sucht dir Missionen.", x: 28, y: 12, rot: 3 },
-    { id: 103, text: "🗺️ KARTENTISCH\n\n- Layer-Icon nutzen\n- Wegpunkte verschieben\n- Distanzen messen", x: 52, y: 6, rot: -1 },
-    { id: 104, text: "🌤️ WETTER & AIP\n\nIm Briefing-Fenster findest du Schalter für METAR/TAF und AIP.", x: 8, y: 45, rot: 1 },
-    { id: 105, text: "🎨 COCKPIT DESIGN\n\nKlicke auf die SCHRAUBE oben links, um die Lackierung zu ändern!", x: 32, y: 48, rot: -3 },
-    { id: 106, text: "🤖 GEMINI API\n\nHol dir einen AI Key und die KI generiert individuelle Aufträge!", x: 55, y: 42, rot: 2 }
+    { id: 101, text: "👋 WILLKOMMEN!\n\nZiehe diese Zettel umher, bearbeite sie (✏️) oder lösch sie (✖).", x: 4, y: 6, rot: -2 },
+    { id: 102, text: "📻 NAVCOM THEME\n\nZieh mit gedrückter Maus an den runden Drehknöpfen, um TAS und GPH schnell einzustellen!", x: 28, y: 10, rot: 3 },
+    { id: 103, text: "🗺️ KARTENTISCH\n\nKlick auf die rote Route für neue Wegpunkte. Nutze das ⛶ Icon für den echten Vollbildmodus!", x: 52, y: 5, rot: -1 },
+    { id: 104, text: "🔗 MULTIPLAYER\n\nKlick im Briefing auf das Link-Symbol, um den Code für deine Freunde zu kopieren (Import hier am Brett).", x: 76, y: 12, rot: 4 },
+    { id: 105, text: "🌤️ WETTER & AIP\n\nIm Briefing (oder auf dem GPS) findest du Direkt-Links zu aktuellen METARs und Anflugkarten.", x: 6, y: 45, rot: 1 },
+    { id: 106, text: "🎨 ANALOG DESIGN\n\nKlicke im Retro-Modus auf die silberne SCHRAUBE oben links, um die Panel-Lackierung zu wechseln!", x: 30, y: 50, rot: -3 },
+    { id: 107, text: "🤖 KI DISPATCHER\n\nTrag unten deinen Gemini API-Key ein für kreative Missions-Storys mit Passagieren & Fracht.", x: 55, y: 42, rot: 2 },
+    { id: 108, text: "📌 FLÜGE MERKEN\n\nPinne coole Routen an dieses Brett. Geflogen? Logge sie unten, um deinen Startplatz zu versetzen!", x: 78, y: 46, rot: -2 }
 ];
 
 function toggleTutorialNotes() {
@@ -1673,10 +1584,8 @@ function toggleTutorialNotes() {
     const hasTutorial = notes.some(n => n.id >= 101 && n.id <= 106);
     
     if (hasTutorial) {
-        // Sind sie da, blenden wir sie aus
         notes = notes.filter(n => n.id < 101 || n.id > 106);
     } else {
-        // Sind sie weg, holen wir sie zurück (ohne Duplikate)
         tutorialNotes.forEach(tn => {
             if (!notes.find(n => n.id === tn.id)) notes.push(tn);
         });
@@ -1752,7 +1661,9 @@ function pinCurrentFlight() {
         mDestRwy: document.getElementById("mDestRwy").innerText, mPay: document.getElementById("mPay").innerText,
         mWeight: document.getElementById("mWeight").innerText, mDistNote: document.getElementById("mDistNote").innerText,
         mHeadingNote: document.getElementById("mHeadingNote").innerText, mETENote: document.getElementById("mETENote").innerText,
-        wikiDescText: document.getElementById("wikiDescText").innerText, isPOI: document.getElementById("destRwyContainer").style.display === "none",
+        wikiDepDescText: document.getElementById("wikiDepDescText") ? document.getElementById("wikiDepDescText").innerText : "",
+        wikiDestDescText: document.getElementById("wikiDestDescText") ? document.getElementById("wikiDestDescText").innerText : "",
+        isPOI: document.getElementById("destRwyContainer").style.display === "none",
         currentMissionData: currentMissionData, routeWaypoints: routeWaypoints, currentStartICAO: currentStartICAO,
         currentDestICAO: currentDestICAO, currentSName: currentSName, currentDName: currentDName
     };
@@ -1785,6 +1696,12 @@ function loadPinnedFlight(id) {
 function exportMission() {
     if (document.getElementById("briefingBox").style.display !== "block" || !currentMissionData) return;
     const wps = routeWaypoints.map(wp => [parseFloat(wp.lat.toFixed(4)), parseFloat((wp.lng||wp.lon).toFixed(4))]);
+    
+    const wikiData = {
+        dep: document.getElementById("wikiDepDescText") ? document.getElementById("wikiDepDescText").innerText : "",
+        dest: document.getElementById("wikiDestDescText") ? document.getElementById("wikiDestDescText").innerText : ""
+    };
+
     const pack = [
         document.getElementById('mTitle').innerHTML, document.getElementById('mStory').innerText,
         document.getElementById("mDepICAO").innerText, document.getElementById("mDepName").innerText,
@@ -1794,7 +1711,7 @@ function exportMission() {
         document.getElementById("mDestRwy").innerText, document.getElementById("mPay").innerText,
         document.getElementById("mWeight").innerText, document.getElementById("mDistNote").innerText,
         document.getElementById("mHeadingNote").innerText, document.getElementById("mETENote").innerText,
-        document.getElementById("wikiDescText").innerText, document.getElementById("destRwyContainer").style.display === "none" ? 1 : 0,
+        wikiData, document.getElementById("destRwyContainer").style.display === "none" ? 1 : 0,
         currentMissionData, wps, currentStartICAO, currentDestICAO, currentSName, currentDName
     ];
 
@@ -1810,11 +1727,14 @@ function importMission() {
         const pack = JSON.parse(decodeURIComponent(atob(code.trim())));
         if (!Array.isArray(pack) || pack.length < 24) throw new Error("Ungültiges oder veraltetes Format");
         const wps = pack[19].map(p => ({ lat: p[0], lng: p[1] }));
+        
+        const wikiData = typeof pack[16] === 'object' && pack[16] !== null ? pack[16] : { dep: "", dest: pack[16] };
+        
         const state = {
             mTitle: pack[0], mStory: pack[1], mDepICAO: pack[2], mDepName: pack[3], mDepCoords: pack[4], mDepRwy: pack[5],
             destIcon: pack[6], mDestICAO: pack[7], mDestName: pack[8], mDestCoords: pack[9], mDestRwy: pack[10],
             mPay: pack[11], mWeight: pack[12], mDistNote: pack[13], mHeadingNote: pack[14], mETENote: pack[15],
-            wikiDescText: pack[16], isPOI: pack[17] === 1, currentMissionData: pack[18], routeWaypoints: wps, 
+            wikiDepDescText: wikiData.dep, wikiDestDescText: wikiData.dest, isPOI: pack[17] === 1, currentMissionData: pack[18], routeWaypoints: wps, 
             currentStartICAO: pack[20], currentDestICAO: pack[21], currentSName: pack[22], currentDName: pack[23]
         };
         let notes = JSON.parse(localStorage.getItem('ga_pinboard')) || [];
@@ -1841,7 +1761,6 @@ function renderNotes() {
         const div = document.createElement('div'); 
         div.className = note.type === 'flight' ? 'post-it flight-card' : 'post-it';
         
-        // Kompatibilität: Wandelt alte feste Pixel in saubere Prozente um
         let posX = note.x > 100 ? (note.x / 1000) * 100 : note.x;
         let posY = note.y > 100 ? (note.y / 600) * 100 : note.y;
 
@@ -1885,8 +1804,6 @@ function makeDraggable(element, noteId) {
         if (newLeft < minLeft) newLeft = minLeft; if (newLeft > maxLeft) newLeft = maxLeft;
         if (newTop < minTop) newTop = minTop; if (newTop > maxTop) newTop = maxTop;
         
-        // FIX: Wir weisen die Position schon während des Ziehens stur in % zu!
-        // Dadurch kleben die Post-Its bombenfest an der Textur des Brettes, egal was der Monitor macht.
         element.style.top = (newTop / board.offsetHeight * 100) + "%"; 
         element.style.left = (newLeft / board.offsetWidth * 100) + "%";
     }
@@ -1909,14 +1826,13 @@ function makeDraggable(element, noteId) {
    ========================================================= */
 const gpsState = {
     mode: 'FPL',
-    subPage: 0,       // universelle Sub-Page; steuert alle Inhalte (Waypoints, Runway, Wiki)
+    subPage: 0,       
     visible: false,
     maxPages: { FPL: 1, DEP: 2, DEST: 2, AIP: 2, WX: 2 },
     metarCache: {},
-    wikiCache: {}     // { icao: ['page1', 'page2', ...] }
+    wikiCache: {}     
 };
 
-// --- Toggle GPS Module ---
 function toggleGPSModule(btnEl) {
     gpsState.visible = !gpsState.visible;
     const mod = document.getElementById('kln90bModule');
@@ -1934,7 +1850,6 @@ function toggleGPSModule(btnEl) {
     renderGPS();
 }
 
-// --- Save & Restore all audio button states ---
 function saveAudioButtonStates() {
     const states = {};
     document.querySelectorAll('.audio-btn-grid .audio-btn').forEach(btn => {
@@ -1952,7 +1867,6 @@ function restoreAudioButtonStates() {
         if (active) btn.classList.add('active');
         else btn.classList.remove('active');
     }
-    // GPS visibility
     if (saved['btnToggleGPS']) {
         gpsState.visible = true;
         const mod = document.getElementById('kln90bModule');
@@ -1961,20 +1875,17 @@ function restoreAudioButtonStates() {
         if (fp) fp.style.display = 'none';
         renderGPS();
     }
-    // AI toggle sync
     if (saved['btnToggleAI']) {
         const aiToggle = document.getElementById('aiToggle');
         if (aiToggle) aiToggle.checked = true;
     }
 }
 
-// --- Mode Buttons ---
 function initGPSButtons() {
     document.querySelectorAll('.kln90b-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const targetMode = btn.dataset.mode;
 
-            // AIP: Direkt-Link öffnen wenn bereits auf DEP- oder DEST-Seite
             if (targetMode === 'AIP') {
                 if (gpsState.mode === 'DEP' && currentStartICAO) {
                     window.open(`https://aip.aero/de/vfr/?${currentStartICAO}`, '_blank');
@@ -1986,7 +1897,6 @@ function initGPSButtons() {
                 }
             }
 
-            // WX: Direkt-Link öffnen wenn bereits auf DEP- oder DEST-Seite
             if (targetMode === 'WX') {
                 if (gpsState.mode === 'DEP' && currentStartICAO) {
                     window.open(`https://metar-taf.com/de/${currentStartICAO}`, '_blank');
@@ -2002,7 +1912,6 @@ function initGPSButtons() {
             btn.classList.add('active');
             gpsState.mode = targetMode;
             gpsState.subPage = 0;
-            // Seitenanzahl auf Default zurücksetzen – wird nach Wiki-Fetch aktualisiert
             if (gpsState.mode === 'DEP' || gpsState.mode === 'DEST') {
                 gpsState.maxPages[gpsState.mode] = 2;
             }
@@ -2011,7 +1920,6 @@ function initGPSButtons() {
     });
 }
 
-// --- Encoder Logic ---
 function initGPSEncoders() {
     const encL = document.getElementById('gpsEncoderL');
     const encR = document.getElementById('gpsEncoderR');
@@ -2027,7 +1935,6 @@ function initGPSEncoders() {
         renderGPS();
     };
 
-    // Linker Encoder: vorherige Seite
     if (encL) {
         encL.addEventListener('click', () => prevPage());
         encL.addEventListener('wheel', (e) => {
@@ -2035,7 +1942,6 @@ function initGPSEncoders() {
             e.deltaY > 0 ? nextPage() : prevPage();
         });
     }
-    // Rechter Encoder: nächste Seite
     if (encR) {
         encR.addEventListener('click', () => nextPage());
         encR.addEventListener('wheel', (e) => {
@@ -2045,7 +1951,6 @@ function initGPSEncoders() {
     }
 }
 
-// --- COM2-Knopf: Ziel löschen ---
 function initCom2Knob() {
     const knob = document.getElementById('com2Knob');
     if (!knob) return;
@@ -2055,7 +1960,6 @@ function initCom2Knob() {
         const destLocRadioEl = document.getElementById('destLocRadio');
         if (destLocEl)      destLocEl.value      = '';
         if (destLocRadioEl) destLocRadioEl.value = '';
-        // Falls KLN auf DEST steht, zurück zu FPL
         if (gpsState.mode === 'DEST') {
             document.querySelectorAll('.kln90b-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'FPL'));
             gpsState.mode    = 'FPL';
@@ -2065,7 +1969,6 @@ function initCom2Knob() {
     });
 }
 
-// --- Main Render ---
 function renderGPS() {
     const left    = document.getElementById('gpsLeft');
     const right   = document.getElementById('gpsRight');
@@ -2086,8 +1989,7 @@ function renderGPS() {
     }
 }
 
-// --- FPL Mode ---
-const FPL_LEGS_PER_PAGE = 6; // kompakte Zeilen pro Seite im Volldisplay
+const FPL_LEGS_PER_PAGE = 6; 
 
 function renderFPL(left, right) {
     if (!currentMissionData) {
@@ -2097,8 +1999,6 @@ function renderFPL(left, right) {
     }
 
     const wps = routeWaypoints;
-
-    // ── Alle Legs berechnen ──────────────────────────────────────────────────
     const legs = [];
     if (wps && wps.length >= 2) {
         for (let i = 0; i < wps.length - 1; i++) {
@@ -2110,7 +2010,6 @@ function renderFPL(left, right) {
         }
     }
 
-    // Nur Leg-Seiten (Performance wird rechts auf allen Seiten angezeigt)
     const legPages   = Math.max(1, Math.ceil(legs.length / FPL_LEGS_PER_PAGE));
     const totalPages = legPages;
     gpsState.maxPages['FPL'] = totalPages;
@@ -2120,7 +2019,6 @@ function renderFPL(left, right) {
     if (pageLbl) pageLbl.textContent = `PG ${gpsState.subPage + 1}/${totalPages}`;
 
     if (gpsState.subPage < legPages) {
-        // ── Wegpunktseite ────────────────────────────────────────────────────
         const start   = gpsState.subPage * FPL_LEGS_PER_PAGE;
         const visible = legs.slice(start, start + FPL_LEGS_PER_PAGE);
         left.innerHTML = visible.map((l, idx) => {
@@ -2134,7 +2032,7 @@ function renderFPL(left, right) {
             const dest = currentDestICAO  || '----';
             left.innerHTML = `<div class="kln90b-line highlight">${dep}</div><div class="kln90b-line dim">→${dest}</div>`;
         }
-        // Rechts immer Performance zeigen auch auf Wegpunkt-Seiten
+        
         const _dist2 = Math.round((currentMissionData.dist||0)*10)/10;
         const _tas2  = parseInt(document.getElementById('tasSlider')?.value)||115;
         const _gph2  = parseInt(document.getElementById('gphSlider')?.value)||9;
@@ -2151,7 +2049,6 @@ function renderFPL(left, right) {
     }
 }
 
-// --- DEP / DEST Mode ---
 async function renderAirportInfo(left, right, type) {
     const icao = type === 'dep' ? currentStartICAO : currentDestICAO;
     if (!icao) {
@@ -2166,25 +2063,21 @@ async function renderAirportInfo(left, right, type) {
     const lat  = data ? data.lat.toFixed(4) : '---';
     const lon  = data ? data.lon.toFixed(4) : '---';
 
-    // Linke Spalte: immer Ident + Name + Koordinaten
     left.innerHTML =
         `<div class="kln90b-line highlight" style="font-size:11px;">${icao}</div>` +
         `<div class="kln90b-line" style="font-size:9px; white-space:normal; line-height:1.35;">${name}</div>` +
         `<div class="kln90b-line dim" style="font-size:9px; margin-top:2px;">${lat}</div>` +
         `<div class="kln90b-line dim" style="font-size:9px;">${lon}</div>`;
 
-    // Runway-Daten Lade-Animation
     right.innerHTML = '<div class="kln90b-line dim kln-loading-dots" style="margin-top:8px;"><span>●</span><span>●</span><span>●</span></div>';
 
     if (!runwayCache[icao] && data) {
-        // 1. STRIKTE WIKIPEDIA-PRIORITÄT (Kein paralleles Overpass-Rennen mehr!)
         const wikiResult = await fetchRunwayFromWikipedia(icao, data.lat, data.lon);
         
         if (wikiResult) {
             runwayCache[icao] = wikiResult;
-            if (gpsState.mode === mode) renderGPS(); // UI aktualisieren
+            if (gpsState.mode === mode) renderGPS(); 
         } else {
-            // 2. NUR wenn Wikipedia fehlschlägt -> Overpass als letzter Ausweg
             try {
                 const ov = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(`[out:json][timeout:8];way["aeroway"="runway"](around:3000,${data.lat},${data.lon});out tags;`)}`).then(r => r.json());
                 if (ov?.elements?.length > 0) {
@@ -2218,7 +2111,6 @@ async function renderAirportInfo(left, right, type) {
     const sp          = gpsState.subPage;
 
     if (sp < rwyPages) {
-        // Runway-Seite(n) anzeigen
         const slice = allRunways.slice(sp * RWYS_PER_PAGE, (sp + 1) * RWYS_PER_PAGE);
         const label = rwyPages > 1 ? `RUNWAYS (${sp+1}/${rwyPages}):` : 'RUNWAYS:';
         right.innerHTML =
@@ -2227,7 +2119,6 @@ async function renderAirportInfo(left, right, type) {
                 ? slice.map(r=>`<div class="kln90b-line" style="font-size:9px; white-space:normal; line-height:1.4;">▸ ${r}</div>`).join('')
                 : '<div class="kln90b-line dim">NO RWY DATA</div>');
 
-        // maxPages aktualisieren (Wiki noch unbekannt → 1 Platzhalter)
         const wikiN = gpsState.wikiCache[icao]?.length || 1;
         const total = rwyPages + wikiN;
         if (gpsState.maxPages[mode] !== total) {
@@ -2238,7 +2129,6 @@ async function renderAirportInfo(left, right, type) {
         return;
     }
 
-    // Wiki-Seite(n) – erst jetzt laden wenn wirklich gebraucht (Seite 2+)
     if (!gpsState.wikiCache[icao] && data) {
         await fetchAndCacheWikiPages(icao, data.lat, data.lon);
     }
@@ -2260,13 +2150,10 @@ async function renderAirportInfo(left, right, type) {
     }
 }
 
-// --- Wiki-Text für einen Flugplatz holen und in Seiten aufteilen ---
-
 async function fetchAndCacheWikiPages(icao, lat, lon) {
     try {
         let title = wikiTitleCache[icao];
 
-        // Titel finden (Gleiche rasante Methode wie beim Runway-Fetch)
         if (!title) {
             const wdRes = await fetchWithTimeout(`https://de.wikipedia.org/w/api.php?action=query&list=search&srsearch=haswbstatement:P239=${icao}&format=json&origin=*`, 4000);
             const wdData = await wdRes.json();
@@ -2286,7 +2173,6 @@ async function fetchAndCacheWikiPages(icao, lat, lon) {
             return;
         }
 
-        // Lade den fertigen, sauberen Plain-Text (Extract)
         const extRes = await fetchWithTimeout(`https://de.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=true&explaintext=true&exsentences=12&titles=${encodeURIComponent(title)}&format=json&origin=*`, 5000);
         const extData = await extRes.json();
         
@@ -2299,9 +2185,7 @@ async function fetchAndCacheWikiPages(icao, lat, lon) {
     }
 }
 
-// --- Text an Satz-/Wortgrenzen in Seiten aufteilen ---
 function splitTextIntoPages(text, charsPerPage = 360) {
-    // Überschüssige Leerzeilen entfernen
     const cleaned = text.replace(/\n{3,}/g, '\n\n').trim();
     const pages   = [];
     let remaining = cleaned;
@@ -2310,7 +2194,6 @@ function splitTextIntoPages(text, charsPerPage = 360) {
             pages.push(remaining);
             break;
         }
-        // Satzgrenze in ±40 Zeichen um das Limit suchen (.!?)
         let cut = charsPerPage;
         const lo = Math.max(cut - 60, 1), hi = Math.min(cut + 40, remaining.length - 1);
         for (let i = hi; i >= lo; i--) {
@@ -2318,7 +2201,6 @@ function splitTextIntoPages(text, charsPerPage = 360) {
                 cut = i + 1; break;
             }
         }
-        // Fallback: Wortgrenze
         if (cut === charsPerPage) {
             while (cut > 0 && remaining[cut] !== ' ' && remaining[cut] !== '\n') cut--;
             if (cut === 0) cut = charsPerPage;
@@ -2329,9 +2211,7 @@ function splitTextIntoPages(text, charsPerPage = 360) {
     return pages.length > 0 ? pages : ['Keine Info'];
 }
 
-// --- AIP Mode ---
 function renderAIP(left, right) {
-    // subPage 0 = DEP, subPage 1 = DEST
     const isDep  = gpsState.subPage === 0;
     const icao   = isDep ? currentStartICAO : currentDestICAO;
     const name   = isDep ? currentSName : currentDName;
@@ -2351,9 +2231,7 @@ function renderAIP(left, right) {
         `<div class="kln90b-line dim" style="font-size:9px;">aip.aero</div>`;
 }
 
-// --- WX / METAR Mode ---
 function renderWX(left, right) {
-    // subPage 0 = DEP, subPage 1 = DEST
     const isDep  = gpsState.subPage === 0;
     const icao   = isDep ? currentStartICAO : currentDestICAO;
     const name   = isDep ? currentSName : currentDName;
@@ -2373,14 +2251,12 @@ function renderWX(left, right) {
         `<div class="kln90b-line dim" style="font-size:9px;">metar-taf.com</div>`;
 }
 
-// --- Refresh GPS after mission dispatch ---
 function refreshGPSAfterDispatch() {
     if (gpsState.visible) {
         setTimeout(() => renderGPS(), 500);
     }
 }
 
-// --- Init on DOMContentLoaded ---
 document.addEventListener('DOMContentLoaded', () => {
     initGPSButtons();
     initGPSEncoders();

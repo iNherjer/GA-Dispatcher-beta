@@ -243,6 +243,7 @@ body.theme-retro .mission-note-page { grid-area: stack; background-color: #fdf5e
 body.theme-retro .mission-note-page::before { content: ''; position: absolute; top: 0; bottom: 0; left: 30px; width: 1px; background-color: rgba(220, 50, 50, 0.4); }
 body.theme-retro .front-note { z-index: 2; transform: rotate(-1.5deg); box-shadow: 3px 5px 12px rgba(0,0,0,0.6); opacity: 1; }
 body.theme-retro .back-note { z-index: 1; transform: rotate(2deg) translate(8px, 6px); box-shadow: 2px 3px 8px rgba(0,0,0,0.5); filter: brightness(0.85); }
+body.theme-retro .third-note { z-index: 0; transform: rotate(-3deg) translate(14px, 12px); box-shadow: 1px 2px 5px rgba(0,0,0,0.4); filter: brightness(0.7); }
 body.theme-retro .page-number { display: block; position: absolute; bottom: 5px; right: 10px; font-family: 'Caveat', cursive; font-size: 18px; color: #0b1f65; opacity: 0.6; }
 body.theme-retro #mTitle, body.theme-retro .wiki-title { display: block; font-family: 'Caveat', cursive; font-size: 28px; color: #0b1f65; text-shadow: none; margin-bottom: 8px; margin-top: 25px; transform: rotate(-1deg); line-height: 1.2; }
 body.theme-retro #mStory, body.theme-retro .wiki-info-note { font-family: 'Courier New', Courier, monospace; font-size: 14px; font-weight: bold; color: #222; line-height: 24px; border: none; padding-bottom: 0; margin-bottom: 0; text-shadow: none; letter-spacing: -0.5px; font-style: normal; }
@@ -353,12 +354,30 @@ body.theme-retro .api-fuel-meter .api-scale { border-left: 3px solid #d93829 !im
 #map { width: 72%; height: 86%; display: block; border-radius: 3px; filter: sepia(0.35) contrast(0.95); box-shadow: inset 0 0 15px rgba(0,0,0,0.6), 0 0 5px rgba(0,0,0,0.4); border: 1px solid rgba(0,0,0,0.3); }
 
 body.map-is-fullscreen .container { display: none !important; }
-body.map-is-fullscreen #mapTableOverlay { background: #111 !important; left: 0 !important; right: 0 !important; top: 0 !important; bottom: 0 !important; transform: none !important; width: 100vw !important; height: 100vh !important; z-index: 99999 !important; border-radius: 0 !important; }
-body.map-is-fullscreen .maptable-content { width: 100% !important; height: 100% !important; transform: none !important; background: none !important; box-shadow: none !important; border-radius: 0 !important; }
-body.map-is-fullscreen .pinboard-scroll-area { position: absolute; top: 50px; left: 0; right: 0; bottom: 0; display: block; padding: 0; margin: 0; overflow: hidden; }
-body.map-is-fullscreen #map { width: 100% !important; height: 100% !important; max-width: 100%; max-height: 100%; border-radius: 0 !important; filter: none !important; border: none !important; box-shadow: none !important; }
-body.map-is-fullscreen .pinboard-header { position: absolute; top: 0; left: 0; right: 0; height: 50px; z-index: 100000; box-sizing: border-box; background: rgba(26,26,26,0.95); }
+body.map-is-fullscreen { overflow: hidden !important; padding: 0 !important; margin: 0 !important; }
+/* Flex-Layout explizit erzwingen */
+body.map-is-fullscreen #mapTableOverlay { background: #111 !important; left: 0 !important; right: 0 !important; top: 0 !important; bottom: 0 !important; transform: none !important; width: 100vw !important; height: 100vh !important; z-index: 99999 !important; border-radius: 0 !important; display: flex !important; flex-direction: column !important; }
 
+body.map-is-fullscreen .maptable-content { 
+    width: 100% !important; 
+    height: 100% !important; 
+    max-width: none !important; /* Hebt die Desktop-Beschränkung auf */
+    max-height: none !important; 
+    aspect-ratio: auto !important; /* Hebt das 16:10 Format auf */
+    margin: 0 !important; /* Entfernt die Zentrierung */
+    transform: none !important; 
+    background: none !important; 
+    box-shadow: none !important; 
+    border-radius: 0 !important; 
+}
+
+/* Absolute Positionierung & harte 50px Höhe entfernt - flex-wrap erlaubt Umbrüche! */
+body.map-is-fullscreen .pinboard-header { position: relative !important; height: auto !important; z-index: 100000; box-sizing: border-box; background: rgba(26,26,26,0.95); flex-wrap: wrap; gap: 8px; }
+
+/* Nimmt sich flexibel den restlichen Platz */
+body.map-is-fullscreen .pinboard-scroll-area { position: relative !important; top: 0 !important; flex: 1 !important; display: block; padding: 0; margin: 0; overflow: hidden; }
+
+body.map-is-fullscreen #map { width: 100% !important; height: 100% !important; max-width: 100%; max-height: 100%; border-radius: 0 !important; filter: none !important; border: none !important; box-shadow: none !important; }
 /* ==========================================================================
    12. DIE SCHUBLADEN-ANIMATION (PC LAYOUT DYNAMISCH - SCROLLBAR FIX)
    ========================================================================== */
