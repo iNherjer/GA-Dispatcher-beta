@@ -1086,3 +1086,40 @@ body.theme-navcom .kln90b-module .radio-label {
     box-shadow: 5px 20px 50px rgba(0,0,0,0.8) !important;
     cursor: zoom-out !important;
 }
+
+/* ==========================================================================
+   17. DISCORD LINK
+   ========================================================================== */
+.discord-link {
+    display: inline-block;
+    margin-top: 6px;
+    color: #5865F2; /* Discord Blurple */
+    text-decoration: none;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    transition: color 0.2s, transform 0.2s;
+}
+.discord-link:hover {
+    color: #7983f5;
+    transform: scale(1.05);
+}
+
+/* Analog Cockpit Theme */
+body.theme-retro .discord-link {
+    color: #777;
+    font-family: 'Courier New', Courier, monospace;
+}
+body.theme-retro .discord-link:hover {
+    color: var(--piper-white);
+}
+
+/* NavCom Theme */
+body.theme-navcom .discord-link {
+    color: #555;
+    font-family: 'Share Tech Mono', monospace;
+}
+body.theme-navcom .discord-link:hover {
+    color: #33ff33;
+    text-shadow: 0 0 5px rgba(51, 255, 51, 0.6);
+}
