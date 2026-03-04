@@ -1071,3 +1071,18 @@ body.theme-navcom .kln90b-module .radio-label {
         mask-image: linear-gradient(to bottom, black 82%, transparent 100%);
     }
 }
+
+/* Sanfte Animation für das Polaroid */
+.briefing-photo-attachment {
+    transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.4s !important;
+    cursor: zoom-in;
+}
+
+/* Der herangeholte / vergrößerte Zustand */
+.briefing-photo-attachment.photo-zoomed {
+    /* Zieht das Bild nach links (-72%), etwas nach unten (20%) und macht es 3x so groß */
+    transform: translate(-72%, 20%) scale(3.0) rotate(2deg) !important;
+    z-index: 100 !important;
+    box-shadow: 5px 20px 50px rgba(0,0,0,0.8) !important;
+    cursor: zoom-out !important;
+}
