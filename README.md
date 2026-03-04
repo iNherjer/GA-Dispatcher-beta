@@ -1,6 +1,6 @@
-# GA-Dispatcher-Alpha
+# GA-Dispatcher-Beta
 
-https://inherjer.github.io/GA-Dispatcher-Alpha/
+https://inherjer.github.io/GA-Dispatcher-beta/
 
 # 🛩️ GA Dispatcher
 
