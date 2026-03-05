@@ -416,6 +416,7 @@ async function restoreMissionState(state) {
     } else if (imgDestContainer) { imgDestContainer.style.display = 'none'; }
 
     document.getElementById("destRwyContainer").style.display = state.isPOI ? "none" : "block";
+    if (document.getElementById("wikiDestRwyText")) document.getElementById("wikiDestRwyText").style.display = state.isPOI ? "none" : "block";
     const destSwitchRow = document.getElementById("destSwitchRow"); if(destSwitchRow) destSwitchRow.style.display = state.isPOI ? "none" : "flex";
 
     currentMissionData = state.currentMissionData; routeWaypoints = state.routeWaypoints;
@@ -1204,6 +1205,7 @@ async function generateMission() {
     if(mHeadingNote) mHeadingNote.innerText = `${nav.brng}°`;
     
     document.getElementById("destRwyContainer").style.display = isPOI ? "none" : "block";
+    if (document.getElementById("wikiDestRwyText")) document.getElementById("wikiDestRwyText").style.display = isPOI ? "none" : "block";
     const destSwitchRow = document.getElementById("destSwitchRow"); if(destSwitchRow) destSwitchRow.style.display = isPOI ? "none" : "flex";
 
     document.getElementById("briefingBox").style.display = "block";

@@ -469,6 +469,7 @@ body.theme-retro .wp-data { color: var(--piper-yellow); }
     #mapTableOverlay .pinboard-scroll-area { padding: 0 !important; }
     .maptable-content { width: 100% !important; height: 100% !important; border-radius: 0 !important; background-size: 100% 100% !important; }
     
+    
     /* Karte mit 20px Rand, damit der Tisch sichtbar bleibt + abgerundete Ecken */
     body:not(.map-is-fullscreen) #map { 
         width: calc(100% - 40px) !important; 
@@ -1158,4 +1159,14 @@ body.theme-navcom .discord-link {
 body.theme-navcom .discord-link:hover {
     color: #33ff33;
     text-shadow: 0 0 5px rgba(51, 255, 51, 0.6);
+}
+
+/* ==========================================================================
+   18. OVERRIDES FÜR MOBILE (Muss ganz unten stehen!)
+   ========================================================================== */
+@media (max-width: 767px) {
+    .briefing-photo-attachment.photo-zoomed {
+        /* Überschreibt den 3.0 Zoom von weiter oben */
+        transform: translate(-50%, 20%) scale(2.6) rotate(2deg) !important; 
+    }
 }
