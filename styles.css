@@ -244,6 +244,7 @@ body.theme-retro .mission-note-page::before { content: ''; position: absolute; t
 body.theme-retro .front-note { z-index: 2; transform: rotate(-1.5deg); box-shadow: 3px 5px 12px rgba(0,0,0,0.6); opacity: 1; }
 body.theme-retro .back-note { z-index: 1; transform: rotate(2deg) translate(8px, 6px); box-shadow: 2px 3px 8px rgba(0,0,0,0.5); filter: brightness(0.85); }
 body.theme-retro .third-note { z-index: 0; transform: rotate(-3deg) translate(14px, 12px); box-shadow: 1px 2px 5px rgba(0,0,0,0.4); filter: brightness(0.7); }
+body.theme-retro .fourth-note { z-index: -1; transform: rotate(1deg) translate(2px, 18px); box-shadow: 1px 2px 5px rgba(0,0,0,0.3); filter: brightness(0.6); }
 body.theme-retro .page-number { display: block; position: absolute; bottom: 5px; right: 10px; font-family: 'Caveat', cursive; font-size: 18px; color: #0b1f65; opacity: 0.6; }
 body.theme-retro #mTitle, body.theme-retro .wiki-title { display: block; font-family: 'Caveat', cursive; font-size: 28px; color: #0b1f65; text-shadow: none; margin-bottom: 8px; margin-top: 25px; transform: rotate(-1deg); line-height: 1.2; }
 body.theme-retro #mStory, body.theme-retro .wiki-info-note { font-family: 'Courier New', Courier, monospace; font-size: 14px; font-weight: bold; color: #222; line-height: 24px; border: none; padding-bottom: 0; margin-bottom: 0; text-shadow: none; letter-spacing: -0.5px; font-style: normal; }

@@ -321,9 +321,11 @@
         <button class="btn-preset" style="flex:1; background-color: #444; color: #fff; border-color: #222;" onclick="togglePinboard()">📋 Pinnwand</button>
     </div>
 
-    <div id="briefingBox" class="briefing">
-        <div class="notes-stack" id="notesStack">
+<div class="briefing" id="briefingBox">
+
+    <div class="notes-stack" id="notesStack">
             <div class="paperclip" onclick="toggleNotes()"></div>
+            
             <div class="mission-note-page front-note" id="notePage1" onclick="toggleNotes()">
                 <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
                 <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
@@ -353,40 +355,49 @@
                     </div>
                 </div>
             </div>
+
             <div class="mission-note-page back-note" id="notePage2" onclick="toggleNotes()">
                 <div class="page-number">Seite 2</div>
-                <h2 class="wiki-title">Start-Info</h2>
-                
-                 <div id="wikiDepImageContainer" class="briefing-photo-attachment" style="display:none; float: right; margin-left: 15px; margin-bottom: 10px; width: 140px; transform: rotate(-2deg);" onclick="toggleWikiPhoto(event, 'wikiDepImageContainer')">
-                     <div class="photo-pin" style="background: #4da6ff;"></div>
-                     <div class="photo-img" id="wikiDepImage" style="background-image: url(''); height: 100px;"></div>
-                     <div class="photo-caption" style="font-size: 14px;">Wiki-Daten</div>
-                </div>
-
-                <div class="wiki-info-note">
-                    <div id="wikiDepRwyText" style="color: var(--piper-yellow); margin-bottom: 10px; font-weight: bold; border-bottom: 1px dashed #ccc; padding-bottom: 5px;">Sucht Pisten-Infos...</div>
-                    📖 <span id="wikiDepDescText">Warte auf Daten...</span>
+                <h2 class="wiki-title" style="margin-bottom: 2px;">Nav-Log</h2>
+                <div id="briefingNavLog" style="font-family: 'Courier New', Courier, monospace; font-size: 11px; line-height: 1.4; color: #222; margin-top: 10px;">
                 </div>
             </div>
 
             <div class="mission-note-page third-note" id="notePage3" onclick="toggleNotes()">
                 <div class="page-number">Seite 3</div>
+                <h2 class="wiki-title">Start-Info</h2>
+                 <div id="wikiDepImageContainer" class="briefing-photo-attachment" style="display:none; float: right; margin-left: 15px; margin-bottom: 10px; width: 140px; transform: rotate(-2deg);" onclick="toggleWikiPhoto(event, 'wikiDepImageContainer')">
+                     <div class="photo-pin" style="background: #4da6ff;"></div>
+                     <div class="photo-img" id="wikiDepImage" style="background-image: url(''); height: 100px;"></div>
+                     <div class="photo-caption" style="font-size: 14px;">Wiki-Daten</div>
+                </div>
+                <div class="wiki-info-note">
+                    <div id="wikiDepFreqText" style="color: var(--blue); font-weight: bold; margin-bottom: 5px; font-size: 13px;"></div>
+                    <div id="wikiDepRwyText" style="color: var(--piper-yellow); margin-bottom: 10px; font-weight: bold; border-bottom: 1px dashed #ccc; padding-bottom: 5px;">Sucht Pisten-Infos...</div>
+                    📖 <span id="wikiDepDescText">Warte auf Daten...</span>
+                </div>
+                <img id="uiDepDetailMap" src="" style="width:100%; border-radius:4px; margin-top:15px; display:none; border: 2px solid #ccc; box-shadow: 2px 3px 6px rgba(0,0,0,0.3);">
+            </div>
+
+            <div class="mission-note-page fourth-note" id="notePage4" onclick="toggleNotes()">
+                <div class="page-number">Seite 4</div>
                 <h2 class="wiki-title">Ziel-Info</h2>
-                
                  <div id="wikiDestImageContainer" class="briefing-photo-attachment" style="display:none; float: right; margin-left: 15px; margin-bottom: 10px; width: 140px; transform: rotate(1deg);" onclick="toggleWikiPhoto(event, 'wikiDestImageContainer')">
                      <div class="photo-pin" style="background: #d93829;"></div>
                      <div class="photo-img" id="wikiDestImage" style="background-image: url(''); height: 100px;"></div>
                      <div class="photo-caption" style="font-size: 14px;">Wiki-Daten</div>
                 </div>
-
                 <div class="wiki-info-note">
+                    <div id="wikiDestFreqText" style="color: var(--blue); font-weight: bold; margin-bottom: 5px; font-size: 13px;"></div>
                     <div id="wikiDestRwyText" style="color: var(--piper-yellow); margin-bottom: 10px; font-weight: bold; border-bottom: 1px dashed #ccc; padding-bottom: 5px;">Sucht Pisten-Infos...</div>
                     📖 <span id="wikiDestDescText">Warte auf Daten...</span>
                 </div>
+                <img id="uiDestDetailMap" src="" style="width:100%; border-radius:4px; margin-top:15px; display:none; border: 2px solid #ccc; box-shadow: 2px 3px 6px rgba(0,0,0,0.3);">
             </div>
         </div>
-        
+
         <div class="flightplan-container" style="display:flex; flex-direction:column;">
+        
             <div class="aero-info-box" id="boxDep">
                 <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
                     <span class="box-title theme-green-text">🛫 <span id="mDepICAO"></span> | <span id="mDepName" style="color:#fff; text-shadow:none;"></span></span>
@@ -510,6 +521,7 @@
     <div class="pinboard-header">
         <span style="color: #fff; font-weight: bold; font-family: monospace;">NAV STATION (KARTENTISCH)</span>
         <div>
+             <button class="pb-btn" id="snapBtn" onclick="toggleSnapMode()">🧲 Snapping (Aus)</button>
             <button class="pb-btn" id="measureBtn" onclick="toggleMeasureMode()">📏 Messen (Aus)</button>
             <button class="pb-btn" onclick="clearMeasure()">🗑️ Zirkel löschen</button>
             <button class="pb-btn" onclick="resetMainRoute()">🔄 Route Reset</button>

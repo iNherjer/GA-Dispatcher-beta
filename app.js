@@ -132,23 +132,17 @@ function cycleRadioOption(selectId) {
 }
 
 function toggleNotes() {
-    const p1 = document.getElementById('notePage1');
-    const p2 = document.getElementById('notePage2');
-    const p3 = document.getElementById('notePage3');
-    if (!p1 || !p2 || !p3) return;
+    const p1 = document.getElementById('notePage1'), p2 = document.getElementById('notePage2'), p3 = document.getElementById('notePage3'), p4 = document.getElementById('notePage4');
+    if (!p1 || !p2 || !p3 || !p4) return;
 
     if(p1.classList.contains('front-note')) {
-        p1.className = 'mission-note-page third-note';
-        p2.className = 'mission-note-page front-note';
-        p3.className = 'mission-note-page back-note';
+        p1.className = 'mission-note-page fourth-note'; p2.className = 'mission-note-page front-note'; p3.className = 'mission-note-page back-note'; p4.className = 'mission-note-page third-note';
     } else if(p2.classList.contains('front-note')) {
-        p2.className = 'mission-note-page third-note';
-        p3.className = 'mission-note-page front-note';
-        p1.className = 'mission-note-page back-note';
+        p2.className = 'mission-note-page fourth-note'; p3.className = 'mission-note-page front-note'; p4.className = 'mission-note-page back-note'; p1.className = 'mission-note-page third-note';
+    } else if(p3.classList.contains('front-note')) {
+        p3.className = 'mission-note-page fourth-note'; p4.className = 'mission-note-page front-note'; p1.className = 'mission-note-page back-note'; p2.className = 'mission-note-page third-note';
     } else {
-        p3.className = 'mission-note-page third-note';
-        p1.className = 'mission-note-page front-note';
-        p2.className = 'mission-note-page back-note';
+        p4.className = 'mission-note-page fourth-note'; p1.className = 'mission-note-page front-note'; p2.className = 'mission-note-page back-note'; p3.className = 'mission-note-page third-note';
     }
 }
 
@@ -217,6 +211,8 @@ function cyclePanelColor() {
    2. GLOBALE VARIABLEN & INITIALISIERUNG
    ========================================================= */
 let map, polyline, markers = [], currentStartICAO, currentDestICAO, currentMissionData = null, selectedAC = "PA-24";
+let currentDepFreq = "";
+let currentDestFreq = "";
 let globalAirports = null, runwayCache = {};
 
 async function fetchWithTimeout(url, ms = 6000) {
@@ -1039,6 +1035,34 @@ function updateApiFuelMeter() {
     needle.style.transform = `translateX(-50%) rotate(${angle}deg)`;
 }
 
+async function fetchAirportFreq(icao, elementId, type) {
+    const el = document.getElementById(elementId);
+    if (el) el.innerText = '📻 Sucht Frequenz...';
+    const proxy = 'https://ga-proxy.einherjer.workers.dev';
+    try {
+        const res = await fetch(`${proxy}/api/airports?search=${icao}&limit=1&t=${Date.now()}`);
+        const data = await res.json();
+        if (data && data.items && data.items.length > 0) {
+            const apt = data.items[0];
+            if (apt.frequencies && apt.frequencies.length > 0) {
+                // Holt nur den reinen Wert (z.B. 118.105) und lässt den Typ weg
+                const freqs = apt.frequencies.map(f => f.value).join(', ');
+                if (el) el.innerText = `📻 FREQ: ${freqs}`;
+                
+                // Speichert die Frequenzen fest ab und aktualisiert die Tabelle
+                if (type === 'dep') currentDepFreq = freqs;
+                if (type === 'dest') currentDestFreq = freqs;
+                updateRoutePerformance(); 
+                return freqs;
+            }
+        }
+        if (el) el.innerText = '';
+    } catch(e) {
+        if (el) el.innerText = '';
+    }
+    return null;
+}
+
 async function generateMission() {
     const btn = document.getElementById('generateBtn'); 
     const rBtn = document.getElementById('radioGenerateBtn');
@@ -1057,7 +1081,6 @@ async function generateMission() {
     document.getElementById("mDepRwy").innerText = "Sucht Pisten-Infos..."; document.getElementById("mDepRwy").style.color = "#fff";
     document.getElementById("mDestRwy").innerText = "Sucht Pisten-Infos..."; document.getElementById("mDestRwy").style.color = "#fff";
     
-    // FIX für Crash: Aktualisiert die Texte auf beiden neuen Seiten!
     if(document.getElementById("wikiDepDescText")) document.getElementById("wikiDepDescText").innerText = "Lade Start-Info...";
     if(document.getElementById("wikiDestDescText")) document.getElementById("wikiDestDescText").innerText = "Lade Ziel-Info...";
 
@@ -1226,6 +1249,26 @@ async function generateMission() {
         fetchAreaDescription(start.lat, start.lon, 'wikiDepDescText', null, currentStartICAO, 'wikiDepImageContainer', 'wikiDepImage');
         fetchAreaDescription(dest.lat, dest.lon, 'wikiDestDescText', isPOI ? dest.n : null, isPOI ? null : currentDestICAO, 'wikiDestImageContainer', 'wikiDestImage');
         
+        // Frequenzen zurücksetzen, damit alte Werte beim Neu-Generieren nicht hängen bleiben
+        currentDepFreq = ""; 
+        currentDestFreq = "";
+        
+        // HIER NEU: Übergibt 'dep', damit die Funktion weiß, dass es der Start ist
+        fetchAirportFreq(currentStartICAO, 'wikiDepFreqText', 'dep');
+        renderTileCanvas(start.lat, start.lon, 13, 600, 400).then(url => {
+            const img = document.getElementById('uiDepDetailMap');
+            if(img) { img.src = url; img.style.display = 'block'; }
+        });
+        
+        if (!isPOI) {
+            // HIER NEU: Übergibt 'dest', damit die Funktion weiß, dass es das Ziel ist
+            fetchAirportFreq(currentDestICAO, 'wikiDestFreqText', 'dest');
+            renderTileCanvas(dest.lat, dest.lon, 13, 600, 400).then(url => {
+                const img = document.getElementById('uiDestDetailMap');
+                if(img) { img.src = url; img.style.display = 'block'; }
+            });
+        }
+
         indicator.innerText = `Briefing komplett.`; resetBtn(btn);
         const rBtnLed = document.getElementById('radioGenerateBtn');
         if(rBtnLed) rBtnLed.classList.add('active');
@@ -1252,9 +1295,9 @@ async function generateMission() {
         
         setTimeout(() => saveMissionState(), 1000);
         refreshGPSAfterDispatch();
-    }, 800); 
+    }, 800);
 }
-
+    
 /* =========================================================
    7. KARTE (LEAFLET, KARTENTISCH & MESS-WERKZEUG)
    ========================================================= */
@@ -1336,28 +1379,136 @@ function renderMainRoute() {
         let draggable = (!isStart && !isDest); 
         let marker = L.marker(latlng, {icon: icon, draggable: draggable}).addTo(map);
 
-        if (isStart) marker.bindPopup(`<b>DEP:</b> ${currentSName}`);
-        else if (isDest) marker.bindPopup(`<b>DEST:</b> ${currentDName}`);
-        else marker.bindPopup(`<div style="text-align:center;"><b>Wegpunkt</b><br><button onclick="removeRouteWaypoint(${index})" style="margin-top:5px; background:#d93829; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius: 2px;">🗑️ Löschen</button></div>`);
+        if (isStart) {
+            marker.bindPopup(`<b>DEP:</b> ${currentSName}`);
+        } else if (isDest) {
+            marker.bindPopup(`<b>DEST:</b> ${currentDName}`);
+        } else {
+            let wpName = routeWaypoints[index].name ? `<b>${routeWaypoints[index].name}</b>` : `<b>Wegpunkt</b>`;
+            marker.bindPopup(`<div style="text-align:center;">${wpName}<br><button onclick="removeRouteWaypoint(${index})" style="margin-top:5px; background:#d93829; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius: 2px;">🗑️ Löschen</button></div>`);
+        }
+        
+       if (draggable) {
+            marker.on('drag', function(e) {
+                if (snapMode && cachedNavData.length > 0) {
+                    let mousePoint = map.latLngToLayerPoint(e.latlng);
+                    let closest = null;
+                    let bestScore = -1; 
+                    
+                    cachedNavData.forEach(nav => {
+                        let navPoint = map.latLngToLayerPoint([nav.lat, nav.lng]);
+                        let d = mousePoint.distanceTo(navPoint);
+                        if (d < 25) {
+                            let score = 25 - d;
+                            // PRIORITÄT: VORs und Airports gewinnen bei Überlappung
+                            if (nav.name.includes('APT ')) score += 100;
+                            else if (nav.name.includes('[')) score += 50; 
+                            
+                            if (score > bestScore) {
+                                bestScore = score;
+                                closest = nav;
+                            }
+                        }
+                    });
+                    
+                    if (closest) marker.setLatLng([closest.lat, closest.lng]); 
+                    else marker.setLatLng(e.latlng); 
+                }
+            });
 
-        if(draggable) marker.on('dragend', function(e) { routeWaypoints[index] = e.target.getLatLng(); renderMainRoute(); });
+            marker.on('dragend', function(e) {
+                let dropLatLng = marker.getLatLng(); 
+                
+                if (snapMode && cachedNavData.length > 0) {
+                    let mousePoint = map.latLngToLayerPoint(dropLatLng);
+                    let closest = null;
+                    let bestScore = -1;
+                    
+                    cachedNavData.forEach(nav => {
+                        let navPoint = map.latLngToLayerPoint([nav.lat, nav.lng]);
+                        let d = mousePoint.distanceTo(navPoint);
+                        if (d < 25) {
+                            let score = 25 - d;
+                            if (nav.name.includes('APT ')) score += 100;
+                            else if (nav.name.includes('[')) score += 50; 
+                            
+                            if (score > bestScore) {
+                                bestScore = score;
+                                closest = nav;
+                            }
+                        }
+                    });
+
+                    if (closest) {
+                        routeWaypoints[index].lat = closest.lat;
+                        routeWaypoints[index].lng = closest.lng;
+                        routeWaypoints[index].name = closest.name;
+                    } else {
+                        routeWaypoints[index].lat = dropLatLng.lat;
+                        routeWaypoints[index].lng = dropLatLng.lng;
+                        routeWaypoints[index].name = null;
+                    }
+                } else {
+                    routeWaypoints[index].lat = dropLatLng.lat;
+                    routeWaypoints[index].lng = dropLatLng.lng;
+                    routeWaypoints[index].name = null;
+                }
+                renderMainRoute(); 
+            });
+        }
         routeMarkers.push(marker);
     });
     
     updateRoutePerformance(); updateMiniMap(); 
 }
-
 function updateRoutePerformance() {
     if(routeWaypoints.length < 2 || !currentMissionData) return;
     let totalNM = 0, wpHTML = '';
+    const tas = parseInt(document.getElementById("tasSlider").value) || 160;
+    const gph = parseInt(document.getElementById("gphSlider").value) || 14;
+    
+    let totalTime = 0;
+    let totalFuel = 0;
+
+    let blHTML = '<table style="width:100%; border-collapse:collapse; text-align:left; font-size:14px; font-family:\'Courier New\', monospace; font-weight:bold; color:#222; margin-top:5px;">';
+    blHTML += '<colgroup><col style="width:50%;"><col style="width:12%;"><col style="width:12%;"><col style="width:12%;"><col style="width:14%;"></colgroup>';
+    blHTML += '<tr style="border-bottom:2px solid #888; color:#0b1f65;"><th>Route</th><th>HDG</th><th>NM</th><th>Min</th><th>Gal</th></tr>';
     
     for(let i=0; i<routeWaypoints.length - 1; i++) {
         let p1 = routeWaypoints[i], p2 = routeWaypoints[i+1], nav = calcNav(p1.lat, p1.lng || p1.lon, p2.lat, p2.lng || p2.lon);
         totalNM += nav.dist;
-        let name1 = (i === 0) ? currentSName : `WP ${i}`, name2 = (i === routeWaypoints.length - 2) ? currentDName : `WP ${i+1}`;
-        wpHTML += `<div class="wp-row"><span class="wp-name">${name1} ➔ ${name2}</span><span class="wp-data">${nav.brng}° | ${nav.dist} NM</span></div>`;
+        
+        let isStart = (i === 0);
+        let isEnd = (i === routeWaypoints.length - 2);
+
+        let name1 = isStart ? currentStartICAO : (routeWaypoints[i].name || `WP ${i}`);
+        let name2 = isEnd ? currentDestICAO : (routeWaypoints[i+1].name || `WP ${i+1}`);
+        
+        let cleanName1 = name1.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '');
+        let cleanName2 = name2.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '');
+        
+        // Frequenzen absolut sicher und dunkelblau in die Namen einbetten
+        if (isStart && currentDepFreq) cleanName1 += ` <span style="color:#0b1f65;">(${currentDepFreq})</span>`;
+        if (isEnd && currentDestFreq) cleanName2 += ` <span style="color:#0b1f65;">(${currentDestFreq})</span>`;
+        
+        let legTime = Math.round((nav.dist / tas) * 60);
+        let legFuel = parseFloat((nav.dist / tas * gph).toFixed(1));
+
+        totalTime += legTime;
+        totalFuel += legFuel;
+
+        blHTML += `<tr><td colspan="5" style="padding-top:12px; color:#111; line-height: 1.2;">${i+1}. ${cleanName1}<br>&nbsp;&nbsp;&nbsp;➔ ${cleanName2}</td></tr>`;
+        blHTML += `<tr style="border-bottom:1px dashed #ccc; color:#d93829;"><td style="padding-bottom:6px;"></td><td style="padding-bottom:6px;">${nav.brng}°</td><td style="padding-bottom:6px;">${nav.dist}</td><td style="padding-bottom:6px;">${legTime}</td><td style="padding-bottom:6px;">${legFuel.toFixed(1)}</td></tr>`;
+        
+        wpHTML += `<div class="wp-row"><span class="wp-name">${cleanName1.replace(/<[^>]+>/g, '')} ➔ ${cleanName2.replace(/<[^>]+>/g, '')}</span><span class="wp-data">${nav.brng}° | ${nav.dist} NM</span></div>`;
     }
     
+    blHTML += `<tr style="border-top:2px solid #888; color:#0b1f65; font-size:15px;"><td style="padding-top:8px;">TOTAL</td><td style="padding-top:8px;"></td><td style="padding-top:8px;">${totalNM}</td><td style="padding-top:8px;">${totalTime}</td><td style="padding-top:8px;">${totalFuel.toFixed(1)}</td></tr>`;
+    blHTML += '</table>';
+    
+    const blDiv = document.getElementById('briefingNavLog');
+    if (blDiv) blDiv.innerHTML = blHTML;
+
     let initialNav = calcNav(routeWaypoints[0].lat, routeWaypoints[0].lng || routeWaypoints[0].lon, routeWaypoints[1].lat, routeWaypoints[1].lng || routeWaypoints[1].lon);
     currentMissionData.dist = totalNM; currentMissionData.heading = initialNav.brng;
 
@@ -1367,12 +1518,10 @@ function updateRoutePerformance() {
     
     recalculatePerformance();
     const mDistNote = document.getElementById("mDistNote"); if(mDistNote) mDistNote.innerText = `${totalNM} NM`;
-    const tas = parseInt(document.getElementById("tasSlider").value) || 160, totalMinutes = Math.round((totalNM / tas) * 60);
-    const hrs = Math.floor(totalMinutes / 60), mins = totalMinutes % 60;
+    const hrs = Math.floor(totalTime / 60), mins = totalTime % 60;
     const mETENote = document.getElementById("mETENote"); if(mETENote) mETENote.innerText = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} Min.`;
 
     setTimeout(() => saveMissionState(), 500);
-
     if (gpsState.visible && gpsState.mode === 'FPL') renderGPS();
 }
 
@@ -1418,6 +1567,14 @@ function initMapBase() {
     map.on('overlayremove', function(e) {
         if (e.name === "🛩️ VFR Lufträume (Overlay)") {
             topoMap.setOpacity(1.0); 
+        }
+    });
+    
+    let fetchTimeout = null;
+    map.on('moveend', function() {
+        if (snapMode) {
+            clearTimeout(fetchTimeout); // Löscht alte, noch nicht ausgeführte Anfragen
+            fetchTimeout = setTimeout(fetchOpenAIPData, 600); // Wartet 0,6 Sekunden Stillstand ab
         }
     });
     
@@ -1485,14 +1642,19 @@ function toggleMapTable() {
     const board = document.getElementById('mapTableOverlay'), pinBoard = document.getElementById('pinboardOverlay');
     if (pinBoard.classList.contains('active')) { togglePinboard(); }
     board.classList.toggle('active'); document.body.classList.toggle('maptable-open');
+    
     if (board.classList.contains('active')) {
         lockBodyScroll();
         if(!map) initMapBase();
+        
         setTimeout(() => {
             if(map) {
                 map.invalidateSize();
                 if(routeWaypoints && routeWaypoints.length >= 2) map.fitBounds(L.latLngBounds(routeWaypoints), { padding: [40, 40] });
                 else updateMapFromInputs();
+                
+                updateSnapButtonUI(); // Button blau machen
+                if(snapMode) fetchOpenAIPData(); // Direkt Punkte für den Ausschnitt laden!
             }
         }, 500);
     } else {
@@ -1787,6 +1949,8 @@ function gatherBriefingData() {
         destDesc:   document.getElementById('wikiDestDescText')?.innerText || '',
         depRwyText: document.getElementById('wikiDepRwyText')?.innerText || '',
         destRwyText:document.getElementById('wikiDestRwyText')?.innerText || '',
+        depFreq:    document.getElementById('wikiDepFreqText')?.innerText || '',
+        destFreq:   document.getElementById('wikiDestFreqText')?.innerText || '',
         isPOI:      document.getElementById('destRwyContainer')?.style.display === 'none',
         date:       new Date().toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' }),
         time:       new Date().toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }),
@@ -1800,12 +1964,22 @@ function gatherBriefingData() {
 
 function computeLegs() {
     const legs = [];
+    const tas = parseInt(document.getElementById('tasSlider').value) || 115;
+    const gph = parseInt(document.getElementById('gphSlider').value) || 9;
+
     for (let i = 0; i < routeWaypoints.length - 1; i++) {
         const p1 = routeWaypoints[i], p2 = routeWaypoints[i+1];
         const nav = calcNav(p1.lat, p1.lng || p1.lon, p2.lat, p2.lng || p2.lon);
-        const n1 = (i === 0) ? currentSName : `WP ${i}`;
-        const n2 = (i === routeWaypoints.length - 2) ? currentDName : `WP ${i+1}`;
-        legs.push({ from: n1, to: n2, heading: nav.brng, dist: nav.dist });
+        
+        let n1 = (i === 0) ? currentSName : (routeWaypoints[i].name || `WP ${i}`);
+        let n2 = (i === routeWaypoints.length - 2) ? currentDName : (routeWaypoints[i+1].name || `WP ${i+1}`);
+        
+        n1 = n1.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '');
+        n2 = n2.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '');
+
+        const time = Math.round((nav.dist / tas) * 60);
+        const fuel = (nav.dist / tas * gph).toFixed(1);
+        legs.push({ from: n1, to: n2, heading: nav.brng, dist: nav.dist, time: time, fuel: fuel });
     }
     return legs;
 }
@@ -1933,8 +2107,8 @@ async function captureMapForPDF() {
         ctx.fillStyle = fill; ctx.fill();
         ctx.strokeStyle = '#111'; ctx.lineWidth = 2; ctx.stroke();
 
-        // Label
-        const label = isStart ? currentSName : isDest ? currentDName : `WP${i}`;
+        // NEU: Nimmt wp.name, wenn vorhanden
+        const label = isStart ? currentSName : isDest ? currentDName : (wp.name || `WP${i}`);
         ctx.font = 'bold 11px Helvetica, Arial, sans-serif';
         ctx.fillStyle = '#111';
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
@@ -2196,163 +2370,76 @@ function drawMissionBriefingPage(doc, data) {
 
 function drawRouteNavigationPage(doc, data, legs) {
     let y = 30;
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(11, 31, 101);
+    doc.text('ROUTE & NAVIGATION', 32, y); y += 4;
+    doc.setDrawColor(11, 31, 101); doc.setLineWidth(0.5); doc.line(32, y, 190, y); y += 12;
 
-    // Title
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(18);
-    doc.setTextColor(11, 31, 101);
-    doc.text('ROUTE & NAVIGATION', 32, y);
-    y += 4;
-    doc.setDrawColor(11, 31, 101);
-    doc.setLineWidth(0.5);
-    doc.line(32, y, 190, y);
-    y += 12;
-
-    // Route summary line
-    doc.setFont('Helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(80, 80, 80);
+    doc.setFont('Helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(80, 80, 80);
     const wpNames = [currentSName];
     for (let i = 1; i < routeWaypoints.length - 1; i++) wpNames.push(`WP${i}`);
     if (routeWaypoints.length > 1) wpNames.push(currentDName);
-    doc.text(wpNames.join(' -> '), 32, y);
-    y += 10;
+    doc.text(wpNames.join(' -> '), 32, y); y += 10;
 
-    // Waypoint table
-    const tableX = 32, colWidths = [12, 72, 32, 32];
-    const tableW = colWidths.reduce((a, b) => a + b, 0);
-    const rowH = 8;
+    const tableX = 32, colWidths = [10, 68, 16, 18, 18, 18];
+    const tableW = colWidths.reduce((a, b) => a + b, 0), rowH = 12; 
 
-    // Header
-    doc.setFillColor(220, 215, 200);
-    doc.rect(tableX, y, tableW, rowH, 'F');
-    doc.setDrawColor(160, 155, 140);
-    doc.setLineWidth(0.3);
-    doc.rect(tableX, y, tableW, rowH, 'S');
+    doc.setFillColor(220, 215, 200); doc.rect(tableX, y, tableW, 8, 'F');
+    doc.setDrawColor(160, 155, 140); doc.setLineWidth(0.3); doc.rect(tableX, y, tableW, 8, 'S');
 
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(40, 40, 40);
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(40, 40, 40);
     doc.text('LEG', tableX + 2, y + 5.5);
     doc.text('ROUTE', tableX + colWidths[0] + 2, y + 5.5);
-    doc.text('HDG', tableX + colWidths[0] + colWidths[1] + 4, y + 5.5);
-    doc.text('DIST', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 4, y + 5.5);
-    y += rowH;
+    doc.text('HDG', tableX + colWidths[0] + colWidths[1] + 2, y + 5.5);
+    doc.text('DIST', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, y + 5.5);
+    doc.text('TIME', tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 2, y + 5.5);
+    doc.text('FUEL', tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + 2, y + 5.5);
+    y += 8;
 
-    // Data rows
     doc.setFont('Helvetica', 'normal');
+    
+    let totalTime = 0;
+    let totalFuel = 0;
+
     legs.forEach((leg, i) => {
-        if (i % 2 === 0) {
-            doc.setFillColor(250, 246, 235);
-            doc.rect(tableX, y, tableW, rowH, 'F');
-        }
-        doc.setDrawColor(200, 195, 180);
-        doc.rect(tableX, y, tableW, rowH, 'S');
+        totalTime += leg.time;
+        totalFuel += parseFloat(leg.fuel);
+
+        if (i % 2 === 0) { doc.setFillColor(250, 246, 235); doc.rect(tableX, y, tableW, rowH, 'F'); }
+        doc.setDrawColor(200, 195, 180); doc.rect(tableX, y, tableW, rowH, 'S');
 
         doc.setTextColor(40, 40, 40);
-        doc.text(`${i + 1}`, tableX + 4, y + 5.5);
-        doc.text(`${leg.from} -> ${leg.to}`, tableX + colWidths[0] + 2, y + 5.5);
-        doc.text(`${leg.heading}\u00B0`, tableX + colWidths[0] + colWidths[1] + 4, y + 5.5);
-        doc.text(`${leg.dist} NM`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + 4, y + 5.5);
+        doc.text(`${i + 1}`, tableX + 3, y + 7);
+        doc.text(`${leg.from}`, tableX + colWidths[0] + 2, y + 4.5);
+        doc.text(`-> ${leg.to}`, tableX + colWidths[0] + 2, y + 9.5); 
+        
+        doc.text(`${leg.heading}\u00B0`, tableX + colWidths[0] + colWidths[1] + 2, y + 7);
+        doc.text(`${leg.dist} NM`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, y + 7);
+        doc.text(`${leg.time} m`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 2, y + 7);
+        doc.text(`${leg.fuel} G`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + 2, y + 7);
         y += rowH;
     });
 
-    // Totals row
-    doc.setFillColor(210, 205, 190);
-    doc.rect(tableX, y, tableW, rowH, 'F');
-    doc.setDrawColor(160, 155, 140);
-    doc.rect(tableX, y, tableW, rowH, 'S');
-    doc.setFont('Helvetica', 'bold');
-    doc.setTextColor(11, 31, 101);
+    // NEU: Total Werte für Time & Fuel im PDF
+    doc.setFillColor(210, 205, 190); doc.rect(tableX, y, tableW, 8, 'F');
+    doc.setDrawColor(160, 155, 140); doc.rect(tableX, y, tableW, 8, 'S');
+    doc.setFont('Helvetica', 'bold'); doc.setTextColor(11, 31, 101);
     doc.text('TOTAL', tableX + colWidths[0] + 2, y + 5.5);
-    doc.text(`${data.heading}`, tableX + colWidths[0] + colWidths[1] + 4, y + 5.5);
-    doc.text(`${data.totalDist} NM`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + 4, y + 5.5);
-    y += rowH + 14;
+    doc.text(`${data.totalDist} NM`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, y + 5.5);
+    doc.text(`${totalTime} m`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 2, y + 5.5);
+    doc.text(`${totalFuel.toFixed(1)} G`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + 2, y + 5.5);
+    y += 8 + 14;
 
-    // Performance section
-    doc.setDrawColor(100, 100, 100);
-    doc.setLineWidth(0.3);
-    doc.setLineDashPattern([2, 2], 0);
-    doc.line(32, y, 190, y);
-    doc.setLineDashPattern([], 0);
-    y += 10;
+    doc.setDrawColor(100, 100, 100); doc.setLineWidth(0.3); doc.setLineDashPattern([2, 2], 0); doc.line(32, y, 190, y); doc.setLineDashPattern([], 0); y += 10;
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(11, 31, 101); doc.text('PERFORMANCE', 32, y); y += 12;
 
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.setTextColor(11, 31, 101);
-    doc.text('PERFORMANCE', 32, y);
-    y += 12;
-
-    doc.setFontSize(10);
-    const perfCol1 = 38, perfCol2 = 110;
-
-    doc.setTextColor(217, 56, 41);
-    doc.text('Aircraft:', perfCol1, y);
-    doc.setTextColor(40, 40, 40);
-    doc.setFont('Helvetica', 'normal');
-    doc.text(data.aircraft, perfCol1 + 38, y);
-
-    doc.setFont('Helvetica', 'bold');
-    doc.setTextColor(217, 56, 41);
-    doc.text('TAS:', perfCol2, y);
-    doc.setTextColor(40, 40, 40);
-    doc.setFont('Helvetica', 'normal');
-    doc.text(`${data.tas} kts`, perfCol2 + 28, y);
-    y += 8;
-
-    doc.setFont('Helvetica', 'bold');
-    doc.setTextColor(217, 56, 41);
-    doc.text('GPH:', perfCol1, y);
-    doc.setTextColor(40, 40, 40);
-    doc.setFont('Helvetica', 'normal');
-    doc.text(`${data.gph} gal/h`, perfCol1 + 38, y);
-
-    doc.setFont('Helvetica', 'bold');
-    doc.setTextColor(217, 56, 41);
-    doc.text('Dist:', perfCol2, y);
-    doc.setTextColor(40, 40, 40);
-    doc.setFont('Helvetica', 'normal');
-    doc.text(`${data.totalDist} NM`, perfCol2 + 28, y);
-    y += 8;
-
-    doc.setFont('Helvetica', 'bold');
-    doc.setTextColor(217, 56, 41);
-    doc.text('ETE:', perfCol1, y);
-    doc.setTextColor(40, 40, 40);
-    doc.setFont('Helvetica', 'normal');
-    doc.text(data.totalTimeStr, perfCol1 + 38, y);
-
-    doc.setFont('Helvetica', 'bold');
-    doc.setTextColor(217, 56, 41);
-    doc.text('Fuel:', perfCol2, y);
-    doc.setTextColor(40, 40, 40);
-    doc.setFont('Helvetica', 'normal');
-    doc.text(`${data.totalFuel} Gal (inkl. ${data.reserveFuel} Res.)`, perfCol2 + 28, y);
-    y += 16;
-
-    // Notes area
-    doc.setDrawColor(100, 100, 100);
-    doc.setLineDashPattern([2, 2], 0);
-    doc.line(32, y, 190, y);
-    doc.setLineDashPattern([], 0);
-    y += 10;
-
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(12);
-    doc.setTextColor(11, 31, 101);
-    doc.text('NOTES', 32, y);
-    y += 8;
-
-    // Empty lines for handwritten notes
-    doc.setDrawColor(200, 195, 180);
-    doc.setLineWidth(0.2);
-    doc.setLineDashPattern([1, 3], 0);
-    for (let i = 0; i < 8; i++) {
-        doc.line(32, y + (i * 7), 190, y + (i * 7));
-    }
-    doc.setLineDashPattern([], 0);
+    doc.setFontSize(10); const perfCol1 = 38, perfCol2 = 110;
+    doc.setTextColor(217, 56, 41); doc.text('Aircraft:', perfCol1, y); doc.setTextColor(40, 40, 40); doc.setFont('Helvetica', 'normal'); doc.text(data.aircraft, perfCol1 + 38, y);
+    doc.setFont('Helvetica', 'bold'); doc.setTextColor(217, 56, 41); doc.text('TAS:', perfCol2, y); doc.setTextColor(40, 40, 40); doc.setFont('Helvetica', 'normal'); doc.text(`${data.tas} kts`, perfCol2 + 28, y); y += 8;
+    doc.setFont('Helvetica', 'bold'); doc.setTextColor(217, 56, 41); doc.text('GPH:', perfCol1, y); doc.setTextColor(40, 40, 40); doc.setFont('Helvetica', 'normal'); doc.text(`${data.gph} gal/h`, perfCol1 + 38, y);
+    doc.setFont('Helvetica', 'bold'); doc.setTextColor(217, 56, 41); doc.text('Dist:', perfCol2, y); doc.setTextColor(40, 40, 40); doc.setFont('Helvetica', 'normal'); doc.text(`${data.totalDist} NM`, perfCol2 + 28, y); y += 8;
+    doc.setFont('Helvetica', 'bold'); doc.setTextColor(217, 56, 41); doc.text('ETE:', perfCol1, y); doc.setTextColor(40, 40, 40); doc.setFont('Helvetica', 'normal'); doc.text(data.totalTimeStr, perfCol1 + 38, y);
+    doc.setFont('Helvetica', 'bold'); doc.setTextColor(217, 56, 41); doc.text('Fuel:', perfCol2, y); doc.setTextColor(40, 40, 40); doc.setFont('Helvetica', 'normal'); doc.text(`${data.totalFuel} Gal`, perfCol2 + 28, y); y += 16;
 }
-
 function drawAirportInfoPage(doc, type, data, photo, detailMap) {
     let y = 30;
     const isDep = (type === 'dep');
@@ -2409,22 +2496,21 @@ function drawAirportInfoPage(doc, type, data, photo, detailMap) {
     doc.text(`Koordinaten: ${coords}`, 32, y);
     y += 14;
 
-    // Runway info
+    // Runway info & Freq
+    const freq = isDep ? data.depFreq : data.destFreq;
+    if (freq && !freq.includes('Sucht Frequenz')) {
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(11, 31, 101);
+        doc.text(freq.replace('📻 ', ''), 32, y);
+        y += 8;
+    }
+
     doc.setFont('Helvetica', 'bold');
     doc.setFontSize(12);
     doc.setTextColor(217, 56, 41);
     doc.text('RUNWAY INFO', 32, y);
     y += 8;
-
-    doc.setFont('Helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(40, 40, 40);
-
-    const rwyDisplay = rwyText && rwyText !== 'Sucht Pisten-Infos...' ? rwyText : rwy;
-    if (rwyDisplay) {
-        y = pdfWrappedText(doc, rwyDisplay, 32, y, 155, 6);
-    }
-    y += 10;
 
     // Separator
     doc.setDrawColor(100, 100, 100);
@@ -2872,63 +2958,44 @@ function renderGPS() {
 const FPL_LEGS_PER_PAGE = 6; 
 
 function renderFPL(left, right) {
-    if (!currentMissionData) {
-        left.innerHTML  = '<div class="kln90b-line dim">NO FLIGHTPLAN</div>';
-        right.innerHTML = '<div class="kln90b-line dim">DISPATCH FIRST</div>';
-        return;
-    }
+    if (!currentMissionData) { left.innerHTML = '<div class="kln90b-line dim">NO FLIGHTPLAN</div>'; right.innerHTML = '<div class="kln90b-line dim">DISPATCH FIRST</div>'; return; }
 
-    const wps = routeWaypoints;
-    const legs = [];
+    const wps = routeWaypoints, legs = [];
     if (wps && wps.length >= 2) {
         for (let i = 0; i < wps.length - 1; i++) {
-            const p1 = wps[i], p2 = wps[i + 1];
-            const nav = calcNav(p1.lat, p1.lng || p1.lon, p2.lat, p2.lng || p2.lon);
-            const n1 = i === 0              ? (currentStartICAO || 'DEP')  : `WP${i}`;
-            const n2 = i === wps.length - 2 ? (currentDestICAO  || 'DEST') : `WP${i+1}`;
-            legs.push({ n1, n2, brng: nav.brng, dist: nav.dist });
+            const p1 = wps[i], p2 = wps[i + 1], nav = calcNav(p1.lat, p1.lng || p1.lon, p2.lat, p2.lng || p2.lon);
+            let n1 = i === 0 ? (currentStartICAO || 'DEP')  : (wps[i].name || `WP${i}`);
+            let n2 = i === wps.length - 2 ? (currentDestICAO  || 'DEST') : (wps[i+1].name || `WP${i+1}`);
+            
+            // Wegschneiden für GPS
+            n1 = n1.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '');
+            n2 = n2.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '');
+
+            const n1Short = n1.length > 8 ? n1.substring(0, 7) + '.' : n1;
+            const n2Short = n2.length > 8 ? n2.substring(0, 7) + '.' : n2;
+            legs.push({ n1: n1Short, n2: n2Short, brng: nav.brng, dist: nav.dist });
         }
     }
 
-    const legPages   = Math.max(1, Math.ceil(legs.length / FPL_LEGS_PER_PAGE));
-    const totalPages = legPages;
-    gpsState.maxPages['FPL'] = totalPages;
-    if (gpsState.subPage >= totalPages) gpsState.subPage = totalPages - 1;
-
+    const legPages = Math.max(1, Math.ceil(legs.length / 6));
+    gpsState.maxPages['FPL'] = legPages;
+    if (gpsState.subPage >= legPages) gpsState.subPage = legPages - 1;
     const pageLbl = document.getElementById('gpsPageLbl');
-    if (pageLbl) pageLbl.textContent = `PG ${gpsState.subPage + 1}/${totalPages}`;
+    if (pageLbl) pageLbl.textContent = `PG ${gpsState.subPage + 1}/${legPages}`;
 
     if (gpsState.subPage < legPages) {
-        const start   = gpsState.subPage * FPL_LEGS_PER_PAGE;
-        const visible = legs.slice(start, start + FPL_LEGS_PER_PAGE);
+        const start = gpsState.subPage * 6;
+        const visible = legs.slice(start, start + 6);
         left.innerHTML = visible.map((l, idx) => {
-            const absIdx = start + idx;
-            const isEnd  = absIdx === 0 || absIdx === legs.length - 1;
-            const cls    = isEnd ? 'highlight' : '';
-            return `<div class="kln90b-line ${cls}" style="font-size:10px; line-height:1.5; white-space:nowrap;">${l.n1}\u2192${l.n2}&nbsp;&nbsp;<span class="dim">${l.brng}\u00b0&thinsp;${l.dist}&thinsp;NM</span></div>`;
+            const isEnd = (start + idx) === 0 || (start + idx) === legs.length - 1;
+            return `<div class="kln90b-line ${isEnd ? 'highlight' : ''}" style="font-size:10px; line-height:1.5; white-space:nowrap;">${l.n1}\u2192${l.n2}&nbsp;&nbsp;<span class="dim">${l.brng}\u00b0&thinsp;${l.dist}&thinsp;NM</span></div>`;
         }).join('');
-        if (legs.length === 0) {
-            const dep  = currentStartICAO || '----';
-            const dest = currentDestICAO  || '----';
-            left.innerHTML = `<div class="kln90b-line highlight">${dep}</div><div class="kln90b-line dim">→${dest}</div>`;
-        }
+        if (legs.length === 0) left.innerHTML = `<div class="kln90b-line highlight">${currentStartICAO}</div><div class="kln90b-line dim">→${currentDestICAO}</div>`;
         
-        const _dist2 = Math.round((currentMissionData.dist||0)*10)/10;
-        const _tas2  = parseInt(document.getElementById('tasSlider')?.value)||115;
-        const _gph2  = parseInt(document.getElementById('gphSlider')?.value)||9;
-        const _mins2 = Math.round((_dist2/_tas2)*60);
-        const _fuel2 = Math.ceil((_dist2/_tas2)*_gph2+0.75*_gph2);
-        let _hdg2 = currentMissionData.heading||0;
-        if (wps && wps.length>=2){const _f=wps[0],_l=wps[wps.length-1];_hdg2=calcNav(_f.lat,_f.lng||_f.lon,_l.lat,_l.lng||_l.lon).brng;}
-        right.innerHTML =
-            `<div class="kln90b-line dim" style="font-size:9px;">TOTAL:</div>`+
-            `<div class="kln90b-line" style="font-size:10px;">DST ${_dist2}NM</div>`+
-            `<div class="kln90b-line" style="font-size:10px;">TME ${_mins2}m</div>`+
-            `<div class="kln90b-line" style="font-size:10px;">FUL ${_fuel2}G</div>`+
-            `<div class="kln90b-line" style="font-size:10px;">HDG ${_hdg2}°</div>`;
+        const _d = Math.round((currentMissionData.dist||0)*10)/10, _t = parseInt(document.getElementById('tasSlider')?.value)||115, _g = parseInt(document.getElementById('gphSlider')?.value)||9;
+        right.innerHTML = `<div class="kln90b-line dim" style="font-size:9px;">TOTAL:</div><div class="kln90b-line" style="font-size:10px;">DST ${_d}NM</div><div class="kln90b-line" style="font-size:10px;">TME ${Math.round((_d/_t)*60)}m</div><div class="kln90b-line" style="font-size:10px;">FUL ${Math.ceil((_d/_t)*_g+0.75*_g)}G</div><div class="kln90b-line" style="font-size:10px;">HDG ${currentMissionData.heading||0}°</div>`;
     }
 }
-
 async function renderAirportInfo(left, right, type) {
     const icao = type === 'dep' ? currentStartICAO : currentDestICAO;
     if (!icao) {
@@ -3143,3 +3210,74 @@ document.addEventListener('DOMContentLoaded', () => {
     initCom2Knob();
     restoreAudioButtonStates();
 });
+
+/* =========================================================
+   19. OPENAIP SNAPPING (NAVAIDS & REP-POINTS)
+   ========================================================= */
+let snapMode = true; // JETZT STANDARDMÄßIG AN!
+let cachedNavData = [];
+
+function toggleSnapMode() {
+    snapMode = !snapMode;
+    updateSnapButtonUI();
+    if (snapMode && map) fetchOpenAIPData();
+    else cachedNavData = [];
+}
+
+function updateSnapButtonUI() {
+    const btn = document.getElementById('snapBtn');
+    if (!btn) return;
+    if (snapMode) {
+        btn.innerText = '🧲 Snapping (An)';
+        btn.style.background = '#4da6ff';
+        btn.style.color = '#fff';
+    } else {
+        btn.innerText = '🧲 Snapping (Aus)';
+        btn.style.background = '#444';
+        btn.style.color = '#fff';
+    }
+}
+
+async function fetchOpenAIPData() {
+    if (!map || !snapMode) return;
+    const b = map.getBounds();
+    const bbox = `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
+    const proxy = 'https://ga-proxy.einherjer.workers.dev';
+    
+    try {
+        const [navRes, repRes, aptRes] = await Promise.all([
+            fetch(`${proxy}/api/navaids?bbox=${bbox}&limit=250&t=${Date.now()}`),
+            fetch(`${proxy}/api/reporting-points?bbox=${bbox}&limit=250&t=${Date.now()}`),
+            fetch(`${proxy}/api/airports?bbox=${bbox}&limit=250&t=${Date.now()}`)
+        ]);
+        
+        const navJson = await navRes.json(), repJson = await repRes.json(), aptJson = await aptRes.json();
+        cachedNavData = [];
+        
+        let navArray = navJson.items || [];
+        let repArray = repJson.items || [];
+        let aptArray = aptJson.items || [];
+
+        // VORs & NDBs: Zieht jetzt auch "identifier" aus der Datenbank
+        navArray.forEach(i => {
+            if (!i.geometry) return;
+            let freq = (i.frequencies && i.frequencies.length > 0 && i.frequencies[0].value) ? ` (${i.frequencies[0].value})` : '';
+            let idVal = i.identifier || i.designator || '';
+            let ident = idVal ? ` [${idVal}]` : '';
+            cachedNavData.push({ name: `${i.name}${ident}${freq}`, lat: i.geometry.coordinates[1], lng: i.geometry.coordinates[0] });
+        });
+        
+        repArray.forEach(i => {
+            if (!i.geometry) return;
+            cachedNavData.push({ name: `RPP ${i.name}`, lat: i.geometry.coordinates[1], lng: i.geometry.coordinates[0] });
+        });
+        
+        // Airports: Nimmt NUR noch den ICAO Code, falls vorhanden (sonst Name)
+        aptArray.forEach(i => {
+            if (!i.geometry) return;
+            let freq = (i.frequencies && i.frequencies.length > 0 && i.frequencies[0].value) ? ` (${i.frequencies[0].value})` : '';
+            let displayName = i.icaoCode ? i.icaoCode : i.name;
+            cachedNavData.push({ name: `APT ${displayName}${freq}`, lat: i.geometry.coordinates[1], lng: i.geometry.coordinates[0] });
+        });
+    } catch(e) { console.error("❌ Fetch Error:", e); }
+}
