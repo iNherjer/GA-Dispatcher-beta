@@ -327,6 +327,7 @@
             <div class="mission-note-page front-note" id="notePage1" onclick="toggleNotes()">
                 <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
                 <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
+                <div class="briefing-pdf-pin" onclick="generateBriefingPDF(); event.stopPropagation();" title="Briefing Pack als PDF drucken">📄</div>
                 <div class="page-number">Seite 1</div>
                 <h2 id="mTitle"></h2>
                 <p id="mStory" class="story"></p>
@@ -523,6 +524,8 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="datenbank.js"></script>
 <script src="missions.js"></script>
 <script src="app.js"></script>

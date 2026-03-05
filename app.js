@@ -1754,6 +1754,884 @@ function importMission() {
     } catch (e) { alert("❌ Fehler: Der Code ist ungültig oder beschädigt."); }
 }
 
+// ==========================================
+// PDF BRIEFING PACK EXPORT
+// ==========================================
+
+function gatherBriefingData() {
+    const tas = parseInt(document.getElementById('tasSlider').value) || 115;
+    const gph = parseInt(document.getElementById('gphSlider').value) || 9;
+    const dist = currentMissionData.dist;
+    const totalMinutes = Math.round((dist / tas) * 60);
+    const hrs = Math.floor(totalMinutes / 60), mins = totalMinutes % 60;
+    return {
+        title:      document.getElementById('mTitle').innerText,
+        story:      document.getElementById('mStory').innerText,
+        payload:    document.getElementById('mPay').innerText,
+        cargo:      document.getElementById('mWeight').innerText,
+        distance:   document.getElementById('mDistNote').innerText,
+        heading:    document.getElementById('mHeadingNote').innerText,
+        ete:        document.getElementById('mETENote').innerText,
+        aircraft:   selectedAC,
+        tas:        tas,
+        gph:        gph,
+        depICAO:    document.getElementById('mDepICAO').innerText,
+        depName:    document.getElementById('mDepName').innerText,
+        depCoords:  document.getElementById('mDepCoords').innerText,
+        depRwy:     document.getElementById('mDepRwy').innerText,
+        destICAO:   document.getElementById('mDestICAO').innerText,
+        destName:   document.getElementById('mDestName').innerText,
+        destCoords: document.getElementById('mDestCoords').innerText,
+        destRwy:    document.getElementById('mDestRwy').innerText,
+        depDesc:    document.getElementById('wikiDepDescText')?.innerText || '',
+        destDesc:   document.getElementById('wikiDestDescText')?.innerText || '',
+        depRwyText: document.getElementById('wikiDepRwyText')?.innerText || '',
+        destRwyText:document.getElementById('wikiDestRwyText')?.innerText || '',
+        isPOI:      document.getElementById('destRwyContainer')?.style.display === 'none',
+        date:       new Date().toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' }),
+        time:       new Date().toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }),
+        totalDist:  Math.round(dist),
+        totalTime:  totalMinutes,
+        totalTimeStr: hrs > 0 ? `${hrs}h ${mins}m` : `${mins} Min`,
+        totalFuel:  Math.ceil((dist / tas * gph) + (0.75 * gph)),
+        reserveFuel: Math.ceil(0.75 * gph)
+    };
+}
+
+function computeLegs() {
+    const legs = [];
+    for (let i = 0; i < routeWaypoints.length - 1; i++) {
+        const p1 = routeWaypoints[i], p2 = routeWaypoints[i+1];
+        const nav = calcNav(p1.lat, p1.lng || p1.lon, p2.lat, p2.lng || p2.lon);
+        const n1 = (i === 0) ? currentSName : `WP ${i}`;
+        const n2 = (i === routeWaypoints.length - 2) ? currentDName : `WP ${i+1}`;
+        legs.push({ from: n1, to: n2, heading: nav.brng, dist: nav.dist });
+    }
+    return legs;
+}
+
+function extractImageUrl(element) {
+    if (!element) return null;
+    const bg = element.style.backgroundImage;
+    if (!bg || bg === 'url("")' || bg === '' || bg === 'url()') return null;
+    return bg.replace(/^url\(['"]?/, '').replace(/['"]?\)$/, '');
+}
+
+async function getImageAsBase64(url) {
+    try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    } catch(e) { return null; }
+}
+
+function stripEmojis(text) {
+    return text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, '').trim();
+}
+
+async function captureMapForPDF() {
+    if (routeWaypoints.length < 2) return null;
+
+    const W = 900, H = 600;
+    const bounds = L.latLngBounds(routeWaypoints);
+
+    // Calculate zoom and center manually for tile rendering
+    // Find zoom level where route fits in WxH with padding
+    let zoom = 1;
+    for (let z = 14; z >= 1; z--) {
+        const nw = bounds.getNorthWest(), se = bounds.getSouthEast();
+        const p1 = latLngToPixel(nw.lat, nw.lng, z);
+        const p2 = latLngToPixel(se.lat, se.lng, z);
+        const routeW = Math.abs(p2.x - p1.x), routeH = Math.abs(p2.y - p1.y);
+        if (routeW < W - 20 && routeH < H - 20) { zoom = z; break; }
+    }
+
+    const center = bounds.getCenter();
+    const centerPx = latLngToPixel(center.lat, center.lng, zoom);
+
+    // Create canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = W * 2; canvas.height = H * 2;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(2, 2);
+    ctx.fillStyle = '#e8e0d0';
+    ctx.fillRect(0, 0, W, H);
+
+    // Load tiles
+    const tileSize = 256;
+    const tilePromises = [];
+    const subdomains = ['a', 'b', 'c'];
+
+    // Topo tiles at actual zoom
+    const startTileX = Math.floor((centerPx.x - W / 2) / tileSize);
+    const startTileY = Math.floor((centerPx.y - H / 2) / tileSize);
+    const endTileX = Math.ceil((centerPx.x + W / 2) / tileSize);
+    const endTileY = Math.ceil((centerPx.y + H / 2) / tileSize);
+
+    for (let tx = startTileX; tx <= endTileX; tx++) {
+        for (let ty = startTileY; ty <= endTileY; ty++) {
+            const s = subdomains[(tx + ty) % 3];
+            const topoUrl = `https://${s}.tile.opentopomap.org/${zoom}/${tx}/${ty}.png`;
+            const drawX = (tx * tileSize) - (centerPx.x - W / 2);
+            const drawY = (ty * tileSize) - (centerPx.y - H / 2);
+            tilePromises.push(loadTileImage(topoUrl).then(img => {
+                if (img) { ctx.globalAlpha = 0.5; ctx.drawImage(img, drawX, drawY, tileSize, tileSize); ctx.globalAlpha = 1.0; }
+            }));
+        }
+    }
+
+    // VFR aero overlay: max native zoom 12, upscale for higher zooms
+    const aeroZoom = Math.min(zoom, 12);
+    const aeroScale = Math.pow(2, zoom - aeroZoom);
+    const aeroCenterPx = latLngToPixel(center.lat, center.lng, aeroZoom);
+    const aeroTileSize = tileSize * aeroScale;
+    const aStartX = Math.floor((aeroCenterPx.x - (W / 2) / aeroScale) / tileSize);
+    const aStartY = Math.floor((aeroCenterPx.y - (H / 2) / aeroScale) / tileSize);
+    const aEndX = Math.ceil((aeroCenterPx.x + (W / 2) / aeroScale) / tileSize);
+    const aEndY = Math.ceil((aeroCenterPx.y + (H / 2) / aeroScale) / tileSize);
+
+    for (let tx = aStartX; tx <= aEndX; tx++) {
+        for (let ty = aStartY; ty <= aEndY; ty++) {
+            const aeroUrl = `https://nwy-tiles-api.prod.newaydata.com/tiles/${aeroZoom}/${tx}/${ty}.png?path=latest/aero/latest`;
+            const drawX = (tx * aeroTileSize) - (aeroCenterPx.x * aeroScale - W / 2);
+            const drawY = (ty * aeroTileSize) - (aeroCenterPx.y * aeroScale - H / 2);
+            tilePromises.push(loadTileImage(aeroUrl).then(img => {
+                if (img) { ctx.globalAlpha = 0.65; ctx.drawImage(img, drawX, drawY, aeroTileSize, aeroTileSize); ctx.globalAlpha = 1.0; }
+            }));
+        }
+    }
+
+    await Promise.all(tilePromises);
+
+    // Draw route line
+    ctx.strokeStyle = '#ff4444';
+    ctx.lineWidth = 5;
+    ctx.setLineDash([10, 8]);
+    ctx.beginPath();
+    routeWaypoints.forEach((wp, i) => {
+        const px = latLngToPixel(wp.lat, wp.lng || wp.lon, zoom);
+        const x = px.x - (centerPx.x - W / 2), y = px.y - (centerPx.y - H / 2);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Draw markers
+    routeWaypoints.forEach((wp, i) => {
+        const px = latLngToPixel(wp.lat, wp.lng || wp.lon, zoom);
+        const x = px.x - (centerPx.x - W / 2), y = px.y - (centerPx.y - H / 2);
+        const isStart = (i === 0), isDest = (i === routeWaypoints.length - 1);
+        const r = (isStart || isDest) ? 9 : 7;
+        const fill = isStart ? '#44ff44' : isDest ? '#ff4444' : '#fdfd86';
+
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = fill; ctx.fill();
+        ctx.strokeStyle = '#111'; ctx.lineWidth = 2; ctx.stroke();
+
+        // Label
+        const label = isStart ? currentSName : isDest ? currentDName : `WP${i}`;
+        ctx.font = 'bold 11px Helvetica, Arial, sans-serif';
+        ctx.fillStyle = '#111';
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+        ctx.strokeText(label, x + 12, y + 4);
+        ctx.fillText(label, x + 12, y + 4);
+    });
+
+    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+    return { data: imgData, width: canvas.width, height: canvas.height };
+}
+
+async function renderTileCanvas(centerLat, centerLng, zoom, W, H) {
+    const centerPx = latLngToPixel(centerLat, centerLng, zoom);
+    const canvas = document.createElement('canvas');
+    canvas.width = W * 2; canvas.height = H * 2;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(2, 2);
+    ctx.fillStyle = '#e8e0d0';
+    ctx.fillRect(0, 0, W, H);
+
+    const tileSize = 256;
+    const subdomains = ['a', 'b', 'c'];
+    const tilePromises = [];
+
+    // Topo tiles at actual zoom
+    const startTileX = Math.floor((centerPx.x - W / 2) / tileSize);
+    const startTileY = Math.floor((centerPx.y - H / 2) / tileSize);
+    const endTileX = Math.ceil((centerPx.x + W / 2) / tileSize);
+    const endTileY = Math.ceil((centerPx.y + H / 2) / tileSize);
+
+    for (let tx = startTileX; tx <= endTileX; tx++) {
+        for (let ty = startTileY; ty <= endTileY; ty++) {
+            const s = subdomains[(tx + ty) % 3];
+            const topoUrl = `https://${s}.tile.opentopomap.org/${zoom}/${tx}/${ty}.png`;
+            const drawX = (tx * tileSize) - (centerPx.x - W / 2);
+            const drawY = (ty * tileSize) - (centerPx.y - H / 2);
+            tilePromises.push(loadTileImage(topoUrl).then(img => {
+                if (img) { ctx.globalAlpha = 0.5; ctx.drawImage(img, drawX, drawY, tileSize, tileSize); ctx.globalAlpha = 1.0; }
+            }));
+        }
+    }
+
+    // VFR aero overlay: max native zoom 12, upscale for higher zooms
+    const aeroZoom = Math.min(zoom, 12);
+    const scale = Math.pow(2, zoom - aeroZoom);
+    const aeroCenterPx = latLngToPixel(centerLat, centerLng, aeroZoom);
+    const aeroTileSize = tileSize * scale;
+    const aStartX = Math.floor((aeroCenterPx.x - (W / 2) / scale) / tileSize);
+    const aStartY = Math.floor((aeroCenterPx.y - (H / 2) / scale) / tileSize);
+    const aEndX = Math.ceil((aeroCenterPx.x + (W / 2) / scale) / tileSize);
+    const aEndY = Math.ceil((aeroCenterPx.y + (H / 2) / scale) / tileSize);
+
+    for (let tx = aStartX; tx <= aEndX; tx++) {
+        for (let ty = aStartY; ty <= aEndY; ty++) {
+            const aeroUrl = `https://nwy-tiles-api.prod.newaydata.com/tiles/${aeroZoom}/${tx}/${ty}.png?path=latest/aero/latest`;
+            const drawX = (tx * aeroTileSize) - (aeroCenterPx.x * scale - W / 2);
+            const drawY = (ty * aeroTileSize) - (aeroCenterPx.y * scale - H / 2);
+            tilePromises.push(loadTileImage(aeroUrl).then(img => {
+                if (img) { ctx.globalAlpha = 0.65; ctx.drawImage(img, drawX, drawY, aeroTileSize, aeroTileSize); ctx.globalAlpha = 1.0; }
+            }));
+        }
+    }
+
+    await Promise.all(tilePromises);
+
+    // Airport marker
+    const apx = latLngToPixel(centerLat, centerLng, zoom);
+    const cx = apx.x - (centerPx.x - W / 2), cy = apx.y - (centerPx.y - H / 2);
+    ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+    ctx.fillStyle = '#ff4444'; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+
+    return canvas.toDataURL('image/jpeg', 0.92);
+}
+
+function latLngToPixel(lat, lng, zoom) {
+    const x = ((lng + 180) / 360) * Math.pow(2, zoom) * 256;
+    const latRad = lat * Math.PI / 180;
+    const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * Math.pow(2, zoom) * 256;
+    return { x, y };
+}
+
+function loadTileImage(url) {
+    return new Promise(resolve => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = url;
+    });
+}
+
+function drawNotebookBackground(doc, pageNum, totalPages) {
+    const W = 210, H = 297;
+
+    // Cream paper
+    doc.setFillColor(253, 245, 230);
+    doc.rect(0, 0, W, H, 'F');
+
+    // Horizontal lines
+    doc.setDrawColor(180, 200, 215);
+    doc.setLineWidth(0.15);
+    for (let y = 21; y < H - 10; y += 7) {
+        doc.line(12, y, W - 12, y);
+    }
+
+    // Red margin line
+    doc.setDrawColor(210, 70, 70);
+    doc.setLineWidth(0.35);
+    doc.line(28, 0, 28, H);
+
+    // Hole punch marks
+    doc.setDrawColor(180, 175, 160);
+    doc.setLineWidth(0.3);
+    [55, H / 2, H - 55].forEach(y => {
+        doc.circle(9, y, 3.5);
+    });
+
+    // Page number
+    doc.setFont('Helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(120, 115, 100);
+    doc.text(`Seite ${pageNum} / ${totalPages}`, W - 15, H - 12, { align: 'right' });
+
+    // Footer watermark
+    doc.setFontSize(7);
+    doc.setTextColor(170, 165, 150);
+    doc.text('GA Dispatcher \u2013 Briefing Pack', W / 2, H - 6, { align: 'center' });
+}
+
+function pdfWrappedText(doc, text, x, y, maxWidth, lineHeight) {
+    const lines = doc.splitTextToSize(text, maxWidth);
+    lines.forEach((line, i) => {
+        doc.text(line, x, y + (i * lineHeight));
+    });
+    return y + (lines.length * lineHeight);
+}
+
+function drawMissionBriefingPage(doc, data) {
+    let y = 30;
+
+    // Title (Helvetica for compact proportional font, emojis stripped)
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.setTextColor(11, 31, 101);
+    const cleanTitle = stripEmojis(data.title);
+    const titleLines = doc.splitTextToSize(cleanTitle, 155);
+    titleLines.forEach((line, i) => {
+        doc.text(line, 32, y + (i * 8));
+    });
+    y += titleLines.length * 8 + 3;
+
+    // Underline
+    doc.setDrawColor(11, 31, 101);
+    doc.setLineWidth(0.5);
+    doc.line(32, y, 190, y);
+    y += 10;
+
+    // Route subtitle
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(80, 80, 80);
+    const routeStr = data.isPOI
+        ? `${data.depICAO} > ${data.destName} (Rundflug)`
+        : `${data.depICAO} (${data.depName}) > ${data.destICAO} (${data.destName})`;
+    const routeLines = doc.splitTextToSize(routeStr, 155);
+    routeLines.forEach((line, i) => {
+        doc.text(line, 32, y + (i * 6));
+    });
+    y += routeLines.length * 6 + 6;
+
+    // Story text
+    doc.setFont('Helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(40, 40, 40);
+    y = pdfWrappedText(doc, stripEmojis(data.story), 32, y, 155, 5.5);
+    y += 8;
+
+    // Dashed separator
+    doc.setDrawColor(100, 100, 100);
+    doc.setLineWidth(0.3);
+    doc.setLineDashPattern([2, 2], 0);
+    doc.line(32, y, 190, y);
+    doc.setLineDashPattern([], 0);
+    y += 10;
+
+    // Payload & Cargo
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(217, 56, 41);
+    doc.text('PAYLOAD:', 32, y);
+    doc.setTextColor(40, 40, 40);
+    doc.setFont('Helvetica', 'normal');
+    doc.text(data.payload, 62, y);
+    y += 7;
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(217, 56, 41);
+    doc.text('FRACHT:', 32, y);
+    doc.setTextColor(40, 40, 40);
+    doc.setFont('Helvetica', 'normal');
+    doc.text(data.cargo, 62, y);
+    y += 14;
+
+    // Flight data box
+    doc.setDrawColor(180, 175, 160);
+    doc.setFillColor(248, 243, 228);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(32, y - 4, 158, 50, 2, 2, 'FD');
+
+    y += 4;
+    const col1 = 38, col2 = 110;
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(217, 56, 41);
+    doc.text('STRECKE:', col1, y);
+    doc.setTextColor(40, 40, 40);
+    doc.text(data.distance, col1 + 35, y);
+
+    doc.setTextColor(217, 56, 41);
+    doc.text('KURS:', col2, y);
+    doc.setTextColor(40, 40, 40);
+    doc.text(data.heading, col2 + 25, y);
+    y += 8;
+
+    doc.setTextColor(217, 56, 41);
+    doc.text('ETE CA:', col1, y);
+    doc.setTextColor(40, 40, 40);
+    doc.text(data.totalTimeStr, col1 + 35, y);
+
+    doc.setTextColor(217, 56, 41);
+    doc.text('FUEL:', col2, y);
+    doc.setTextColor(40, 40, 40);
+    doc.text(`${data.totalFuel} Gal`, col2 + 25, y);
+    y += 8;
+
+    doc.setTextColor(217, 56, 41);
+    doc.text('AIRCRAFT:', col1, y);
+    doc.setTextColor(40, 40, 40);
+    doc.text(data.aircraft, col1 + 35, y);
+
+    doc.setTextColor(217, 56, 41);
+    doc.text('TAS:', col2, y);
+    doc.setTextColor(40, 40, 40);
+    doc.text(`${data.tas} kts`, col2 + 25, y);
+    y += 8;
+
+    doc.setTextColor(217, 56, 41);
+    doc.text('GPH:', col1, y);
+    doc.setTextColor(40, 40, 40);
+    doc.text(`${data.gph} gal/h`, col1 + 35, y);
+
+    doc.setTextColor(217, 56, 41);
+    doc.text('DATUM:', col2, y);
+    doc.setTextColor(40, 40, 40);
+    doc.text(`${data.date} ${data.time}`, col2 + 25, y);
+}
+
+function drawRouteNavigationPage(doc, data, legs) {
+    let y = 30;
+
+    // Title
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.setTextColor(11, 31, 101);
+    doc.text('ROUTE & NAVIGATION', 32, y);
+    y += 4;
+    doc.setDrawColor(11, 31, 101);
+    doc.setLineWidth(0.5);
+    doc.line(32, y, 190, y);
+    y += 12;
+
+    // Route summary line
+    doc.setFont('Helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(80, 80, 80);
+    const wpNames = [currentSName];
+    for (let i = 1; i < routeWaypoints.length - 1; i++) wpNames.push(`WP${i}`);
+    if (routeWaypoints.length > 1) wpNames.push(currentDName);
+    doc.text(wpNames.join(' -> '), 32, y);
+    y += 10;
+
+    // Waypoint table
+    const tableX = 32, colWidths = [12, 72, 32, 32];
+    const tableW = colWidths.reduce((a, b) => a + b, 0);
+    const rowH = 8;
+
+    // Header
+    doc.setFillColor(220, 215, 200);
+    doc.rect(tableX, y, tableW, rowH, 'F');
+    doc.setDrawColor(160, 155, 140);
+    doc.setLineWidth(0.3);
+    doc.rect(tableX, y, tableW, rowH, 'S');
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(40, 40, 40);
+    doc.text('LEG', tableX + 2, y + 5.5);
+    doc.text('ROUTE', tableX + colWidths[0] + 2, y + 5.5);
+    doc.text('HDG', tableX + colWidths[0] + colWidths[1] + 4, y + 5.5);
+    doc.text('DIST', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 4, y + 5.5);
+    y += rowH;
+
+    // Data rows
+    doc.setFont('Helvetica', 'normal');
+    legs.forEach((leg, i) => {
+        if (i % 2 === 0) {
+            doc.setFillColor(250, 246, 235);
+            doc.rect(tableX, y, tableW, rowH, 'F');
+        }
+        doc.setDrawColor(200, 195, 180);
+        doc.rect(tableX, y, tableW, rowH, 'S');
+
+        doc.setTextColor(40, 40, 40);
+        doc.text(`${i + 1}`, tableX + 4, y + 5.5);
+        doc.text(`${leg.from} -> ${leg.to}`, tableX + colWidths[0] + 2, y + 5.5);
+        doc.text(`${leg.heading}\u00B0`, tableX + colWidths[0] + colWidths[1] + 4, y + 5.5);
+        doc.text(`${leg.dist} NM`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + 4, y + 5.5);
+        y += rowH;
+    });
+
+    // Totals row
+    doc.setFillColor(210, 205, 190);
+    doc.rect(tableX, y, tableW, rowH, 'F');
+    doc.setDrawColor(160, 155, 140);
+    doc.rect(tableX, y, tableW, rowH, 'S');
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(11, 31, 101);
+    doc.text('TOTAL', tableX + colWidths[0] + 2, y + 5.5);
+    doc.text(`${data.heading}`, tableX + colWidths[0] + colWidths[1] + 4, y + 5.5);
+    doc.text(`${data.totalDist} NM`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + 4, y + 5.5);
+    y += rowH + 14;
+
+    // Performance section
+    doc.setDrawColor(100, 100, 100);
+    doc.setLineWidth(0.3);
+    doc.setLineDashPattern([2, 2], 0);
+    doc.line(32, y, 190, y);
+    doc.setLineDashPattern([], 0);
+    y += 10;
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(11, 31, 101);
+    doc.text('PERFORMANCE', 32, y);
+    y += 12;
+
+    doc.setFontSize(10);
+    const perfCol1 = 38, perfCol2 = 110;
+
+    doc.setTextColor(217, 56, 41);
+    doc.text('Aircraft:', perfCol1, y);
+    doc.setTextColor(40, 40, 40);
+    doc.setFont('Helvetica', 'normal');
+    doc.text(data.aircraft, perfCol1 + 38, y);
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(217, 56, 41);
+    doc.text('TAS:', perfCol2, y);
+    doc.setTextColor(40, 40, 40);
+    doc.setFont('Helvetica', 'normal');
+    doc.text(`${data.tas} kts`, perfCol2 + 28, y);
+    y += 8;
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(217, 56, 41);
+    doc.text('GPH:', perfCol1, y);
+    doc.setTextColor(40, 40, 40);
+    doc.setFont('Helvetica', 'normal');
+    doc.text(`${data.gph} gal/h`, perfCol1 + 38, y);
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(217, 56, 41);
+    doc.text('Dist:', perfCol2, y);
+    doc.setTextColor(40, 40, 40);
+    doc.setFont('Helvetica', 'normal');
+    doc.text(`${data.totalDist} NM`, perfCol2 + 28, y);
+    y += 8;
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(217, 56, 41);
+    doc.text('ETE:', perfCol1, y);
+    doc.setTextColor(40, 40, 40);
+    doc.setFont('Helvetica', 'normal');
+    doc.text(data.totalTimeStr, perfCol1 + 38, y);
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(217, 56, 41);
+    doc.text('Fuel:', perfCol2, y);
+    doc.setTextColor(40, 40, 40);
+    doc.setFont('Helvetica', 'normal');
+    doc.text(`${data.totalFuel} Gal (inkl. ${data.reserveFuel} Res.)`, perfCol2 + 28, y);
+    y += 16;
+
+    // Notes area
+    doc.setDrawColor(100, 100, 100);
+    doc.setLineDashPattern([2, 2], 0);
+    doc.line(32, y, 190, y);
+    doc.setLineDashPattern([], 0);
+    y += 10;
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(11, 31, 101);
+    doc.text('NOTES', 32, y);
+    y += 8;
+
+    // Empty lines for handwritten notes
+    doc.setDrawColor(200, 195, 180);
+    doc.setLineWidth(0.2);
+    doc.setLineDashPattern([1, 3], 0);
+    for (let i = 0; i < 8; i++) {
+        doc.line(32, y + (i * 7), 190, y + (i * 7));
+    }
+    doc.setLineDashPattern([], 0);
+}
+
+function drawAirportInfoPage(doc, type, data, photo, detailMap) {
+    let y = 30;
+    const isDep = (type === 'dep');
+
+    // Title
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.setTextColor(11, 31, 101);
+    doc.text(isDep ? 'DEPARTURE AIRPORT' : 'DESTINATION AIRPORT', 32, y);
+    y += 4;
+    doc.setDrawColor(11, 31, 101);
+    doc.setLineWidth(0.5);
+    doc.line(32, y, 190, y);
+    y += 14;
+
+    const icao = isDep ? data.depICAO : data.destICAO;
+    const name = isDep ? data.depName : data.destName;
+    const coords = isDep ? data.depCoords : data.destCoords;
+    const rwy = isDep ? data.depRwy : data.destRwy;
+    const rwyText = isDep ? data.depRwyText : data.destRwyText;
+    const desc = isDep ? data.depDesc : data.destDesc;
+
+    // Photo (top right if available)
+    let textMaxW = 155;
+    if (photo) {
+        try {
+            doc.addImage(photo, 'JPEG', 140, y - 5, 50, 38);
+            // Polaroid border
+            doc.setDrawColor(200, 195, 180);
+            doc.setLineWidth(0.5);
+            doc.rect(138, y - 7, 54, 46);
+            textMaxW = 100;
+        } catch(e) { textMaxW = 155; }
+    }
+
+    // ICAO big
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(24);
+    doc.setTextColor(11, 31, 101);
+    doc.text(icao, 32, y);
+    y += 10;
+
+    // Name
+    doc.setFont('Helvetica', 'normal');
+    doc.setFontSize(12);
+    doc.setTextColor(60, 60, 60);
+    doc.text(name, 32, y);
+    y += 8;
+
+    // Coordinates
+    doc.setFont('Helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Koordinaten: ${coords}`, 32, y);
+    y += 14;
+
+    // Runway info
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(217, 56, 41);
+    doc.text('RUNWAY INFO', 32, y);
+    y += 8;
+
+    doc.setFont('Helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(40, 40, 40);
+
+    const rwyDisplay = rwyText && rwyText !== 'Sucht Pisten-Infos...' ? rwyText : rwy;
+    if (rwyDisplay) {
+        y = pdfWrappedText(doc, rwyDisplay, 32, y, 155, 6);
+    }
+    y += 10;
+
+    // Separator
+    doc.setDrawColor(100, 100, 100);
+    doc.setLineDashPattern([2, 2], 0);
+    doc.line(32, y, 190, y);
+    doc.setLineDashPattern([], 0);
+    y += 10;
+
+    // Description
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(11, 31, 101);
+    doc.text('AIRPORT INFO', 32, y);
+    y += 8;
+
+    doc.setFont('Helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(50, 50, 50);
+
+    if (desc && desc !== 'Warte auf Daten...') {
+        const maxChars = 800;
+        const trimmedDesc = desc.length > maxChars ? desc.substring(0, maxChars) + '...' : desc;
+        y = pdfWrappedText(doc, trimmedDesc, 32, y, 155, 5.5);
+    } else {
+        doc.text('Keine weiteren Informationen verfügbar.', 32, y);
+        y += 6;
+    }
+
+    // Detail map (airport chart with traffic pattern zoom)
+    if (detailMap) {
+        y = Math.max(y + 8, 185);
+        doc.setDrawColor(100, 100, 100);
+        doc.setLineDashPattern([2, 2], 0);
+        doc.line(32, y, 190, y);
+        doc.setLineDashPattern([], 0);
+        y += 8;
+
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(11, 31, 101);
+        doc.text(`PLATZKARTE ${icao}`, 32, y);
+        y += 6;
+
+        const mapW = 155, mapH = 80;
+        const mapX = 32;
+
+        doc.setFillColor(230, 225, 210);
+        doc.rect(mapX - 1, y - 1, mapW + 2, mapH + 2, 'F');
+        doc.setDrawColor(160, 155, 140);
+        doc.setLineWidth(0.4);
+        doc.rect(mapX - 1, y - 1, mapW + 2, mapH + 2, 'S');
+
+        doc.addImage(detailMap, 'JPEG', mapX, y, mapW, mapH);
+    }
+}
+
+function drawMapPage(doc, mapImage, data) {
+    let y = 30;
+
+    // Title
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.setTextColor(11, 31, 101);
+    doc.text('ROUTE MAP', 32, y);
+    y += 4;
+    doc.setDrawColor(11, 31, 101);
+    doc.setLineWidth(0.5);
+    doc.line(32, y, 190, y);
+    y += 10;
+
+    if (mapImage) {
+        // Calculate aspect-ratio-correct dimensions
+        const maxW = 165, maxH = 200;
+        const ratio = mapImage.width / mapImage.height;
+        let imgW, imgH;
+        if (ratio > maxW / maxH) {
+            imgW = maxW;
+            imgH = maxW / ratio;
+        } else {
+            imgH = maxH;
+            imgW = maxH * ratio;
+        }
+        const imgX = (210 - imgW) / 2;
+
+        doc.setFillColor(230, 225, 210);
+        doc.rect(imgX - 2, y - 2, imgW + 4, imgH + 4, 'F');
+        doc.setDrawColor(160, 155, 140);
+        doc.setLineWidth(0.5);
+        doc.rect(imgX - 2, y - 2, imgW + 4, imgH + 4, 'S');
+
+        doc.addImage(mapImage.data, 'JPEG', imgX, y, imgW, imgH);
+        y += imgH + 10;
+    } else {
+        // Fallback: text-only waypoint list
+        doc.setFont('Helvetica', 'normal');
+        doc.setFontSize(10);
+        doc.setTextColor(100, 100, 100);
+        doc.text('Karte konnte nicht erfasst werden.', 32, y);
+        y += 10;
+
+        doc.setTextColor(40, 40, 40);
+        routeWaypoints.forEach((wp, i) => {
+            const lat = wp.lat.toFixed(4), lng = (wp.lng || wp.lon).toFixed(4);
+            const label = (i === 0) ? currentSName : (i === routeWaypoints.length - 1) ? currentDName : `WP ${i}`;
+            doc.text(`${label}: ${lat}, ${lng}`, 38, y);
+            y += 6;
+        });
+        y += 10;
+    }
+
+    // Route summary under map
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(11, 31, 101);
+    const mapRouteStr = data.isPOI
+        ? `${data.depICAO} > ${data.destName} (Rundflug)`
+        : `${data.depICAO} > ${data.destICAO}`;
+    doc.text(mapRouteStr, 32, y);
+    y += 7;
+
+    doc.setFont('Helvetica', 'normal');
+    doc.setTextColor(60, 60, 60);
+    doc.text(`Total: ${data.totalDist} NM | HDG: ${data.heading} | ETE: ${data.totalTimeStr} | Fuel: ${data.totalFuel} Gal`, 32, y);
+}
+
+async function generateBriefingPDF() {
+    if (!currentMissionData || document.getElementById("briefingBox").style.display !== "block") {
+        alert('Kein aktives Briefing vorhanden.');
+        return;
+    }
+    if (!window.jspdf) {
+        alert('PDF-Bibliothek nicht geladen. Bitte Seite neu laden.');
+        return;
+    }
+
+    const indicator = document.getElementById('searchIndicator');
+    if (indicator) indicator.innerText = '\uD83D\uDCC4 Erstelle Briefing Pack PDF...';
+
+    try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+        const data = gatherBriefingData();
+        const legs = computeLegs();
+        const isPOI = data.isPOI;
+        const totalPages = isPOI ? 4 : 5;
+
+        // Start all async work in parallel: route map, detail maps, photos
+        const mapImagePromise = captureMapForPDF();
+
+        // Airport coordinates from waypoints
+        const depLL = routeWaypoints[0];
+        const destLL = routeWaypoints[routeWaypoints.length - 1];
+        const detailZoom = 12; // Zoom level to see traffic patterns and airspace
+        const depDetailPromise = renderTileCanvas(depLL.lat, depLL.lng || depLL.lon, detailZoom, 700, 360);
+        const destDetailPromise = isPOI ? Promise.resolve(null) : renderTileCanvas(destLL.lat, destLL.lng || destLL.lon, detailZoom, 700, 360);
+
+        // Fetch airport photos
+        const depPhotoUrl = extractImageUrl(document.getElementById('wikiDepImage'));
+        const destPhotoUrl = extractImageUrl(document.getElementById('wikiDestImage'));
+        const [depPhoto, destPhoto, depDetail, destDetail] = await Promise.all([
+            depPhotoUrl ? getImageAsBase64(depPhotoUrl) : Promise.resolve(null),
+            destPhotoUrl ? getImageAsBase64(destPhotoUrl) : Promise.resolve(null),
+            depDetailPromise,
+            destDetailPromise
+        ]);
+
+        // Page 1: Mission Briefing
+        drawNotebookBackground(doc, 1, totalPages);
+        drawMissionBriefingPage(doc, data);
+
+        // Page 2: Route & Navigation
+        doc.addPage();
+        drawNotebookBackground(doc, 2, totalPages);
+        drawRouteNavigationPage(doc, data, legs);
+
+        // Page 3: Departure Airport
+        doc.addPage();
+        drawNotebookBackground(doc, 3, totalPages);
+        drawAirportInfoPage(doc, 'dep', data, depPhoto, depDetail);
+
+        // Page 4: Destination Airport (skip for POI)
+        if (!isPOI) {
+            doc.addPage();
+            drawNotebookBackground(doc, 4, totalPages);
+            drawAirportInfoPage(doc, 'dest', data, destPhoto, destDetail);
+        }
+
+        // Last page: Route Map
+        const mapImage = await mapImagePromise;
+        doc.addPage();
+        drawNotebookBackground(doc, totalPages, totalPages);
+        drawMapPage(doc, mapImage, data);
+
+        // Save
+        const filename = `Briefing_${data.depICAO}_${isPOI ? 'Rundflug' : data.destICAO}_${data.date.replace(/\./g, '')}.pdf`;
+        doc.save(filename);
+
+        if (indicator) indicator.innerText = '\uD83D\uDCC4 Briefing Pack PDF erstellt!';
+        setTimeout(() => { if (indicator) indicator.innerText = 'System bereit.'; }, 4000);
+    } catch (e) {
+        console.error('PDF generation failed:', e);
+        if (indicator) indicator.innerText = '\u274C PDF-Erstellung fehlgeschlagen.';
+        alert('PDF konnte nicht erstellt werden: ' + e.message);
+    }
+}
+
 function renderNotes() {
     const board = document.getElementById('pinboard');
     if (!board) return;
