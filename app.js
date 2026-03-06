@@ -423,7 +423,7 @@ async function restoreMissionState(state) {
 
     document.getElementById("destRwyContainer").style.display = state.isPOI ? "none" : "block";
     if (document.getElementById("wikiDestRwyText")) document.getElementById("wikiDestRwyText").style.display = state.isPOI ? "none" : "block";
-    const destSwitchRow = document.getElementById("destSwitchRow"); if(destSwitchRow) destSwitchRow.style.display = state.isPOI ? "none" : "flex";
+    const destSwitchRow = document.getElementById("destSwitchRow"); if(destSwitchRow) destSwitchRow.style.display = "flex";
 
     currentMissionData = state.currentMissionData; routeWaypoints = state.routeWaypoints;
     currentStartICAO = state.currentStartICAO; currentDestICAO = state.currentDestICAO;
@@ -1312,11 +1312,15 @@ async function generateMission() {
         
         if (!isPOI) {
             fetchAirportFreq(currentDestICAO, 'wikiDestFreqText', 'dest');
-            renderTileCanvas(dest.lat, dest.lon, 13, 600, 400).then(url => {
-                const img = document.getElementById('uiDestDetailMap');
-                if(img) { img.src = url; img.style.display = 'block'; }
-            });
+        } else {
+            const df = document.getElementById('wikiDestFreqText');
+            if(df) df.innerHTML = '';
         }
+
+        renderTileCanvas(dest.lat, dest.lon, 13, 600, 400).then(url => {
+            const img = document.getElementById('uiDestDetailMap');
+            if(img) { img.src = url; img.style.display = 'block'; }
+        });
 
         indicator.innerText = `Briefing komplett.`; resetBtn(btn);
         const rBtnLed = document.getElementById('radioGenerateBtn');
@@ -2426,9 +2430,9 @@ function drawRouteNavigationPage(doc, data, legs) {
     doc.setDrawColor(11, 31, 101); doc.setLineWidth(0.5); doc.line(32, y, 190, y); y += 12;
 
     doc.setFont('Helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(80, 80, 80);
-    const wpNames = [currentSName];
+    const wpNames = [data.depICAO || currentStartICAO];
     for (let i = 1; i < routeWaypoints.length - 1; i++) wpNames.push(`WP${i}`);
-    if (routeWaypoints.length > 1) wpNames.push(currentDName);
+    if (routeWaypoints.length > 1) wpNames.push(data.destICAO || currentDestICAO);
     doc.text(wpNames.join(' -> '), 32, y); y += 10;
 
     const tableX = 32, colWidths = [10, 42, 16, 16, 16, 16, 16];
@@ -2504,9 +2508,10 @@ function drawRouteNavigationPage(doc, data, legs) {
 function drawAirportInfoPage(doc, type, data, photo, detailMap) {
     let y = 30;
     const isDep = (type === 'dep');
+    const isPOI = (!isDep && data.isPOI);
 
     doc.setFont('Helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(11, 31, 101);
-    doc.text(isDep ? 'DEPARTURE AIRPORT' : 'DESTINATION AIRPORT', 32, y);
+    doc.text(isPOI ? 'ZIELPUNKT INFO' : (isDep ? 'DEPARTURE AIRPORT' : 'DESTINATION AIRPORT'), 32, y);
     y += 4;
     doc.setDrawColor(11, 31, 101); doc.setLineWidth(0.5); doc.line(32, y, 190, y);
     y += 14;
@@ -2542,6 +2547,7 @@ function drawAirportInfoPage(doc, type, data, photo, detailMap) {
     doc.setDrawColor(100, 100, 100); doc.setLineWidth(0.3); doc.setLineDashPattern([2, 2], 0); doc.line(32, y, 190, y); doc.setLineDashPattern([], 0);
     y += 8;
 
+    if (!isPOI) {
     let blockY = y;
     doc.setFont('Helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(217, 56, 41);
     doc.text('RUNWAYS', 32, blockY);
@@ -2571,9 +2577,10 @@ function drawAirportInfoPage(doc, type, data, photo, detailMap) {
 
     doc.setDrawColor(100, 100, 100); doc.setLineDashPattern([2, 2], 0); doc.line(32, y, 190, y); doc.setLineDashPattern([], 0);
     y += 8;
+    }
 
     doc.setFont('Helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(11, 31, 101);
-    doc.text('AIRPORT INFO', 32, y);
+    doc.text(isPOI ? 'INFO' : 'AIRPORT INFO', 32, y);
     y += 7;
 
     doc.setFont('Helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(50, 50, 50);
@@ -2593,7 +2600,7 @@ function drawAirportInfoPage(doc, type, data, photo, detailMap) {
         y += 6;
 
         doc.setFont('Helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(11, 31, 101);
-        doc.text(`PLATZKARTE ${icao}`, 32, y);
+        doc.text(isPOI ? 'KARTE' : `PLATZKARTE ${icao}`, 32, y);
         y += 5;
 
         // Berechne Aspect Ratio basierend auf 700x360
@@ -2645,7 +2652,7 @@ async function generateBriefingPDF() {
         const destLL = routeWaypoints[routeWaypoints.length - 1];
         const detailZoom = 12; 
         const depDetailPromise = renderTileCanvas(depLL.lat, depLL.lng || depLL.lon, detailZoom, 700, 360);
-        const destDetailPromise = isPOI ? Promise.resolve(null) : renderTileCanvas(destLL.lat, destLL.lng || destLL.lon, detailZoom, 700, 360);
+        const destDetailPromise = renderTileCanvas(destLL.lat, destLL.lng || destLL.lon, detailZoom, 700, 360);
 
         const depPhotoUrl = extractImageUrl(document.getElementById('wikiDepImage'));
         const destPhotoUrl = extractImageUrl(document.getElementById('wikiDestImage'));
@@ -2671,11 +2678,9 @@ async function generateBriefingPDF() {
         drawNotebookBackground(doc, 3, totalPages);
         drawAirportInfoPage(doc, 'dep', data, depPhoto, depDetail);
 
-        if (!isPOI) {
-            doc.addPage();
-            drawNotebookBackground(doc, 4, totalPages);
-            drawAirportInfoPage(doc, 'dest', data, destPhoto, destDetail);
-        }
+        doc.addPage();
+        drawNotebookBackground(doc, 4, totalPages);
+        drawAirportInfoPage(doc, 'dest', data, destPhoto, destDetail);
 
         const filename = `Briefing_${data.depICAO}_${isPOI ? 'Rundflug' : data.destICAO}_${data.date.replace(/\./g, '')}.pdf`;
         doc.save(filename);
