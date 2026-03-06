@@ -324,9 +324,9 @@
 <div class="briefing" id="briefingBox">
 
     <div class="notes-stack" id="notesStack">
-            <div class="paperclip" onclick="toggleNotes()"></div>
+            <div class="paperclip" onclick="toggleNotes(event)"></div>
             
-            <div class="mission-note-page front-note" id="notePage1" onclick="toggleNotes()">
+            <div class="mission-note-page front-note" id="notePage1" onclick="toggleNotes(event)">
                 <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
                 <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
                 <div class="briefing-pdf-pin" onclick="generateBriefingPDF(); event.stopPropagation();" title="Briefing Pack als PDF drucken">📄</div>
@@ -356,7 +356,7 @@
                 </div>
             </div>
 
-            <div class="mission-note-page back-note" id="notePage2" onclick="toggleNotes()">
+            <div class="mission-note-page back-note" id="notePage2" onclick="toggleNotes(event)">
                 <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
                 <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
                 <div class="briefing-pdf-pin" onclick="generateBriefingPDF(); event.stopPropagation();" title="Briefing Pack als PDF drucken">📄</div>
@@ -366,7 +366,7 @@
                 </div>
             </div>
 
-            <div class="mission-note-page third-note" id="notePage3" onclick="toggleNotes()">
+            <div class="mission-note-page third-note" id="notePage3" onclick="toggleNotes(event)">
                 <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
                 <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
                 <div class="briefing-pdf-pin" onclick="generateBriefingPDF(); event.stopPropagation();" title="Briefing Pack als PDF drucken">📄</div>
@@ -392,7 +392,7 @@
                 <img id="uiDepDetailMap" src="" style="width:100%; border-radius:4px; margin-top:15px; display:none; border: 2px solid #ccc; box-shadow: 2px 3px 6px rgba(0,0,0,0.3);">
             </div>
 
-            <div class="mission-note-page fourth-note" id="notePage4" onclick="toggleNotes()">
+            <div class="mission-note-page fourth-note" id="notePage4" onclick="toggleNotes(event)">
                 <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
                 <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
                 <div class="briefing-pdf-pin" onclick="generateBriefingPDF(); event.stopPropagation();" title="Briefing Pack als PDF drucken">📄</div>

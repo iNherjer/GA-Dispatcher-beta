@@ -130,18 +130,38 @@ function cycleRadioOption(selectId) {
     selectEl.dispatchEvent(new Event('change'));
 }
 
-function toggleNotes() {
+function toggleNotes(event) {
+    if (event && (event.target.tagName === 'A' || event.target.tagName === 'BUTTON' || event.target.closest('.briefing-photo-attachment'))) return;
+
     const p1 = document.getElementById('notePage1'), p2 = document.getElementById('notePage2'), p3 = document.getElementById('notePage3'), p4 = document.getElementById('notePage4');
     if (!p1 || !p2 || !p3 || !p4) return;
 
-    if(p1.classList.contains('front-note')) {
-        p1.className = 'mission-note-page fourth-note'; p2.className = 'mission-note-page front-note'; p3.className = 'mission-note-page back-note'; p4.className = 'mission-note-page third-note';
-    } else if(p2.classList.contains('front-note')) {
-        p2.className = 'mission-note-page fourth-note'; p3.className = 'mission-note-page front-note'; p4.className = 'mission-note-page back-note'; p1.className = 'mission-note-page third-note';
-    } else if(p3.classList.contains('front-note')) {
-        p3.className = 'mission-note-page fourth-note'; p4.className = 'mission-note-page front-note'; p1.className = 'mission-note-page back-note'; p2.className = 'mission-note-page third-note';
+    let forward = true;
+    if (event && event.currentTarget && event.currentTarget.getBoundingClientRect) {
+        const rect = event.currentTarget.getBoundingClientRect();
+        if ((event.clientX - rect.left) < rect.width / 2) forward = false;
+    }
+
+    if (forward) {
+        if(p1.classList.contains('front-note')) {
+            p1.className = 'mission-note-page fourth-note'; p2.className = 'mission-note-page front-note'; p3.className = 'mission-note-page back-note'; p4.className = 'mission-note-page third-note';
+        } else if(p2.classList.contains('front-note')) {
+            p2.className = 'mission-note-page fourth-note'; p3.className = 'mission-note-page front-note'; p4.className = 'mission-note-page back-note'; p1.className = 'mission-note-page third-note';
+        } else if(p3.classList.contains('front-note')) {
+            p3.className = 'mission-note-page fourth-note'; p4.className = 'mission-note-page front-note'; p1.className = 'mission-note-page back-note'; p2.className = 'mission-note-page third-note';
+        } else {
+            p4.className = 'mission-note-page fourth-note'; p1.className = 'mission-note-page front-note'; p2.className = 'mission-note-page back-note'; p3.className = 'mission-note-page third-note';
+        }
     } else {
-        p4.className = 'mission-note-page fourth-note'; p1.className = 'mission-note-page front-note'; p2.className = 'mission-note-page back-note'; p3.className = 'mission-note-page third-note';
+        if(p1.classList.contains('front-note')) {
+            p1.className = 'mission-note-page back-note'; p2.className = 'mission-note-page third-note'; p3.className = 'mission-note-page fourth-note'; p4.className = 'mission-note-page front-note';
+        } else if(p2.classList.contains('front-note')) {
+            p2.className = 'mission-note-page back-note'; p3.className = 'mission-note-page third-note'; p4.className = 'mission-note-page fourth-note'; p1.className = 'mission-note-page front-note';
+        } else if(p3.classList.contains('front-note')) {
+            p3.className = 'mission-note-page back-note'; p4.className = 'mission-note-page third-note'; p1.className = 'mission-note-page fourth-note'; p2.className = 'mission-note-page front-note';
+        } else {
+            p4.className = 'mission-note-page back-note'; p1.className = 'mission-note-page third-note'; p2.className = 'mission-note-page fourth-note'; p3.className = 'mission-note-page front-note';
+        }
     }
 }
 
@@ -424,6 +444,7 @@ async function restoreMissionState(state) {
     document.getElementById("destRwyContainer").style.display = state.isPOI ? "none" : "block";
     if (document.getElementById("wikiDestRwyText")) document.getElementById("wikiDestRwyText").style.display = state.isPOI ? "none" : "block";
     const destSwitchRow = document.getElementById("destSwitchRow"); if(destSwitchRow) destSwitchRow.style.display = "flex";
+    const destLinks = document.getElementById("wikiDestLinks"); if(destLinks) destLinks.style.display = state.isPOI ? "none" : "block";
 
     currentMissionData = state.currentMissionData; routeWaypoints = state.routeWaypoints;
     currentStartICAO = state.currentStartICAO; currentDestICAO = state.currentDestICAO;
@@ -1291,6 +1312,9 @@ async function generateMission() {
     if (destLocRadioEl) destLocRadioEl.value = '';
 
     updateMap(start.lat, start.lon, dest.lat, dest.lon, currentStartICAO, dest.n);
+    
+    const destLinks = document.getElementById("wikiDestLinks");
+    if(destLinks) destLinks.style.display = isPOI ? "none" : "block";
 
     indicator.innerText = `Flugplan bereit (${dataSource}). Lade Infos...`;
     fetchRunwayDetails(start.lat, start.lon, 'mDepRwy', currentStartICAO);
