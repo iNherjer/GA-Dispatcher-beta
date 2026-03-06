@@ -131,15 +131,24 @@ function cycleRadioOption(selectId) {
 }
 
 function toggleNotes(event) {
-    if (event && (event.target.tagName === 'A' || event.target.tagName === 'BUTTON' || event.target.closest('.briefing-photo-attachment'))) return;
+    // Wenn wir auf einen Link oder Button klicken, nichts tun
+    if (event && (event.target.tagName === 'A' || event.target.tagName === 'BUTTON')) return;
 
+    const stack = document.getElementById('notesStack');
     const p1 = document.getElementById('notePage1'), p2 = document.getElementById('notePage2'), p3 = document.getElementById('notePage3'), p4 = document.getElementById('notePage4');
     if (!p1 || !p2 || !p3 || !p4) return;
 
     let forward = true;
-    if (event && event.currentTarget && event.currentTarget.getBoundingClientRect) {
-        const rect = event.currentTarget.getBoundingClientRect();
-        if ((event.clientX - rect.left) < rect.width / 2) forward = false;
+
+    // Wenn auf die Büroklammer geklickt wird -> Immer zurück (ist ja ganz links)
+    if (event && event.target && event.target.classList.contains('paperclip')) {
+        forward = false;
+    }
+    // Ansonsten: Einfach - links vom Bildschirm = zurück
+    else {
+        if (event.clientX < window.innerWidth / 2) {
+            forward = false;
+        }
     }
 
     if (forward) {
@@ -166,9 +175,17 @@ function toggleNotes(event) {
 }
 
 function toggleWikiPhoto(event, containerId) {
-    event.stopPropagation();
     const container = document.getElementById(containerId);
-    if(!container) return;
+    if(!container) { event.stopPropagation(); return; }
+    
+    // Nur reagieren, wenn das Foto auch auf der aktiven Seite ist!
+    const page = container.closest('.mission-note-page');
+    if (page && !page.classList.contains('front-note')) {
+        // Event durchlassen -> Seite wird umgeblättert
+        return; 
+    }
+
+    event.stopPropagation();
     container.classList.toggle('photo-zoomed');
     
     let backdrop = document.getElementById('photo-backdrop');
@@ -402,7 +419,8 @@ function saveMissionState() {
         currentSName: currentSName,
         currentDName: currentDName,
         currentDepFreq: currentDepFreq,
-        currentDestFreq: currentDestFreq
+        currentDestFreq: currentDestFreq,
+        freqCache: freqCache
     };
     localStorage.setItem('ga_active_mission', JSON.stringify(state));
 }
@@ -450,6 +468,15 @@ async function restoreMissionState(state) {
     currentStartICAO = state.currentStartICAO; currentDestICAO = state.currentDestICAO;
     currentSName = state.currentSName; currentDName = state.currentDName;
     currentDepFreq = state.currentDepFreq || ""; currentDestFreq = state.currentDestFreq || "";
+    freqCache = state.freqCache || {};
+
+    // Fallback: Wenn Frequenzen im Briefing fehlen (z.B. alte Pinnwand-Daten), neu laden
+    if (!state.wikiDepFreqText && currentStartICAO) {
+        fetchAirportFreq(currentStartICAO, 'wikiDepFreqText', 'dep');
+    }
+    if (!state.wikiDestFreqText && currentDestICAO && !state.isPOI) {
+        fetchAirportFreq(currentDestICAO, 'wikiDestFreqText', 'dest');
+    }
 
     const startLocEl = document.getElementById('startLoc');
     const destLocEl  = document.getElementById('destLoc');
@@ -1126,8 +1153,10 @@ async function fetchAirportFreq(icao, elementId, type) {
             }
         }
         if (el) el.innerText = '';
+        freqCache[icao] = []; // Mark as fetched but empty
     } catch(e) {
         if (el) el.innerText = '';
+        freqCache[icao] = []; // Mark as fetched but empty
     }
     return null;
 }
@@ -1773,28 +1802,31 @@ function toggleMapTable() {
    ========================================================= */
 function updateMiniMap() {
     const miniContainer = document.getElementById('miniMap');
-    if (!miniContainer || miniContainer.offsetParent === null) return; 
-    
-    if (!miniMap) {
-        miniMap = L.map('miniMap', { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, attributionControl: false });
-        L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png').addTo(miniMap);
-        L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', { 
-            opacity: 0.65, 
-            maxNativeZoom: 12 
-        }).addTo(miniMap);
-    }
-    
-    if (routeWaypoints && routeWaypoints.length > 0) {
-        if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline);
-        miniRoutePolyline = L.polyline(routeWaypoints, { color: '#d93829', weight: 4 }).addTo(miniMap);
-        miniMapMarkers.forEach(m => miniMap.removeLayer(m)); miniMapMarkers = [];
+    if (!miniContainer || miniContainer.offsetParent === null) return;
 
-        const startMarker = L.circleMarker(routeWaypoints[0], { radius: 5, color: '#111', weight: 2, fillColor: '#44ff44', fillOpacity: 1 }).addTo(miniMap);
-        const destMarker = L.circleMarker(routeWaypoints[routeWaypoints.length - 1], { radius: 5, color: '#111', weight: 2, fillColor: '#ff4444', fillOpacity: 1 }).addTo(miniMap);
-        
-        miniMapMarkers.push(startMarker, destMarker);
-        setTimeout(() => { miniMap.invalidateSize(); miniMap.fitBounds(L.latLngBounds(routeWaypoints), { padding: [15, 15] }); }, 150);
-    }
+    // Verzögerung, um UI-Blockierung zu vermeiden
+    setTimeout(() => {
+        if (!miniMap) {
+            miniMap = L.map('miniMap', { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, attributionControl: false });
+            L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png').addTo(miniMap);
+            L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', {
+                opacity: 0.65,
+                maxNativeZoom: 12
+            }).addTo(miniMap);
+        }
+
+        if (routeWaypoints && routeWaypoints.length > 0) {
+            if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline);
+            miniRoutePolyline = L.polyline(routeWaypoints, { color: '#d93829', weight: 4 }).addTo(miniMap);
+            miniMapMarkers.forEach(m => miniMap.removeLayer(m)); miniMapMarkers = [];
+
+            const startMarker = L.circleMarker(routeWaypoints[0], { radius: 5, color: '#111', weight: 2, fillColor: '#44ff44', fillOpacity: 1 }).addTo(miniMap);
+            const destMarker = L.circleMarker(routeWaypoints[routeWaypoints.length - 1], { radius: 5, color: '#111', weight: 2, fillColor: '#ff4444', fillOpacity: 1 }).addTo(miniMap);
+
+            miniMapMarkers.push(startMarker, destMarker);
+            setTimeout(() => { miniMap.invalidateSize(); miniMap.fitBounds(L.latLngBounds(routeWaypoints), { padding: [15, 15] }); }, 50);
+        }
+    }, 100); // Kurze Verzögerung vor dem Start
 }
 
 /* =========================================================
@@ -1932,9 +1964,14 @@ function pinCurrentFlight() {
         mHeadingNote: document.getElementById("mHeadingNote").innerText, mETENote: document.getElementById("mETENote").innerText,
         wikiDepDescText: document.getElementById("wikiDepDescText") ? document.getElementById("wikiDepDescText").innerText : "",
         wikiDestDescText: document.getElementById("wikiDestDescText") ? document.getElementById("wikiDestDescText").innerText : "",
+        wikiDepFreqText: document.getElementById("wikiDepFreqText") ? document.getElementById("wikiDepFreqText").innerHTML : "",
+        wikiDestFreqText: document.getElementById("wikiDestFreqText") ? document.getElementById("wikiDestFreqText").innerHTML : "",
+        wikiDepImageUrl: document.getElementById("wikiDepImage") ? document.getElementById("wikiDepImage").style.backgroundImage : "",
+        wikiDestImageUrl: document.getElementById("wikiDestImage") ? document.getElementById("wikiDestImage").style.backgroundImage : "",
         isPOI: document.getElementById("destRwyContainer").style.display === "none",
         currentMissionData: currentMissionData, routeWaypoints: routeWaypoints, currentStartICAO: currentStartICAO,
-        currentDestICAO: currentDestICAO, currentSName: currentSName, currentDName: currentDName
+        currentDestICAO: currentDestICAO, currentSName: currentSName, currentDName: currentDName,
+        currentDepFreq: currentDepFreq, currentDestFreq: currentDestFreq, freqCache: freqCache
     };
 
     const routeText = `${currentStartICAO} ➔ ${currentDestICAO === "POI" ? currentMissionData.poiName : currentDestICAO}`;
@@ -2136,8 +2173,8 @@ async function captureMapForPDF() {
     let zoom = 1;
     for (let z = 14; z >= 1; z--) {
         const nw = bounds.getNorthWest(), se = bounds.getSouthEast();
-        const p1 = latLngToPixel(nw.lat, nw.lng, z);
-        const p2 = latLngToPixel(se.lat, se.lng, z);
+        const p1 = latLngToPixel(nw.lat, nw.lng || nw.lon, z);
+        const p2 = latLngToPixel(se.lat, se.lng || se.lon, z);
         const routeW = Math.abs(p2.x - p1.x), routeH = Math.abs(p2.y - p1.y);
         if (routeW < W - 20 && routeH < H - 20) { zoom = z; break; }
     }
@@ -2155,8 +2192,8 @@ async function captureMapForPDF() {
 
     // Load tiles
     const tileSize = 256;
-    const tilePromises = [];
     const subdomains = ['a', 'b', 'c'];
+    const tilePromises = [];
 
     const startTileX = Math.floor((centerPx.x - W / 2) / tileSize);
     const startTileY = Math.floor((centerPx.y - H / 2) / tileSize);
@@ -2177,19 +2214,19 @@ async function captureMapForPDF() {
 
     // VFR aero overlay
     const aeroZoom = Math.min(zoom, 12);
-    const aeroScale = Math.pow(2, zoom - aeroZoom);
+    const scale = Math.pow(2, zoom - aeroZoom);
     const aeroCenterPx = latLngToPixel(center.lat, center.lng, aeroZoom);
-    const aeroTileSize = tileSize * aeroScale;
-    const aStartX = Math.floor((aeroCenterPx.x - (W / 2) / aeroScale) / tileSize);
-    const aStartY = Math.floor((aeroCenterPx.y - (H / 2) / aeroScale) / tileSize);
-    const aEndX = Math.ceil((aeroCenterPx.x + (W / 2) / aeroScale) / tileSize);
-    const aEndY = Math.ceil((aeroCenterPx.y + (H / 2) / aeroScale) / tileSize);
+    const aeroTileSize = tileSize * scale;
+    const aStartX = Math.floor((aeroCenterPx.x - (W / 2) / scale) / tileSize);
+    const aStartY = Math.floor((aeroCenterPx.y - (H / 2) / scale) / tileSize);
+    const aEndX = Math.ceil((aeroCenterPx.x + (W / 2) / scale) / tileSize);
+    const aEndY = Math.ceil((aeroCenterPx.y + (H / 2) / scale) / tileSize);
 
     for (let tx = aStartX; tx <= aEndX; tx++) {
         for (let ty = aStartY; ty <= aEndY; ty++) {
             const aeroUrl = `https://nwy-tiles-api.prod.newaydata.com/tiles/${aeroZoom}/${tx}/${ty}.png?path=latest/aero/latest`;
-            const drawX = (tx * aeroTileSize) - (aeroCenterPx.x * aeroScale - W / 2);
-            const drawY = (ty * aeroTileSize) - (aeroCenterPx.y * aeroScale - H / 2);
+            const drawX = (tx * aeroTileSize) - (aeroCenterPx.x * scale - W / 2);
+            const drawY = (ty * aeroTileSize) - (aeroCenterPx.y * scale - H / 2);
             tilePromises.push(loadTileImage(aeroUrl).then(img => {
                 if (img) { ctx.globalAlpha = 0.65; ctx.drawImage(img, drawX, drawY, aeroTileSize, aeroTileSize); ctx.globalAlpha = 1.0; }
             }));
@@ -2463,7 +2500,7 @@ function drawRouteNavigationPage(doc, data, legs) {
     const tableW = colWidths.reduce((a, b) => a + b, 0), rowH = 12; 
 
     doc.setFillColor(220, 215, 200); doc.rect(tableX, y, tableW, 8, 'F');
-    doc.setDrawColor(160, 155, 140); doc.setLineWidth(0.3); doc.rect(tableX, y, tableW, 8, 'S');
+    doc.setDrawColor(160, 155, 140); doc.rect(tableX, y, tableW, 8, 'S');
 
     doc.setFont('Helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(40, 40, 40);
     doc.text('LEG', tableX + 2, y + 5.5);
@@ -3057,6 +3094,16 @@ async function renderAirportInfo(left, right, type) {
         }
     }
 
+    // Frequenz-Fallback: Wenn nicht im Cache, nachladen
+    if (freqCache[icao] === undefined && (!gpsState.fetchingFreqs || !gpsState.fetchingFreqs.has(icao))) {
+        if (!gpsState.fetchingFreqs) gpsState.fetchingFreqs = new Set();
+        gpsState.fetchingFreqs.add(icao);
+        fetchAirportFreq(icao, null, null).then(() => {
+            gpsState.fetchingFreqs.delete(icao);
+            if (gpsState.mode === mode) renderGPS();
+        });
+    }
+
     const RWYS_PER_PAGE = 4;
     const FREQS_PER_PAGE = 4;
     const allRunways  = runwayCache[icao] ? runwayCache[icao].split(/\s*(?:\||\n|<br\s*\/?>)\s*/i).filter(r=>r.trim()) : [];
@@ -3134,7 +3181,7 @@ async function fetchAndCacheWikiPages(icao, lat, lon) {
             if (wdData?.query?.search?.length > 0) {
                 title = wdData.query.search[0].title;
             } else {
-                const fallRes = await fetchWithTimeout(`https://de.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(icao + ' Flugplatz OR Flughafen')}&srlimit=1&format=json&origin=*`, 4000);
+                const fallRes = await fetchWithTimeout(`https://de.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(icao + ' Flugplatz OR Flugplatz')}&srlimit=1&format=json&origin=*`, 4000);
                 const fallData = await fallRes.json();
                 if (fallData?.query?.search?.length > 0) title = fallData.query.search[0].title;
             }

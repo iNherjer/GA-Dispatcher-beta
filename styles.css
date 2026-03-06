@@ -237,7 +237,12 @@ body.theme-retro .meter-label { display: block; position: absolute; bottom: 2px;
 .paperclip, .page-number { display: none; }
 .mission-note-page { display: block !important; opacity: 1 !important; transform: none !important; }
 
-body.theme-retro .notes-stack { display: grid; grid-template-areas: "stack"; position: relative; margin-bottom: 25px; cursor: pointer; }
+body.theme-retro .notes-stack { 
+    display: grid; grid-template-areas: "stack"; 
+    position: relative; margin-bottom: 25px; cursor: pointer;
+    min-width: 250px; min-height: 400px; /* Explizite Mindestgröße für bessere Klick-Erkennung */
+    user-select: none; -webkit-user-select: none; /* Verhindert Text-Selektion statt Blättern */
+}
 body.theme-retro .paperclip { display: block; position: absolute; top: -18px; left: 20px; width: 25px; height: 60px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 60'%3E%3Cpath d='M10 40 V12 a4 4 0 0 1 8 0 v32 a6 6 0 0 1-12 0 V10 a8 8 0 0 1 16 0 v32' fill='none' stroke='%23889' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; z-index: 10; filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.5)); transform: rotate(-15deg); }
 body.theme-retro .mission-note-page { grid-area: stack; background-color: #fdf5e6; background-image: repeating-linear-gradient(transparent, transparent 23px, #a6bccc 24px); background-size: 100% 24px; background-position: 0 4px; padding: 15px 15px 15px 45px; border-radius: 2px 6px 4px 2px; border: 1px solid #d3cbb8; position: relative; transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1); }
 body.theme-retro .mission-note-page::before { content: ''; position: absolute; top: 0; bottom: 0; left: 30px; width: 1px; background-color: rgba(220, 50, 50, 0.4); }
@@ -1171,4 +1176,12 @@ body.theme-navcom .discord-link:hover {
         /* Überschreibt den 3.0 Zoom von weiter oben */
         transform: translate(-50%, 20%) scale(2.6) rotate(2deg) !important; 
     }
+}
+
+/* FIX: Interaktive Elemente auf Hintergrund-Seiten deaktivieren, damit Klicks zuverlässig zum Blättern führen */
+body.theme-retro .mission-note-page:not(.front-note) .briefing-photo-attachment,
+body.theme-retro .mission-note-page:not(.front-note) a,
+body.theme-retro .mission-note-page:not(.front-note) button,
+body.theme-retro .mission-note-page:not(.front-note) .retro-switch-container {
+    pointer-events: none;
 }
