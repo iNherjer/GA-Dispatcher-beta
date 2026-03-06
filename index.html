@@ -357,6 +357,9 @@
             </div>
 
             <div class="mission-note-page back-note" id="notePage2" onclick="toggleNotes()">
+                <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
+                <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
+                <div class="briefing-pdf-pin" onclick="generateBriefingPDF(); event.stopPropagation();" title="Briefing Pack als PDF drucken">📄</div>
                 <div class="page-number">Seite 2</div>
                 <h2 class="wiki-title" style="margin-bottom: 2px;">Nav-Log</h2>
                 <div id="briefingNavLog" style="font-family: 'Courier New', Courier, monospace; font-size: 11px; line-height: 1.4; color: #222; margin-top: 10px;">
@@ -364,32 +367,52 @@
             </div>
 
             <div class="mission-note-page third-note" id="notePage3" onclick="toggleNotes()">
+                <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
+                <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
+                <div class="briefing-pdf-pin" onclick="generateBriefingPDF(); event.stopPropagation();" title="Briefing Pack als PDF drucken">📄</div>
                 <div class="page-number">Seite 3</div>
                 <h2 class="wiki-title">Start-Info</h2>
-                 <div id="wikiDepImageContainer" class="briefing-photo-attachment" style="display:none; float: right; margin-left: 15px; margin-bottom: 10px; width: 140px; transform: rotate(-2deg);" onclick="toggleWikiPhoto(event, 'wikiDepImageContainer')">
-                     <div class="photo-pin" style="background: #4da6ff;"></div>
-                     <div class="photo-img" id="wikiDepImage" style="background-image: url(''); height: 100px;"></div>
-                     <div class="photo-caption" style="font-size: 14px;">Wiki-Daten</div>
+                <div id="wikiDepNameDisplay" style="font-weight:bold; font-size:14px; color:#333; margin-bottom:8px;"></div>
+                <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:10px;">
+                    <div id="wikiDepLinks" style="flex-shrink:0;">
+                        <a href="#" onclick="openAIP('dep'); event.stopPropagation(); return false;" style="color:var(--blue); font-weight:bold; font-size:13px; text-decoration:none; display:block; margin-bottom:4px;">📋 AIP</a>
+                        <a href="#" onclick="openMetar('dep'); event.stopPropagation(); return false;" style="color:var(--blue); font-weight:bold; font-size:13px; text-decoration:none; display:block;">🌤️ METAR</a>
+                    </div>
+                    <div id="wikiDepImageContainer" class="briefing-photo-attachment" style="display:none; width:140px; transform:rotate(-2deg); flex-shrink:0; margin-left:auto;" onclick="toggleWikiPhoto(event, 'wikiDepImageContainer')">
+                        <div class="photo-pin" style="background: #4da6ff;"></div>
+                        <div class="photo-img" id="wikiDepImage" style="background-image: url(''); height: 100px;"></div>
+                        <div class="photo-caption" style="font-size: 14px;">Wiki-Daten</div>
+                    </div>
                 </div>
                 <div class="wiki-info-note">
-                    <div id="wikiDepFreqText" style="color: var(--blue); font-weight: bold; margin-bottom: 5px; font-size: 13px;"></div>
                     <div id="wikiDepRwyText" style="color: var(--piper-yellow); margin-bottom: 10px; font-weight: bold; border-bottom: 1px dashed #ccc; padding-bottom: 5px;">Sucht Pisten-Infos...</div>
+                    <div id="wikiDepFreqText" style="color: var(--blue); font-weight: bold; margin-bottom: 10px; font-size: 13px; border-bottom: 1px dashed #ccc; padding-bottom: 5px;"></div>
                     📖 <span id="wikiDepDescText">Warte auf Daten...</span>
                 </div>
                 <img id="uiDepDetailMap" src="" style="width:100%; border-radius:4px; margin-top:15px; display:none; border: 2px solid #ccc; box-shadow: 2px 3px 6px rgba(0,0,0,0.3);">
             </div>
 
             <div class="mission-note-page fourth-note" id="notePage4" onclick="toggleNotes()">
+                <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
+                <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
+                <div class="briefing-pdf-pin" onclick="generateBriefingPDF(); event.stopPropagation();" title="Briefing Pack als PDF drucken">📄</div>
                 <div class="page-number">Seite 4</div>
                 <h2 class="wiki-title">Ziel-Info</h2>
-                 <div id="wikiDestImageContainer" class="briefing-photo-attachment" style="display:none; float: right; margin-left: 15px; margin-bottom: 10px; width: 140px; transform: rotate(1deg);" onclick="toggleWikiPhoto(event, 'wikiDestImageContainer')">
-                     <div class="photo-pin" style="background: #d93829;"></div>
-                     <div class="photo-img" id="wikiDestImage" style="background-image: url(''); height: 100px;"></div>
-                     <div class="photo-caption" style="font-size: 14px;">Wiki-Daten</div>
+                <div id="wikiDestNameDisplay" style="font-weight:bold; font-size:14px; color:#333; margin-bottom:8px;"></div>
+                <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:10px;">
+                    <div id="wikiDestLinks" style="flex-shrink:0;">
+                        <a href="#" onclick="openAIP('dest'); event.stopPropagation(); return false;" style="color:var(--blue); font-weight:bold; font-size:13px; text-decoration:none; display:block; margin-bottom:4px;">📋 AIP</a>
+                        <a href="#" onclick="openMetar('dest'); event.stopPropagation(); return false;" style="color:var(--blue); font-weight:bold; font-size:13px; text-decoration:none; display:block;">🌤️ METAR</a>
+                    </div>
+                    <div id="wikiDestImageContainer" class="briefing-photo-attachment" style="display:none; width:140px; transform:rotate(1deg); flex-shrink:0; margin-left:auto;" onclick="toggleWikiPhoto(event, 'wikiDestImageContainer')">
+                        <div class="photo-pin" style="background: #d93829;"></div>
+                        <div class="photo-img" id="wikiDestImage" style="background-image: url(''); height: 100px;"></div>
+                        <div class="photo-caption" style="font-size: 14px;">Wiki-Daten</div>
+                    </div>
                 </div>
                 <div class="wiki-info-note">
-                    <div id="wikiDestFreqText" style="color: var(--blue); font-weight: bold; margin-bottom: 5px; font-size: 13px;"></div>
                     <div id="wikiDestRwyText" style="color: var(--piper-yellow); margin-bottom: 10px; font-weight: bold; border-bottom: 1px dashed #ccc; padding-bottom: 5px;">Sucht Pisten-Infos...</div>
+                    <div id="wikiDestFreqText" style="color: var(--blue); font-weight: bold; margin-bottom: 10px; font-size: 13px; border-bottom: 1px dashed #ccc; padding-bottom: 5px;"></div>
                     📖 <span id="wikiDestDescText">Warte auf Daten...</span>
                 </div>
                 <img id="uiDestDetailMap" src="" style="width:100%; border-radius:4px; margin-top:15px; display:none; border: 2px solid #ccc; box-shadow: 2px 3px 6px rgba(0,0,0,0.3);">
