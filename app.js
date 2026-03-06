@@ -370,6 +370,8 @@ function saveMissionState() {
         mETENote: document.getElementById("mETENote").innerText,
         wikiDepDescText: document.getElementById("wikiDepDescText") ? document.getElementById("wikiDepDescText").innerText : "",
         wikiDestDescText: document.getElementById("wikiDestDescText") ? document.getElementById("wikiDestDescText").innerText : "",
+        wikiDepFreqText: document.getElementById("wikiDepFreqText") ? document.getElementById("wikiDepFreqText").innerHTML : "",
+        wikiDestFreqText: document.getElementById("wikiDestFreqText") ? document.getElementById("wikiDestFreqText").innerHTML : "",
         wikiDepImageUrl: imgDepUrl,
         wikiDestImageUrl: imgDestUrl, 
         isPOI: document.getElementById("destRwyContainer").style.display === "none",
@@ -401,6 +403,9 @@ async function restoreMissionState(state) {
     
     if (document.getElementById("wikiDepDescText")) document.getElementById("wikiDepDescText").innerText = state.wikiDepDescText || "";
     if (document.getElementById("wikiDestDescText")) document.getElementById("wikiDestDescText").innerText = state.wikiDestDescText || "";
+    
+    if (document.getElementById("wikiDepFreqText")) document.getElementById("wikiDepFreqText").innerHTML = state.wikiDepFreqText || "";
+    if (document.getElementById("wikiDestFreqText")) document.getElementById("wikiDestFreqText").innerHTML = state.wikiDestFreqText || "";
     
     const imgDepContainer = document.getElementById("wikiDepImageContainer");
     const imgDepEl = document.getElementById("wikiDepImage");
@@ -2395,7 +2400,7 @@ function drawMissionBriefingPage(doc, data, mapImage) {
     doc.setTextColor(217, 56, 41); doc.text('DATUM:', col2, y);
     doc.setTextColor(40, 40, 40); doc.text(`${data.date} ${data.time}`, col2 + 25, y);
 
-    y += 18; 
+    y += 24; 
     if (mapImage) {
         doc.setFont('Helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(11, 31, 101);
         doc.text('ROUTE MAP', 32, y);
@@ -2591,7 +2596,21 @@ function drawAirportInfoPage(doc, type, data, photo, detailMap) {
         doc.text(`PLATZKARTE ${icao}`, 32, y);
         y += 5;
 
-        const mapW = 155, mapH = Math.min(100, 280 - y), mapX = 32;
+        // Berechne Aspect Ratio basierend auf 700x360
+        const mapRatio = 700 / 360;
+        const maxW = 155;
+        const maxH = Math.min(100, 280 - y);
+        let mapW, mapH;
+
+        if (maxW / maxH < mapRatio) {
+            mapW = maxW;
+            mapH = mapW / mapRatio;
+        } else {
+            mapH = maxH;
+            mapW = mapH * mapRatio;
+        }
+        
+        const mapX = 32 + (maxW - mapW) / 2;
 
         doc.setFillColor(230, 225, 210); doc.rect(mapX - 1, y - 1, mapW + 2, mapH + 2, 'F');
         doc.setDrawColor(160, 155, 140); doc.setLineWidth(0.4); doc.rect(mapX - 1, y - 1, mapW + 2, mapH + 2, 'S');
