@@ -134,43 +134,35 @@ function toggleNotes(event) {
     // Wenn wir auf einen Link oder Button klicken, nichts tun
     if (event && (event.target.tagName === 'A' || event.target.tagName === 'BUTTON')) return;
 
-    const stack = document.getElementById('notesStack');
-    const p1 = document.getElementById('notePage1'), p2 = document.getElementById('notePage2'), p3 = document.getElementById('notePage3'), p4 = document.getElementById('notePage4');
-    if (!p1 || !p2 || !p3 || !p4) return;
+    const pages = ['notePage1','notePage2','notePage3','notePage4','notePage5'].map(id => document.getElementById(id)).filter(Boolean);
+    if (pages.length < 2) return;
+    const classes = ['front-note','back-note','third-note','fourth-note','fifth-note'];
 
     let forward = true;
-
-    // Wenn auf die Büroklammer geklickt wird -> Immer zurück (ist ja ganz links)
     if (event && event.target && event.target.classList.contains('paperclip')) {
         forward = false;
-    }
-    // Ansonsten: Einfach - links vom Bildschirm = zurück
-    else {
-        if (event.clientX < window.innerWidth / 2) {
-            forward = false;
-        }
+    } else if (event && event.currentTarget) {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const clickX = event.clientX - rect.left;
+        if (clickX < rect.width / 2) forward = false;
+    } else if (event) {
+        if (event.clientX < window.innerWidth / 2) forward = false;
     }
 
+    // Find current front page index
+    let frontIdx = pages.findIndex(p => p.classList.contains('front-note'));
+    if (frontIdx < 0) frontIdx = 0;
+
     if (forward) {
-        if(p1.classList.contains('front-note')) {
-            p1.className = 'mission-note-page fourth-note'; p2.className = 'mission-note-page front-note'; p3.className = 'mission-note-page back-note'; p4.className = 'mission-note-page third-note';
-        } else if(p2.classList.contains('front-note')) {
-            p2.className = 'mission-note-page fourth-note'; p3.className = 'mission-note-page front-note'; p4.className = 'mission-note-page back-note'; p1.className = 'mission-note-page third-note';
-        } else if(p3.classList.contains('front-note')) {
-            p3.className = 'mission-note-page fourth-note'; p4.className = 'mission-note-page front-note'; p1.className = 'mission-note-page back-note'; p2.className = 'mission-note-page third-note';
-        } else {
-            p4.className = 'mission-note-page fourth-note'; p1.className = 'mission-note-page front-note'; p2.className = 'mission-note-page back-note'; p3.className = 'mission-note-page third-note';
-        }
+        frontIdx = (frontIdx + 1) % pages.length;
     } else {
-        if(p1.classList.contains('front-note')) {
-            p1.className = 'mission-note-page back-note'; p2.className = 'mission-note-page third-note'; p3.className = 'mission-note-page fourth-note'; p4.className = 'mission-note-page front-note';
-        } else if(p2.classList.contains('front-note')) {
-            p2.className = 'mission-note-page back-note'; p3.className = 'mission-note-page third-note'; p4.className = 'mission-note-page fourth-note'; p1.className = 'mission-note-page front-note';
-        } else if(p3.classList.contains('front-note')) {
-            p3.className = 'mission-note-page back-note'; p4.className = 'mission-note-page third-note'; p1.className = 'mission-note-page fourth-note'; p2.className = 'mission-note-page front-note';
-        } else {
-            p4.className = 'mission-note-page back-note'; p1.className = 'mission-note-page third-note'; p2.className = 'mission-note-page fourth-note'; p3.className = 'mission-note-page front-note';
-        }
+        frontIdx = (frontIdx - 1 + pages.length) % pages.length;
+    }
+
+    // Assign classes in order starting from frontIdx
+    for (let i = 0; i < pages.length; i++) {
+        let pageIdx = (frontIdx + i) % pages.length;
+        pages[pageIdx].className = 'mission-note-page ' + classes[i];
     }
 }
 
@@ -295,10 +287,15 @@ function initDragKnob(knobId, displayId, sliderId, min, max, type) {
         
         let delta = Math.round((startY - clientY) + (clientX - startX));
         if (type === 'gph') delta = Math.round(delta * 0.3); 
+        if (type === 'alt') delta = Math.round(delta * 10);
         
         let newVal = startVal + delta;
         if (newVal < min) newVal = min;
         if (newVal > max) newVal = max;
+        
+        // Snap to slider step
+        const step = parseInt(slider.step) || 1;
+        if (step > 1) newVal = Math.round(newVal / step) * step;
 
         display.innerText = newVal;
         slider.value = newVal;
@@ -353,7 +350,12 @@ window.onload = () => {
 
     const activeMission = localStorage.getItem('ga_active_mission');
     if (activeMission) {
-        setTimeout(() => restoreMissionState(JSON.parse(activeMission)), 300);
+        setTimeout(() => {
+            restoreMissionState(JSON.parse(activeMission));
+            // Clear destination input on initial load to allow easy random route generation
+            const dInp = document.getElementById('destLoc');
+            if (dInp) dInp.value = '';
+        }, 300);
     }
 
     requestAnimationFrame(() => {
@@ -367,6 +369,8 @@ window.onload = () => {
 
     initDragKnob('tasDragKnob', 'tasRadioDisplay', 'tasSlider', 80, 260, 'tas');
     initDragKnob('gphDragKnob', 'gphRadioDisplay', 'gphSlider', 5, 35, 'gph');
+    initDragKnob('altDragKnob', 'altRadioDisplay', 'altSlider', 1500, 9500, 'alt');
+    syncToNavCom('altRadioDisplay', document.getElementById('altSlider') ? document.getElementById('altSlider').value : '4500');
     
     if(aiToggleBtn && aiToggleBtn.checked) {
         const btnAI = document.getElementById('btnToggleAI');
@@ -420,7 +424,9 @@ function saveMissionState() {
         currentDName: currentDName,
         currentDepFreq: currentDepFreq,
         currentDestFreq: currentDestFreq,
-        freqCache: freqCache
+        freqCache: freqCache,
+        vpAltWaypoints: typeof vpAltWaypoints !== 'undefined' ? vpAltWaypoints : [],
+        vpElevationData: typeof vpElevationData !== 'undefined' ? vpElevationData : null
     };
     localStorage.setItem('ga_active_mission', JSON.stringify(state));
 }
@@ -469,6 +475,8 @@ async function restoreMissionState(state) {
     currentSName = state.currentSName; currentDName = state.currentDName;
     currentDepFreq = state.currentDepFreq || ""; currentDestFreq = state.currentDestFreq || "";
     freqCache = state.freqCache || {};
+    vpAltWaypoints = state.vpAltWaypoints || [];
+    vpElevationData = state.vpElevationData || null;
 
     // Fallback: Wenn Frequenzen im Briefing fehlen (z.B. alte Pinnwand-Daten), neu laden
     if (!state.wikiDepFreqText && currentStartICAO) {
@@ -596,8 +604,13 @@ function setDrumCounter(elementId, valueStr) {
 
 function handleSliderChange(type, val) { 
     setDrumCounter(type + 'Drum', val); 
-    recalculatePerformance(); 
+    if (type !== 'alt') recalculatePerformance(); 
     syncToNavCom(type + 'Radio', val);
+    if (type === 'alt') {
+        syncToNavCom('altRadioDisplay', val);
+        triggerVerticalProfileUpdate();
+        if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+    }
 }
 
 function recalculatePerformance() {
@@ -610,6 +623,7 @@ function recalculatePerformance() {
 
 function refreshAllDrums() {
     setDrumCounter('tasDrum', document.getElementById('tasSlider').value); setDrumCounter('gphDrum', document.getElementById('gphSlider').value);
+    const altSlider = document.getElementById('altSlider'); if (altSlider) setDrumCounter('altDrum', altSlider.value);
     if(currentMissionData) { setDrumCounter('distDrum', currentMissionData.dist); recalculatePerformance(); }
 }
 
@@ -805,9 +819,11 @@ async function loadMetarWidget(icao, containerId, lat, lon) {
         let arrowHtml = '';
         if (!isVRB && wspd > 0 && wdir !== null && wdir !== "VRB") {
             arrowHtml = `
-            <svg viewBox="0 0 160 160" style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:10; transform-origin: center center; transform: rotate(${wdir}deg); filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.4)); pointer-events:none;">
-                <line x1="80" y1="6" x2="80" y2="70" stroke="#1a73e8" stroke-width="4" stroke-linecap="round"/>
-                <polygon points="72,55 80,80 88,55" fill="#1a73e8" />
+            <svg viewBox="0 0 160 160" style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:10; pointer-events:none;">
+                <g transform="rotate(${wdir} 80 80)">
+                    <line x1="80" y1="6" x2="80" y2="70" stroke="#1a73e8" stroke-width="4" stroke-linecap="round"/>
+                    <polygon points="72,55 80,80 88,55" fill="#1a73e8" />
+                </g>
             </svg>`;
         }
         
@@ -1630,53 +1646,113 @@ async function fetchRouteAirspaces(routePts) {
 
         activeAirspaces = intersecting;
         clearAirspaceMapLayers();
-
-        if (intersecting.length === 0) {
-            listEl.innerHTML = '<span style="color:#33ff33;">✅ Route frei – keine Konflikte erkannt.</span>';
-        } else {
-            let html = '';
-            intersecting.forEach((a, idx) => {
-                const style = getAirspaceStyle(a);
-                const displayName = getAirspaceDisplayName(a);
-                const freqInfo = getAirspaceFreqInfo(a);
-                
-                let limitStr = '';
-                const fmtLmt = (lim) => {
-                    if(!lim) return '?';
-                    if (lim.referenceDatum===0 && lim.value===0) return 'GND';
-                    if (lim.unit===6) return `FL ${lim.value}`;
-                    let u = lim.unit === 1 ? 'FT' : (lim.unit === 6 ? 'FL ' : 'M');
-                    let r = lim.referenceDatum === 1 ? ' MSL' : (lim.referenceDatum===0 ? ' AGL' : '');
-                    return `${lim.value} ${u}${r}`;
-                };
-
-                if (a.lowerLimit && a.upperLimit) {
-                    limitStr = `<span style="color:#555; font-size:9px; white-space:nowrap;">[${fmtLmt(a.lowerLimit)} – ${fmtLmt(a.upperLimit)}]</span>`;
-                }
-
-                const catLabel = `<span style="font-size:9px; color:#888;">${style.category}</span>`;
-                const freqLine = freqInfo ? `<div style="margin-top:1px;">${freqInfo}</div>` : '';
-
-                html += `<div class="as-row" data-as-idx="${idx}" 
-                            onclick="toggleAirspaceHighlight(${idx}); event.stopPropagation();"
-                            style="padding: 5px 4px; border-bottom: 1px dashed #bbb; cursor:pointer; transition: background 0.15s;">
-                            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                                <span style="color:${style.color}; line-height:1.3;">
-                                    <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${style.color}; margin-right:4px; vertical-align:middle;"></span>${style.icon} <b>${displayName}</b>
-                                    <span style="margin-left:4px;">${catLabel}</span>
-                                </span>
-                                ${limitStr}
-                            </div>
-                            ${freqLine}
-                        </div>`;
-            });
-            listEl.innerHTML = html;
-        }
+        renderAirspaceWarningsList();
 
     } catch (e) {
         console.error("OpenAIP Error", e);
         listEl.innerHTML = '<span style="color:#d93829;">Fehler beim Laden der Luftraumdaten.</span>';
     }
+}
+
+function renderAirspaceWarningsList() {
+    const listEl = document.getElementById('routeAirspacesList');
+    if (!listEl) return;
+
+    if (!activeAirspaces || activeAirspaces.length === 0) {
+        listEl.innerHTML = '<span style="color:#33ff33;">✅ Route frei – keine Konflikte erkannt.</span>';
+        return;
+    }
+
+    const filterCheckbox = document.getElementById('navLogAirspaceFilter');
+    const filterActive = filterCheckbox && filterCheckbox.checked;
+
+    let fpResult = null;
+    if (filterActive && typeof vpElevationData !== 'undefined' && vpElevationData && vpElevationData.length >= 2) {
+        const cruiseAlt = parseInt(document.getElementById('altSliderMap')?.value || document.getElementById('altSlider')?.value || 4500);
+        const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
+        fpResult = computeFlightProfile(vpElevationData, cruiseAlt, 500, 500, tas);
+    }
+
+    let finalAirspaces = activeAirspaces;
+
+    if (filterActive && fpResult && fpResult.profile) {
+        finalAirspaces = activeAirspaces.filter(a => {
+            if (!a.lowerLimit || !a.upperLimit) return true;
+            const lowerFt = airspaceLimitToFt(a.lowerLimit);
+            const upperFt = airspaceLimitToFt(a.upperLimit);
+            if (lowerFt === null || upperFt === null) return true;
+            
+            let intersects = false;
+            if (a.geometry) {
+                const polys = [];
+                if (a.geometry.type === 'Polygon') polys.push(a.geometry.coordinates[0]);
+                else if (a.geometry.type === 'MultiPolygon') a.geometry.coordinates.forEach(mc => polys.push(mc[0]));
+
+                for (let i = 0; i < fpResult.profile.length; i++) {
+                    const pp = fpResult.profile[i];
+                    if (pp.altFt >= lowerFt && pp.altFt <= upperFt) {
+                        const pt = vpElevationData[i];
+                        for (const poly of polys) {
+                            if (vpPointInPoly(pt, poly)) {
+                                intersects = true; break;
+                            }
+                        }
+                    }
+                    if (intersects) break;
+                }
+            } else {
+                // Fallback for airspaces without geometry
+                for (const pp of fpResult.profile) {
+                    if (pp.altFt >= lowerFt && pp.altFt <= upperFt) { intersects = true; break; }
+                }
+            }
+            return intersects;
+        });
+    }
+
+    if (finalAirspaces.length === 0) {
+        listEl.innerHTML = '<span style="color:#33ff33;">✅ Route auf dieser Flughöhe frei.</span>';
+        return;
+    }
+
+    let html = '';
+    finalAirspaces.forEach((a) => {
+        const idx = activeAirspaces.indexOf(a); // Keep original idx for map toggling
+        const style = getAirspaceStyle(a);
+        const displayName = getAirspaceDisplayName(a);
+        const freqInfo = getAirspaceFreqInfo(a);
+        
+        let limitStr = '';
+        const fmtLmt = (lim) => {
+            if(!lim) return '?';
+            if (lim.referenceDatum===0 && lim.value===0) return 'GND';
+            if (lim.unit===6) return `FL ${lim.value}`;
+            let u = lim.unit === 1 ? 'FT' : (lim.unit === 6 ? 'FL ' : 'M');
+            let r = lim.referenceDatum === 1 ? ' MSL' : (lim.referenceDatum===0 ? ' AGL' : '');
+            return `${lim.value} ${u}${r}`;
+        };
+
+        if (a.lowerLimit && a.upperLimit) {
+            limitStr = `<span style="color:#555; font-size:9px; white-space:nowrap;">[${fmtLmt(a.lowerLimit)} – ${fmtLmt(a.upperLimit)}]</span>`;
+        }
+
+        const catLabel = `<span style="font-size:9px; color:#888;">${style.category}</span>`;
+        const freqLine = freqInfo ? `<div style="margin-top:1px;">${freqInfo}</div>` : '';
+
+        html += `<div class="as-row" data-as-idx="${idx}" 
+                    onclick="toggleAirspaceHighlight(${idx}); event.stopPropagation();"
+                    style="padding: 5px 4px; border-bottom: 1px dashed #bbb; cursor:pointer; transition: background 0.15s;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                        <span style="color:${style.color}; line-height:1.3;">
+                            <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${style.color}; margin-right:4px; vertical-align:middle;"></span>${style.icon} <b>${displayName}</b>
+                            <span style="margin-left:4px;">${catLabel}</span>
+                        </span>
+                        ${limitStr}
+                    </div>
+                    ${freqLine}
+                </div>`;
+    });
+    listEl.innerHTML = html;
 }
 
 async function generateMission() {
@@ -2189,6 +2265,9 @@ function updateRoutePerformance() {
         fetchRouteAirspaces(routeWaypoints);
     }, 800);
 
+    // Trigger Vertical Profile Update
+    triggerVerticalProfileUpdate();
+
     setTimeout(() => saveMissionState(), 500);
     if (gpsState.visible && gpsState.mode === 'FPL') renderGPS();
 }
@@ -2256,7 +2335,11 @@ function initMapBase() {
         btn.onclick = function(e){
             e.preventDefault(); document.body.classList.toggle('map-is-fullscreen');
             if (document.body.classList.contains('map-is-fullscreen')) { btn.innerHTML = '✖'; } else { btn.innerHTML = '⛶'; }
-            setTimeout(() => { if(map) map.invalidateSize(); updateMiniMap(); }, 300);
+            setTimeout(() => { 
+                if(map) map.invalidateSize(); 
+                updateMiniMap(); 
+                if (typeof renderMapProfile === 'function') renderMapProfile();
+            }, 300);
         };
         return btn;
     };
@@ -2516,7 +2599,9 @@ function pinCurrentFlight() {
         isPOI: document.getElementById("destRwyContainer").style.display === "none",
         currentMissionData: currentMissionData, routeWaypoints: routeWaypoints, currentStartICAO: currentStartICAO,
         currentDestICAO: currentDestICAO, currentSName: currentSName, currentDName: currentDName,
-        currentDepFreq: currentDepFreq, currentDestFreq: currentDestFreq, freqCache: freqCache
+        currentDepFreq: currentDepFreq, currentDestFreq: currentDestFreq, freqCache: freqCache,
+        vpAltWaypoints: typeof vpAltWaypoints !== 'undefined' ? vpAltWaypoints : [],
+        vpElevationData: typeof vpElevationData !== 'undefined' ? vpElevationData : null
     };
 
     const routeText = `${currentStartICAO} ➔ ${currentDestICAO === "POI" ? currentMissionData.poiName : currentDestICAO}`;
@@ -4063,3 +4148,1484 @@ async function fetchOpenAIPData() {
         });
     } catch(e) { console.error("❌ Fetch Error:", e); }
 }
+
+/* =========================================================
+   VERTICAL PROFILE (Höhenprofil) ENGINE
+   ========================================================= */
+let vpElevationData = null;
+let vpProfileTimeout = null;
+let vpZoomLevel = 100; // 100 = full route, 10 = 10% view
+let vpHighResData = null; // Higher resolution elevation data for zoom
+let vpElevationCache = {}; // Cache to prevent API rate limits (HTTP 429)
+
+function triggerVerticalProfileUpdate() {
+    if (vpProfileTimeout) clearTimeout(vpProfileTimeout);
+    vpProfileTimeout = setTimeout(async () => {
+        if (!routeWaypoints || routeWaypoints.length < 2) return;
+        
+        const cacheKey = routeWaypoints.map(p => `${(p.lat||0).toFixed(4)},${((p.lng||p.lon)||0).toFixed(4)}`).join('|');
+        if (window._lastVpRouteKey !== cacheKey) {
+            vpAltWaypoints = [];
+            vpHighResData = null;
+            vpZoomLevel = 100;
+            const zd = document.getElementById('vpZoomDisplay');
+            if (zd) zd.textContent = '100%';
+            window._lastVpRouteKey = cacheKey;
+        }
+        
+        const page5 = document.getElementById('notePage5');
+        if (page5) page5.style.display = '';
+        const status = document.getElementById('verticalProfileStatus');
+        if (status) status.textContent = 'Lade Höhendaten...';
+        
+        try {
+            vpElevationData = await fetchRouteElevation(routeWaypoints);
+            renderVerticalProfile('verticalProfileCanvas');
+            if (status) status.textContent = vpElevationData.length + ' Höhenpunkte geladen';
+        } catch(e) {
+            console.error('Vertical Profile Error:', e);
+            if (status) status.textContent = 'Limit API/Fehler';
+            
+            // If we have nothing, render a flat baseline so the canvas still draws and airspaces update
+            if (!vpElevationData || vpElevationData.length === 0) {
+                const totalDist = routeWaypoints.reduce((acc, wp, i) => i === 0 ? 0 : acc + calcNav(routeWaypoints[i-1].lat, routeWaypoints[i-1].lng||routeWaypoints[i-1].lon, wp.lat, wp.lng||wp.lon).dist, 0);
+                vpElevationData = [
+                    {distNM: 0, elevFt: 0, lat: routeWaypoints[0].lat, lon: routeWaypoints[0].lng||routeWaypoints[0].lon},
+                    {distNM: Math.max(1, totalDist), elevFt: 0, lat: routeWaypoints[routeWaypoints.length-1].lat, lon: routeWaypoints[routeWaypoints.length-1].lng||routeWaypoints[routeWaypoints.length-1].lon}
+                ];
+            }
+            renderVerticalProfile('verticalProfileCanvas');
+        }
+    }, 1200);
+}
+
+async function fetchRouteElevation(routePts) {
+    if (!routePts || routePts.length < 2) return [];
+    
+    // Generate a unique cache key based on route coordinates
+    const cacheKey = routePts.map(p => `${(p.lat||0).toFixed(4)},${((p.lng||p.lon)||0).toFixed(4)}`).join('|');
+    if (vpElevationCache[cacheKey]) {
+        return vpElevationCache[cacheKey];
+    }
+    
+    try {
+        const stored = localStorage.getItem('ga_elev_cache_' + cacheKey);
+        if (stored) {
+            const data = JSON.parse(stored);
+            vpElevationCache[cacheKey] = data;
+            return data;
+        }
+    } catch(e) {}
+
+    const interpolated = [];
+    let cumulativeDist = 0;
+
+    for (let i = 0; i < routePts.length - 1; i++) {
+        const p1 = routePts[i], p2 = routePts[i+1];
+        const lat1 = p1.lat, lon1 = p1.lng || p1.lon;
+        const lat2 = p2.lat, lon2 = p2.lng || p2.lon;
+        const segDist = calcNav(lat1, lon1, lat2, lon2).dist;
+        const steps = Math.max(1, Math.round(segDist));
+        
+        for (let j = 0; j <= steps; j++) {
+            if (i > 0 && j === 0) continue;
+            const f = j / steps;
+            interpolated.push({
+                lat: lat1 + (lat2 - lat1) * f,
+                lon: lon1 + (lon2 - lon1) * f,
+                distNM: cumulativeDist + segDist * f
+            });
+        }
+        cumulativeDist += segDist;
+    }
+
+    let samplePts = interpolated;
+    if (interpolated.length > 100) {
+        samplePts = [];
+        for (let i = 0; i < 100; i++) {
+            const idx = Math.round(i * (interpolated.length - 1) / 99);
+            samplePts.push(interpolated[idx]);
+        }
+    }
+
+    const lats = samplePts.map(p => p.lat.toFixed(4)).join(',');
+    const lons = samplePts.map(p => p.lon.toFixed(4)).join(',');
+    
+    const res = await fetch('https://api.open-meteo.com/v1/elevation?latitude=' + lats + '&longitude=' + lons);
+    if (!res.ok) throw new Error('Elevation API error: ' + res.status);
+    const data = await res.json();
+    
+    if (!data.elevation || data.elevation.length !== samplePts.length) {
+        throw new Error('Invalid elevation response');
+    }
+
+    const finalData = samplePts.map((p, i) => ({
+        distNM: p.distNM,
+        elevFt: Math.round(data.elevation[i] * 3.28084),
+        lat: p.lat,
+        lon: p.lon
+    }));
+    
+    vpElevationCache[cacheKey] = finalData;
+    try { localStorage.setItem('ga_elev_cache_' + cacheKey, JSON.stringify(finalData)); } catch(e){}
+    return finalData;
+}
+
+function computeFlightProfile(elevationData, cruiseAltFt, climbRateFpm, descentRateFpm, tasKts) {
+    if (!elevationData || elevationData.length < 2) return null;
+    
+    const depElevFt = elevationData[0].elevFt;
+    const destElevFt = elevationData[elevationData.length - 1].elevFt;
+    const totalDistNM = elevationData[elevationData.length - 1].distNM;
+
+    const climbFt = Math.max(0, cruiseAltFt - depElevFt);
+    const climbTimeMin = climbFt / climbRateFpm;
+    const climbDistNM = (climbTimeMin / 60) * tasKts * 0.85;
+
+    const descentFt = Math.max(0, cruiseAltFt - destElevFt);
+    const descentTimeMin = descentFt / descentRateFpm;
+    const descentDistNM = (descentTimeMin / 60) * tasKts * 0.9;
+
+    const tocDistNM = Math.min(climbDistNM, totalDistNM * 0.4);
+    const todDistNM = Math.max(totalDistNM - descentDistNM, totalDistNM * 0.6);
+
+    const profile = [];
+    for (const pt of elevationData) {
+        let altFt;
+        if (pt.distNM <= tocDistNM) {
+            const f = tocDistNM > 0 ? pt.distNM / tocDistNM : 1;
+            altFt = depElevFt + (cruiseAltFt - depElevFt) * f;
+        } else if (pt.distNM >= todDistNM) {
+            const f = (totalDistNM - todDistNM) > 0 ? (pt.distNM - todDistNM) / (totalDistNM - todDistNM) : 1;
+            altFt = cruiseAltFt - (cruiseAltFt - destElevFt) * f;
+        } else {
+            altFt = cruiseAltFt;
+        }
+        profile.push({ distNM: pt.distNM, altFt: Math.round(altFt) });
+    }
+
+    return { profile, tocDistNM, todDistNM };
+}
+
+function renderVerticalProfile(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || !vpElevationData || vpElevationData.length < 2) return;
+
+    const container = canvas.parentElement;
+    const displayWidth = container.clientWidth || 400;
+    const displayHeight = Math.round(displayWidth * 0.4);
+    
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = displayWidth * dpr;
+    canvas.height = displayHeight * dpr;
+    canvas.style.width = displayWidth + 'px';
+    canvas.style.height = displayHeight + 'px';
+
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    const padLeft = 45, padRight = 15, padTop = 20, padBottom = 30;
+    const plotW = displayWidth - padLeft - padRight;
+    const plotH = displayHeight - padTop - padBottom;
+
+    const cruiseAlt = parseInt(document.getElementById('altSlider')?.value || 4500);
+    const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
+    const totalDist = vpElevationData[vpElevationData.length - 1].distNM;
+    const maxTerrain = Math.max(...vpElevationData.map(p => p.elevFt));
+    const maxAlt = Math.max(cruiseAlt + 500, maxTerrain + 1500);
+    const minAlt = 0;
+
+    const fpResult = computeFlightProfile(vpElevationData, cruiseAlt, 500, 500, tas);
+    
+    const xOf = (distNM) => padLeft + (distNM / totalDist) * plotW;
+    const yOf = (altFt) => padTop + plotH - ((altFt - minAlt) / (maxAlt - minAlt)) * plotH;
+
+    // Background
+    ctx.fillStyle = '#eef6ff';
+    ctx.fillRect(0, 0, displayWidth, displayHeight);
+
+    // Sky gradient
+    const skyGrad = ctx.createLinearGradient(0, padTop, 0, padTop + plotH);
+    skyGrad.addColorStop(0, '#87CEEB');
+    skyGrad.addColorStop(0.5, '#c8e6f8');
+    skyGrad.addColorStop(1, '#e8f4f8');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(padLeft, padTop, plotW, plotH);
+
+    // Airspace blocks
+    if (typeof activeAirspaces !== 'undefined' && activeAirspaces.length > 0) {
+        for (const as of activeAirspaces) {
+            if (!as.lowerLimit || !as.upperLimit) continue;
+            const lowerFt = airspaceLimitToFt(as.lowerLimit);
+            const upperFt = airspaceLimitToFt(as.upperLimit);
+            if (lowerFt === null || upperFt === null || upperFt <= minAlt || lowerFt >= maxAlt) continue;
+
+
+            let asMinDist = totalDist, asMaxDist = 0, found = false;
+            if (as.geometry) {
+                const polys = [];
+                if (as.geometry.type === 'Polygon') polys.push(as.geometry.coordinates[0]);
+                else if (as.geometry.type === 'MultiPolygon') as.geometry.coordinates.forEach(mc => polys.push(mc[0]));
+
+                for (const pt of vpElevationData) {
+                    for (const poly of polys) {
+                        if (vpPointInPoly(pt, poly)) {
+                            if (pt.distNM < asMinDist) asMinDist = pt.distNM;
+                            if (pt.distNM > asMaxDist) asMaxDist = pt.distNM;
+                            found = true; break;
+                        }
+                    }
+                }
+            }
+            if (!found) continue;
+
+            const style = getAirspaceStyle(as);
+            const x1 = xOf(asMinDist), x2 = xOf(asMaxDist);
+            const y1 = yOf(Math.min(upperFt, maxAlt)), y2 = yOf(Math.max(lowerFt, minAlt));
+
+            ctx.fillStyle = vpHexToRgba(style.color, 0.15);
+            ctx.strokeStyle = vpHexToRgba(style.color, 0.5);
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+            ctx.setLineDash([]);
+
+            const displayName = getAirspaceDisplayName(as);
+            ctx.fillStyle = vpHexToRgba(style.color, 0.7);
+            ctx.font = 'bold 8px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(displayName, (x1+x2)/2, y1 + 10);
+            ctx.font = '7px Arial';
+            ctx.fillText(lowerFt + '–' + upperFt + ' ft', (x1+x2)/2, y1 + 19);
+        }
+    }
+    ctx.textAlign = 'left';
+
+    // Safety line (terrain + 1000ft)
+    ctx.beginPath();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = 'rgba(200, 80, 0, 0.5)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < vpElevationData.length; i++) {
+        const x = xOf(vpElevationData[i].distNM), y = yOf(vpElevationData[i].elevFt + 1000);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Terrain polygon
+    ctx.beginPath();
+    ctx.moveTo(xOf(0), yOf(0));
+    for (let i = 0; i < vpElevationData.length; i++) ctx.lineTo(xOf(vpElevationData[i].distNM), yOf(vpElevationData[i].elevFt));
+    ctx.lineTo(xOf(totalDist), yOf(0));
+    ctx.closePath();
+
+    const terrainGrad = ctx.createLinearGradient(0, yOf(maxTerrain), 0, yOf(0));
+    terrainGrad.addColorStop(0, '#8B7355');
+    terrainGrad.addColorStop(0.3, '#6B8E23');
+    terrainGrad.addColorStop(0.7, '#228B22');
+    terrainGrad.addColorStop(1, '#2E8B57');
+    ctx.fillStyle = terrainGrad;
+    ctx.fill();
+
+    ctx.beginPath();
+    for (let i = 0; i < vpElevationData.length; i++) {
+        const x = xOf(vpElevationData[i].distNM), y = yOf(vpElevationData[i].elevFt);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = '#3a5a20';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Flight profile
+    if (fpResult && fpResult.profile) {
+        ctx.beginPath();
+        for (let i = 0; i < fpResult.profile.length; i++) {
+            const x = xOf(fpResult.profile[i].distNM), y = yOf(fpResult.profile[i].altFt) + 2;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        ctx.beginPath();
+        for (let i = 0; i < fpResult.profile.length; i++) {
+            const x = xOf(fpResult.profile[i].distNM), y = yOf(fpResult.profile[i].altFt);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = '#d93829';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+
+        // TOC
+        ctx.beginPath();
+        ctx.arc(xOf(fpResult.tocDistNM), yOf(cruiseAlt), 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#d93829';
+        ctx.fill();
+        ctx.fillStyle = '#333';
+        ctx.font = 'bold 9px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('TOC', xOf(fpResult.tocDistNM), yOf(cruiseAlt) - 7);
+
+        // TOD
+        ctx.beginPath();
+        ctx.arc(xOf(fpResult.todDistNM), yOf(cruiseAlt), 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#d93829';
+        ctx.fill();
+        ctx.fillStyle = '#333';
+        ctx.fillText('TOD', xOf(fpResult.todDistNM), yOf(cruiseAlt) - 7);
+        ctx.textAlign = 'left';
+    }
+
+    // Waypoint markers
+    let wpCumDist = 0;
+    for (let i = 0; i < routeWaypoints.length; i++) {
+        if (i > 0) {
+            const prev = routeWaypoints[i-1], curr = routeWaypoints[i];
+            wpCumDist += calcNav(prev.lat, prev.lng || prev.lon, curr.lat, curr.lng || curr.lon).dist;
+        }
+        const x = xOf(wpCumDist);
+        
+        ctx.beginPath();
+        ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+        ctx.lineWidth = 1;
+        ctx.moveTo(x, padTop);
+        ctx.lineTo(x, padTop + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        let wpLabel;
+        if (i === 0) wpLabel = currentStartICAO || 'DEP';
+        else if (i === routeWaypoints.length - 1) wpLabel = (currentMissionData?.poiName ? 'POI' : currentDestICAO) || 'DEST';
+        else wpLabel = routeWaypoints[i].name ? routeWaypoints[i].name.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '').split(' ')[0] : 'WP' + i;
+        if (wpLabel.length > 8) wpLabel = wpLabel.substring(0, 7) + '…';
+
+        ctx.save();
+        ctx.translate(x, padTop + plotH + 4);
+        ctx.rotate(-Math.PI / 4);
+        ctx.fillStyle = '#333';
+        ctx.font = 'bold 8px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(wpLabel, 0, 0);
+        ctx.restore();
+
+        ctx.beginPath();
+        ctx.arc(x, padTop + 3, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = i === 0 ? '#44ff44' : (i === routeWaypoints.length - 1 ? '#ff4444' : '#fdfd86');
+        ctx.fill();
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+
+    // Y axis
+    ctx.fillStyle = '#555';
+    ctx.font = '9px Arial';
+    ctx.textAlign = 'right';
+    const altStep = maxAlt > 6000 ? 2000 : (maxAlt > 3000 ? 1000 : 500);
+    for (let alt = 0; alt <= maxAlt; alt += altStep) {
+        const y = yOf(alt);
+        if (y < padTop - 5 || y > padTop + plotH + 5) continue;
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+        ctx.lineWidth = 0.5;
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(padLeft + plotW, y);
+        ctx.stroke();
+        ctx.fillStyle = '#555';
+        ctx.fillText(alt >= 1000 ? (alt/1000).toFixed(alt % 1000 === 0 ? 0 : 1) + 'k' : alt + '', padLeft - 4, y + 3);
+    }
+
+    ctx.save();
+    ctx.translate(8, padTop + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = '#888';
+    ctx.font = 'bold 8px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('ALT (ft)', 0, 0);
+    ctx.restore();
+
+    // X axis
+    ctx.textAlign = 'center';
+    const distStep = totalDist > 100 ? 20 : (totalDist > 50 ? 10 : 5);
+    for (let d = 0; d <= totalDist; d += distStep) {
+        ctx.fillStyle = '#888';
+        ctx.font = '8px Arial';
+        ctx.fillText(d + '', xOf(d), padTop + plotH + 22);
+    }
+    ctx.fillStyle = '#888';
+    ctx.font = 'bold 8px Arial';
+    ctx.fillText('NM', padLeft + plotW + 8, padTop + plotH + 22);
+
+    // Border
+    ctx.strokeStyle = '#bbb';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(padLeft, padTop, plotW, plotH);
+
+    // Cruise altitude label & line
+    ctx.fillStyle = 'rgba(217, 56, 41, 0.8)';
+    ctx.font = 'bold 9px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText('CRZ ' + cruiseAlt + ' ft', padLeft + 4, yOf(cruiseAlt) - 4);
+    ctx.beginPath();
+    ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = 'rgba(217, 56, 41, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.moveTo(padLeft, yOf(cruiseAlt));
+    ctx.lineTo(padLeft + plotW, yOf(cruiseAlt));
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Peak elevation marker
+    const peakPt = vpElevationData.reduce((max, p) => p.elevFt > max.elevFt ? p : max);
+    ctx.fillStyle = '#333';
+    ctx.font = '10px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('▲', xOf(peakPt.distNM), yOf(peakPt.elevFt) - 3);
+    ctx.font = 'bold 8px Arial';
+    ctx.fillText(peakPt.elevFt + ' ft', xOf(peakPt.distNM), yOf(peakPt.elevFt) - 12);
+    
+    // Auto-update things that depend on the completed elevation data
+    if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+    if (typeof vpMapProfileVisible !== 'undefined' && vpMapProfileVisible && vpElevationData) {
+        const mainAlt = document.getElementById('altSlider');
+        const mapAlt = document.getElementById('altSliderMap');
+        const mapDisplay = document.getElementById('altMapDisplay');
+        if (mainAlt && mapAlt) { mapAlt.value = mainAlt.value; }
+        if (mainAlt && mapDisplay) { mapDisplay.textContent = mainAlt.value; }
+        renderMapProfile();
+    }
+}
+
+function vpPointInPoly(pt, polygon) {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const xi = polygon[i][0], yi = polygon[i][1];
+        const xj = polygon[j][0], yj = polygon[j][1];
+        const intersect = ((yi > pt.lat) !== (yj > pt.lat)) && (pt.lon < (xj - xi) * (pt.lat - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+function airspaceLimitToFt(lim) {
+    if (!lim) return null;
+    if (lim.referenceDatum === 0 && lim.value === 0) return 0;
+    if (lim.unit === 6) return lim.value * 100;
+    if (lim.unit === 1) return lim.value;
+    if (lim.unit === 0) return Math.round(lim.value * 3.28084);
+    return lim.value;
+}
+
+function vpHexToRgba(hex, alpha) {
+    if (!hex || hex.charAt(0) !== '#') return 'rgba(0,0,0,' + alpha + ')';
+    const r = parseInt(hex.slice(1,3), 16) || 0;
+    const g = parseInt(hex.slice(3,5), 16) || 0;
+    const b = parseInt(hex.slice(5,7), 16) || 0;
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+}
+
+/* =========================================================
+   MAP TABLE PROFILE STRIP
+   ========================================================= */
+let vpMapProfileVisible = true;
+
+function toggleMapProfile() {
+    vpMapProfileVisible = !vpMapProfileVisible;
+    const strip = document.getElementById('mapProfileStrip');
+    const btn = document.getElementById('vpToggleBtn');
+    if (strip) strip.style.display = vpMapProfileVisible ? '' : 'none';
+    if (btn) {
+        btn.textContent = vpMapProfileVisible ? '📊 Profil (An)' : '📊 Profil (Aus)';
+        btn.style.background = vpMapProfileVisible ? '#2E8B57' : '#444';
+    }
+    if (vpMapProfileVisible) renderMapProfile();
+    // Invalidate map size since space changed
+    if (typeof map !== 'undefined' && map) setTimeout(() => map.invalidateSize(), 100);
+}
+
+function syncAltFromMap(val) {
+    const mainSlider = document.getElementById('altSlider');
+    if (mainSlider) mainSlider.value = val;
+    document.getElementById('altMapDisplay').textContent = val;
+    handleSliderChange('alt', val);
+    renderMapProfile();
+    if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+}
+
+function vpZoom(delta) {
+    vpZoomLevel = Math.max(10, Math.min(100, vpZoomLevel + delta));
+    document.getElementById('vpZoomDisplay').textContent = vpZoomLevel + '%';
+    
+    // If zoomed in, fetch higher resolution data
+    if (vpZoomLevel < 100 && routeWaypoints && routeWaypoints.length >= 2) {
+        fetchHighResElevation().then(() => renderMapProfile());
+    } else {
+        vpHighResData = null;
+        renderMapProfile();
+    }
+}
+
+async function fetchHighResElevation() {
+    if (!routeWaypoints || routeWaypoints.length < 2) return;
+    
+    const interpolated = [];
+    let cumulativeDist = 0;
+
+    for (let i = 0; i < routeWaypoints.length - 1; i++) {
+        const p1 = routeWaypoints[i], p2 = routeWaypoints[i+1];
+        const lat1 = p1.lat, lon1 = p1.lng || p1.lon;
+        const lat2 = p2.lat, lon2 = p2.lng || p2.lon;
+        const segDist = calcNav(lat1, lon1, lat2, lon2).dist;
+        // Higher resolution: every 0.25 NM instead of 1 NM
+        const steps = Math.max(1, Math.round(segDist * 4));
+        
+        for (let j = 0; j <= steps; j++) {
+            if (i > 0 && j === 0) continue;
+            const f = j / steps;
+            interpolated.push({
+                lat: lat1 + (lat2 - lat1) * f,
+                lon: lon1 + (lon2 - lon1) * f,
+                distNM: cumulativeDist + segDist * f
+            });
+        }
+        cumulativeDist += segDist;
+    }
+
+    // Resample to max 100 points
+    let samplePts = interpolated;
+    if (interpolated.length > 100) {
+        samplePts = [];
+        for (let i = 0; i < 100; i++) {
+            const idx = Math.round(i * (interpolated.length - 1) / 99);
+            samplePts.push(interpolated[idx]);
+        }
+    }
+
+    const lats = samplePts.map(p => p.lat.toFixed(5)).join(',');
+    const lons = samplePts.map(p => p.lon.toFixed(5)).join(',');
+    
+    try {
+        const res = await fetch('https://api.open-meteo.com/v1/elevation?latitude=' + lats + '&longitude=' + lons);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.elevation || data.elevation.length !== samplePts.length) return;
+        
+        vpHighResData = samplePts.map((p, i) => ({
+            distNM: p.distNM,
+            elevFt: Math.round(data.elevation[i] * 3.28084),
+            lat: p.lat,
+            lon: p.lon
+        }));
+    } catch(e) {
+        console.error('High-res elevation fetch error:', e);
+    }
+}
+
+function renderMapProfile() {
+    const canvas = document.getElementById('mapProfileCanvas');
+    const scrollContainer = document.getElementById('mapProfileScroll');
+    if (!canvas || !scrollContainer) return;
+    
+    const elevData = (vpZoomLevel < 100 && vpHighResData) ? vpHighResData : vpElevationData;
+    if (!elevData || elevData.length < 2) return;
+
+    const containerHeight = scrollContainer.clientHeight || 100;
+    const baseWidth = scrollContainer.clientWidth || 600;
+    
+    // Zoom: canvas is wider than container when zoomed in
+    const zoomFactor = 100 / vpZoomLevel;
+    const canvasWidth = Math.round(baseWidth * zoomFactor);
+    
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvasWidth * dpr;
+    canvas.height = containerHeight * dpr;
+    canvas.style.width = canvasWidth + 'px';
+    canvas.style.height = containerHeight + 'px';
+
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    const padLeft = 40, padRight = 10, padTop = 12, padBottom = 22;
+    const plotW = canvasWidth - padLeft - padRight;
+    const plotH = containerHeight - padTop - padBottom;
+
+    const cruiseAlt = parseInt(document.getElementById('altSliderMap')?.value || document.getElementById('altSlider')?.value || 4500);
+    const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
+    const totalDist = elevData[elevData.length - 1].distNM;
+    const maxTerrain = Math.max(...elevData.map(p => p.elevFt));
+    const maxAlt = Math.max(cruiseAlt + 500, maxTerrain + 1500);
+    const minAlt = 0;
+
+    const fpResult = computeFlightProfile(elevData, cruiseAlt, 500, 500, tas);
+    
+    const xOf = (distNM) => padLeft + (distNM / totalDist) * plotW;
+    const yOf = (altFt) => padTop + plotH - ((altFt - minAlt) / (maxAlt - minAlt)) * plotH;
+
+    // Background - dark theme for map strip
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, canvasWidth, containerHeight);
+
+    // Sky gradient (dark)
+    const skyGrad = ctx.createLinearGradient(0, padTop, 0, padTop + plotH);
+    skyGrad.addColorStop(0, '#1a2a3a');
+    skyGrad.addColorStop(0.5, '#1a2030');
+    skyGrad.addColorStop(1, '#151a20');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(padLeft, padTop, plotW, plotH);
+
+    // Airspace blocks (dark theme)
+    if (typeof activeAirspaces !== 'undefined' && activeAirspaces.length > 0) {
+        for (const as of activeAirspaces) {
+            if (!as.lowerLimit || !as.upperLimit) continue;
+            const lowerFt = airspaceLimitToFt(as.lowerLimit);
+            const upperFt = airspaceLimitToFt(as.upperLimit);
+            if (lowerFt === null || upperFt === null || upperFt <= minAlt || lowerFt >= maxAlt) continue;
+
+            let asMinDist = totalDist, asMaxDist = 0, found = false;
+            if (as.geometry) {
+                const polys = [];
+                if (as.geometry.type === 'Polygon') polys.push(as.geometry.coordinates[0]);
+                else if (as.geometry.type === 'MultiPolygon') as.geometry.coordinates.forEach(mc => polys.push(mc[0]));
+
+                for (const pt of elevData) {
+                    for (const poly of polys) {
+                        if (vpPointInPoly(pt, poly)) {
+                            if (pt.distNM < asMinDist) asMinDist = pt.distNM;
+                            if (pt.distNM > asMaxDist) asMaxDist = pt.distNM;
+                            found = true; break;
+                        }
+                    }
+                }
+            }
+            if (!found) continue;
+
+            const style = getAirspaceStyle(as);
+            const x1 = xOf(asMinDist), x2 = xOf(asMaxDist);
+            const y1 = yOf(Math.min(upperFt, maxAlt)), y2 = yOf(Math.max(lowerFt, minAlt));
+
+            ctx.fillStyle = vpHexToRgba(style.color, 0.15);
+            ctx.strokeStyle = vpHexToRgba(style.color, 0.5);
+            ctx.lineWidth = 2;
+            ctx.setLineDash([3, 3]);
+            ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+            ctx.setLineDash([]);
+
+            // Airspace label (only if zoomed enough to show)
+            if (zoomFactor >= 1.5 || (x2 - x1) > 40) {
+                const displayName = getAirspaceDisplayName(as);
+                ctx.fillStyle = vpHexToRgba(style.color, 0.6);
+                ctx.font = 'bold 10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(displayName, (x1+x2)/2, y1 + 12);
+                if (zoomFactor >= 2) {
+                    ctx.font = '9px Arial';
+                    ctx.fillText(lowerFt + '–' + upperFt + ' ft', (x1+x2)/2, y1 + 23);
+                }
+            }
+        }
+    }
+    ctx.textAlign = 'left';
+
+    // Safety line
+    ctx.beginPath();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = 'rgba(200, 120, 40, 0.4)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < elevData.length; i++) {
+        const x = xOf(elevData[i].distNM), y = yOf(elevData[i].elevFt + 1000);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Terrain polygon
+    ctx.beginPath();
+    ctx.moveTo(xOf(0), yOf(0));
+    for (let i = 0; i < elevData.length; i++) ctx.lineTo(xOf(elevData[i].distNM), yOf(elevData[i].elevFt));
+    ctx.lineTo(xOf(totalDist), yOf(0));
+    ctx.closePath();
+
+    const terrainGrad = ctx.createLinearGradient(0, yOf(maxTerrain), 0, yOf(0));
+    terrainGrad.addColorStop(0, '#6B5B3C');
+    terrainGrad.addColorStop(0.3, '#3B5B23');
+    terrainGrad.addColorStop(0.7, '#1B5B22');
+    terrainGrad.addColorStop(1, '#1E5B37');
+    ctx.fillStyle = terrainGrad;
+    ctx.fill();
+
+    ctx.beginPath();
+    for (let i = 0; i < elevData.length; i++) {
+        const x = xOf(elevData[i].distNM), y = yOf(elevData[i].elevFt);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = '#4a7a30';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Flight profile
+    if (fpResult && fpResult.profile) {
+        ctx.beginPath();
+        for (let i = 0; i < fpResult.profile.length; i++) {
+            const x = xOf(fpResult.profile[i].distNM), y = yOf(fpResult.profile[i].altFt) + 1;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        ctx.beginPath();
+        for (let i = 0; i < fpResult.profile.length; i++) {
+            const x = xOf(fpResult.profile[i].distNM), y = yOf(fpResult.profile[i].altFt);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = '#ff4444';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+
+    // Cruise altitude line
+    ctx.beginPath();
+    ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = 'rgba(255, 68, 68, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.moveTo(padLeft, yOf(cruiseAlt));
+    ctx.lineTo(padLeft + plotW, yOf(cruiseAlt));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255, 68, 68, 0.7)';
+    ctx.font = 'bold 10px Arial';
+    ctx.fillText('CRZ ' + cruiseAlt + ' ft', padLeft + 4, yOf(cruiseAlt) - 4);
+
+    // Waypoint markers
+    let wpCumDist = 0;
+    for (let i = 0; i < routeWaypoints.length; i++) {
+        if (i > 0) {
+            const prev = routeWaypoints[i-1], curr = routeWaypoints[i];
+            wpCumDist += calcNav(prev.lat, prev.lng || prev.lon, curr.lat, curr.lng || curr.lon).dist;
+        }
+        const x = xOf(wpCumDist);
+        
+        ctx.beginPath();
+        ctx.setLineDash([2, 3]);
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.lineWidth = 1;
+        ctx.moveTo(x, padTop);
+        ctx.lineTo(x, padTop + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        let wpLabel;
+        if (i === 0) wpLabel = currentStartICAO || 'DEP';
+        else if (i === routeWaypoints.length - 1) wpLabel = (currentMissionData?.poiName ? 'POI' : currentDestICAO) || 'DEST';
+        else wpLabel = routeWaypoints[i].name ? routeWaypoints[i].name.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '').split(' ')[0] : 'WP' + i;
+        if (!zoomFactor || zoomFactor < 2) { if (wpLabel.length > 6) wpLabel = wpLabel.substring(0, 5) + '…'; }
+        else { if (wpLabel.length > 12) wpLabel = wpLabel.substring(0, 11) + '…'; }
+
+        // Colored dot
+        ctx.beginPath();
+        ctx.arc(x, padTop + plotH + 3, 3, 0, Math.PI * 2);
+        ctx.fillStyle = i === 0 ? '#44ff44' : (i === routeWaypoints.length - 1 ? '#ff4444' : '#ffcc00');
+        ctx.fill();
+
+        // Label  
+        ctx.fillStyle = '#bbb';
+        ctx.font = (zoomFactor >= 2) ? 'bold 11px Arial' : 'bold 9px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(wpLabel, x, padTop + plotH + 16);
+    }
+
+    // Y axis
+    ctx.textAlign = 'right';
+    const altStep = maxAlt > 6000 ? 2000 : (maxAlt > 3000 ? 1000 : 500);
+    for (let alt = 0; alt <= maxAlt; alt += altStep) {
+        const y = yOf(alt);
+        if (y < padTop - 3 || y > padTop + plotH + 3) continue;
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+        ctx.lineWidth = 0.5;
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(padLeft + plotW, y);
+        ctx.stroke();
+        ctx.fillStyle = '#777';
+        ctx.font = '9px Arial';
+        ctx.fillText(alt >= 1000 ? (alt/1000).toFixed(0) + 'k' : alt + '', padLeft - 3, y + 3);
+    }
+
+    // X axis ticks
+    ctx.textAlign = 'center';
+    const distStep = totalDist > 150 ? 25 : (totalDist > 80 ? 10 : 5);
+    for (let d = distStep; d < totalDist; d += distStep) {
+        const x = xOf(d);
+        ctx.fillStyle = '#666';
+        ctx.font = '8px Arial';
+        ctx.fillText(d + '', x, containerHeight - 1);
+    }
+
+    // Peak marker
+    const peakPt = elevData.reduce((max, p) => p.elevFt > max.elevFt ? p : max);
+    ctx.fillStyle = '#aaa';
+    ctx.font = '11px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('▲', xOf(peakPt.distNM), yOf(peakPt.elevFt) - 3);
+    ctx.font = 'bold 9px Arial';
+    ctx.fillText(peakPt.elevFt + ' ft', xOf(peakPt.distNM), yOf(peakPt.elevFt) - 13);
+
+    // Border
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(padLeft, padTop, plotW, plotH);
+
+    // === POSITION MARKER (Magenta triangle + line) ===
+    if (typeof vpPositionFraction === 'number' && vpPositionFraction >= 0) {
+        const posDistNM = vpPositionFraction * totalDist;
+        const posX = xOf(posDistNM);
+        
+        // Vertical magenta line
+        ctx.beginPath();
+        ctx.strokeStyle = '#ff00ff';
+        ctx.lineWidth = 1.5;
+        ctx.moveTo(posX, padTop);
+        ctx.lineTo(posX, padTop + plotH);
+        ctx.stroke();
+        
+        // Magenta triangle at bottom
+        ctx.beginPath();
+        ctx.moveTo(posX, padTop + plotH + 2);
+        ctx.lineTo(posX - 5, padTop + plotH + 10);
+        ctx.lineTo(posX + 5, padTop + plotH + 10);
+        ctx.closePath();
+        ctx.fillStyle = '#ff00ff';
+        ctx.fill();
+    }
+
+    // === ALTITUDE WAYPOINTS (user markers on flight line) ===
+    if (vpAltWaypoints.length > 0) {
+        for (let i = 0; i < vpAltWaypoints.length; i++) {
+            const wp = vpAltWaypoints[i];
+            const wx = xOf(wp.distNM);
+            const wy = yOf(wp.altFt);
+            
+            // Vertical dashed line from waypoint down to terrain
+            ctx.beginPath();
+            ctx.setLineDash([2, 3]);
+            ctx.strokeStyle = 'rgba(255,0,255,0.3)';
+            ctx.lineWidth = 1;
+            ctx.moveTo(wx, wy);
+            ctx.lineTo(wx, padTop + plotH);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Diamond marker
+            ctx.beginPath();
+            ctx.moveTo(wx, wy - 7);
+            ctx.lineTo(wx + 6, wy);
+            ctx.lineTo(wx, wy + 7);
+            ctx.lineTo(wx - 6, wy);
+            ctx.closePath();
+            ctx.fillStyle = '#ff00ff';
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            
+            // Label: show altitude
+            ctx.fillStyle = '#ff00ff';
+            ctx.font = 'bold 9px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(wp.altFt + ' ft', wx, wy - 11);
+        }
+    }
+}
+
+// Removed arbitrary setTimeout hook in favor of synchronous hooks within renderVerticalProfile
+
+/* =========================================================
+   RESIZE HANDLE (Map / Profile split)
+   ========================================================= */
+let vpResizeActive = false;
+
+function initProfileResize() {
+    const handle = document.getElementById('profileResizeHandle');
+    const strip = document.getElementById('mapProfileStrip');
+    const maptable = document.querySelector('.maptable-content');
+    if (!handle || !strip || !maptable) return;
+
+    let startY = 0, startH = 0;
+
+    function onStart(e) {
+        vpResizeActive = true;
+        startY = e.touches ? e.touches[0].clientY : e.clientY;
+        startH = strip.offsetHeight;
+        document.body.style.cursor = 'ns-resize';
+        e.preventDefault();
+    }
+
+    function onMove(e) {
+        if (!vpResizeActive) return;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const delta = startY - clientY; // pulling up = bigger profile
+        let newH = startH + delta;
+        const totalH = maptable.offsetHeight;
+        newH = Math.max(60, Math.min(totalH * 0.6, newH));
+        strip.style.height = newH + 'px';
+        
+        if (typeof map !== 'undefined' && map) map.invalidateSize();
+        renderMapProfile();
+    }
+
+    function onEnd() {
+        if (!vpResizeActive) return;
+        vpResizeActive = false;
+        document.body.style.cursor = '';
+    }
+
+    handle.addEventListener('mousedown', onStart);
+    handle.addEventListener('touchstart', onStart, {passive: false});
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('touchmove', onMove, {passive: false});
+    document.addEventListener('mouseup', onEnd);
+    document.addEventListener('touchend', onEnd);
+}
+
+// Init resize when map table opens
+const _origToggleMapTable = typeof toggleMapTable === 'function' ? toggleMapTable : null;
+if (_origToggleMapTable) {
+    const _origFn = toggleMapTable;
+    toggleMapTable = function() {
+        _origFn();
+        setTimeout(() => {
+            initProfileResize();
+            if (vpMapProfileVisible && vpElevationData) renderMapProfile();
+        }, 500);
+    };
+}
+
+/* =========================================================
+   POSITION MARKER (Magenta triangle + Leaflet marker sync)
+   ========================================================= */
+let vpPositionFraction = -1; // -1 = hidden
+let vpPositionLeafletMarker = null;
+
+function vpUpdatePosition(fraction) {
+    vpPositionFraction = fraction;
+    renderMapProfile();
+    
+    // Update Leaflet marker on map
+    if (!vpElevationData || vpElevationData.length < 2) return;
+    const totalDist = vpElevationData[vpElevationData.length - 1].distNM;
+    const targetDist = fraction * totalDist;
+    
+    // Find the interpolated lat/lon at this distance
+    let lat, lon;
+    for (let i = 0; i < vpElevationData.length - 1; i++) {
+        if (vpElevationData[i + 1].distNM >= targetDist) {
+            const segLen = vpElevationData[i + 1].distNM - vpElevationData[i].distNM;
+            const f = segLen > 0 ? (targetDist - vpElevationData[i].distNM) / segLen : 0;
+            lat = vpElevationData[i].lat + (vpElevationData[i + 1].lat - vpElevationData[i].lat) * f;
+            lon = vpElevationData[i].lon + (vpElevationData[i + 1].lon - vpElevationData[i].lon) * f;
+            break;
+        }
+    }
+    if (!lat) { lat = vpElevationData[vpElevationData.length - 1].lat; lon = vpElevationData[vpElevationData.length - 1].lon; }
+    
+    if (typeof map !== 'undefined' && map && typeof L !== 'undefined') {
+        if (!vpPositionLeafletMarker) {
+            const magentaIcon = L.divIcon({
+                className: 'vp-pos-marker',
+                html: '<div style="width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:14px solid #ff00ff;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.6));"></div>',
+                iconSize: [16, 14],
+                iconAnchor: [8, 14]
+            });
+            vpPositionLeafletMarker = L.marker([lat, lon], {icon: magentaIcon, interactive: false, zIndexOffset: 5000}).addTo(map);
+        } else {
+            vpPositionLeafletMarker.setLatLng([lat, lon]);
+        }
+    }
+}
+
+/* =========================================================
+   ALTITUDE WAYPOINTS (Click to set, drag to move)
+   ========================================================= */
+let vpAltWaypoints = []; // [{distNM, altFt}] - fixed anchor points
+let vpSegmentAlts = [];  // vpSegmentAlts[i] = cruise altitude between vpAltWaypoints[i] and [i+1]
+let vpDraggingWP = -1;
+let vpDraggingSegment = null; // { segIndex, origAlt }
+let vpCanvasClickHandler = null;
+
+function getExactAltAtDist(distNM, profObj, fallbackAlt) {
+    if (!profObj || !profObj.profile || profObj.profile.length === 0) return fallbackAlt;
+    const prof = profObj.profile;
+    if (distNM <= prof[0].distNM) return prof[0].altFt;
+    if (distNM >= prof[prof.length - 1].distNM) return prof[prof.length - 1].altFt;
+    for (let j = 0; j < prof.length - 1; j++) {
+        if (distNM >= prof[j].distNM && distNM <= prof[j+1].distNM) {
+            const f = (distNM - prof[j].distNM) / (prof[j+1].distNM - prof[j].distNM || 1);
+            return prof[j].altFt + f * (prof[j+1].altFt - prof[j].altFt);
+        }
+    }
+    return fallbackAlt;
+}
+
+function initAltWaypoints() {
+    const canvas = document.getElementById('mapProfileCanvas');
+    if (!canvas || vpCanvasClickHandler) return;
+    
+    vpCanvasClickHandler = true;
+    
+    canvas.addEventListener('dblclick', (e) => {
+        // Double-click: remove nearest waypoint
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const clickX = (e.clientX - rect.left);
+        if (vpAltWaypoints.length === 0) return;
+        
+        const elevData = (vpZoomLevel < 100 && vpHighResData) ? vpHighResData : vpElevationData;
+        if (!elevData || elevData.length < 2) return;
+        const totalDist = elevData[elevData.length - 1].distNM;
+        const scrollLeft = document.getElementById('mapProfileScroll')?.scrollLeft || 0;
+        const baseWidth = document.getElementById('mapProfileScroll')?.clientWidth || 600;
+        const zoomFactor = 100 / vpZoomLevel;
+        const canvasWidth = Math.round(baseWidth * zoomFactor);
+        const padLeft = 40, padRight = 10;
+        const plotW = canvasWidth - padLeft - padRight;
+        
+        const actualX = clickX * (canvasWidth / rect.width) + scrollLeft * (canvasWidth / (baseWidth * zoomFactor));
+        const clickDistNM = ((actualX - padLeft) / plotW) * totalDist;
+        
+        // Find nearest waypoint
+        let nearestIdx = -1, nearestDist = Infinity;
+        for (let i = 0; i < vpAltWaypoints.length; i++) {
+            const d = Math.abs(vpAltWaypoints[i].distNM - clickDistNM);
+            if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
+        }
+        if (nearestIdx >= 0 && nearestDist < totalDist * 0.05) {
+            vpAltWaypoints.splice(nearestIdx, 1);
+            // Merge adjacent segment alts
+            if (vpSegmentAlts.length > 0) {
+                if (nearestIdx > 0 && nearestIdx < vpSegmentAlts.length) {
+                    // Merge segments nearestIdx-1 and nearestIdx into one
+                    const merged = Math.round((vpSegmentAlts[nearestIdx - 1] + vpSegmentAlts[nearestIdx]) / 2);
+                    vpSegmentAlts.splice(nearestIdx - 1, 2, merged);
+                } else if (nearestIdx < vpSegmentAlts.length) {
+                    vpSegmentAlts.splice(nearestIdx, 1);
+                } else if (vpSegmentAlts.length > 0) {
+                    vpSegmentAlts.splice(vpSegmentAlts.length - 1, 1);
+                }
+            }
+            if (vpAltWaypoints.length < 2) vpSegmentAlts = [];
+            renderMapProfile();
+            if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+        }
+    });
+    
+    let vpWasDragging = false;
+
+    canvas.addEventListener('click', (e) => {
+        if (vpWasDragging) return;
+        
+        const rect = canvas.getBoundingClientRect();
+        const elevData = (vpZoomLevel < 100 && vpHighResData) ? vpHighResData : vpElevationData;
+        if (!elevData || elevData.length < 2) return;
+        const totalDist = elevData[elevData.length - 1].distNM;
+        const cruiseAlt = parseInt(document.getElementById('altSliderMap')?.value || document.getElementById('altSlider')?.value || 4500);
+
+        const scrollContainer = document.getElementById('mapProfileScroll');
+        const baseWidth = scrollContainer?.clientWidth || 600;
+        const zoomFactor = 100 / vpZoomLevel;
+        const canvasWidth = Math.round(baseWidth * zoomFactor);
+        const padLeft = 40, padRight = 10;
+        const plotW = canvasWidth - padLeft - padRight;
+
+        const scaleX = canvasWidth / rect.width;
+        const actualX = (e.clientX - rect.left) * scaleX;
+        
+        const clickDistNM = ((actualX - padLeft) / plotW) * totalDist;
+        if (clickDistNM < 0 || clickDistNM > totalDist) return;
+        
+        for (const wp of vpAltWaypoints) {
+            if (Math.abs(wp.distNM - clickDistNM) < totalDist * 0.03) return;
+        }
+        
+        // Find which segment this click falls into
+        let insertIdx = vpAltWaypoints.length;
+        for (let k = 0; k < vpAltWaypoints.length; k++) {
+            if (clickDistNM < vpAltWaypoints[k].distNM) { insertIdx = k; break; }
+        }
+        
+        // Insert waypoint
+        vpAltWaypoints.splice(insertIdx, 0, { distNM: clickDistNM, altFt: cruiseAlt });
+        
+        // Split segment: the old segment at insertIdx becomes two new segments
+        // Both inherit the old segment altitude, or cruiseAlt if none existed
+        if (vpSegmentAlts.length > 0 && insertIdx < vpSegmentAlts.length) {
+            const oldSegAlt = vpSegmentAlts[insertIdx];
+            vpSegmentAlts.splice(insertIdx, 1, oldSegAlt, oldSegAlt);
+        } else if (vpAltWaypoints.length >= 2 && vpSegmentAlts.length < vpAltWaypoints.length - 1) {
+            // First time creating a segment: fill with cruiseAlt
+            vpSegmentAlts = [];
+            for (let k = 0; k < vpAltWaypoints.length - 1; k++) {
+                vpSegmentAlts.push(cruiseAlt);
+            }
+        }
+        
+        renderMapProfile();
+        if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+    });
+    
+    // Hover cursors
+    canvas.addEventListener('mousemove', (e) => {
+        if (vpDraggingWP >= 0 || vpDraggingSegment) return;
+        const rect = canvas.getBoundingClientRect();
+        const elevData = (vpZoomLevel < 100 && vpHighResData) ? vpHighResData : vpElevationData;
+        if (!elevData || elevData.length < 2) return;
+        
+        const totalDist = elevData[elevData.length - 1].distNM;
+        const cruiseAlt = parseInt(document.getElementById('altSliderMap')?.value || document.getElementById('altSlider')?.value || 4500);
+        const maxTerrain = Math.max(...elevData.map(p => p.elevFt));
+        const maxAlt = Math.max(cruiseAlt + 500, maxTerrain + 1500);
+        
+        const scrollContainer = document.getElementById('mapProfileScroll');
+        const containerHeight = scrollContainer?.clientHeight || 100;
+        const baseWidth = scrollContainer?.clientWidth || 600;
+        const zoomFactor = 100 / vpZoomLevel;
+        const canvasWidth = Math.round(baseWidth * zoomFactor);
+        const padLeft = 40, padTop = 12, padBottom = 22, padRight = 10;
+        const plotW = canvasWidth - padLeft - padRight;
+        const plotH = containerHeight - padTop - padBottom;
+        
+        const scaleX = canvasWidth / rect.width;
+        const scaleY = containerHeight / rect.height;
+        const mx = (e.clientX - rect.left) * scaleX;
+        const my = (e.clientY - rect.top) * scaleY;
+        
+        let cursor = 'default';
+
+        // 1. Check if hovering over a waypoint diamond
+        for (let i = 0; i < vpAltWaypoints.length; i++) {
+            const wp = vpAltWaypoints[i];
+            const wpx = padLeft + (wp.distNM / totalDist) * plotW;
+            const wpy = padTop + plotH - (wp.altFt / maxAlt) * plotH;
+            if (Math.abs(mx - wpx) < 15 && Math.abs(my - wpy) < 15) {
+                cursor = 'move';
+                break;
+            }
+        }
+        
+        // 2. Check if hovering over the red flight line
+        if (cursor === 'default') {
+            const mouseDistNM = ((mx - padLeft) / plotW) * totalDist;
+            if (mouseDistNM >= 0 && mouseDistNM <= totalDist) {
+                const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
+                const profObj = typeof computeFlightProfile === 'function' ? computeFlightProfile(elevData, cruiseAlt, 500, 500, tas) : null;
+                const altAtMouse = getExactAltAtDist(mouseDistNM, profObj, cruiseAlt);
+                const lineY = padTop + plotH - (altAtMouse / maxAlt) * plotH;
+                if (Math.abs(my - lineY) < 15) {
+                    cursor = 'ns-resize';
+                }
+            }
+        }
+        
+        canvas.style.cursor = cursor;
+    });
+    
+    // Drag waypoints or line segments
+    let dragStartY = 0, dragStartX = 0, dragOrigWP = null;
+    
+    canvas.addEventListener('mousedown', (e) => {
+        vpWasDragging = false;
+        const rect = canvas.getBoundingClientRect();
+        const elevData = (vpZoomLevel < 100 && vpHighResData) ? vpHighResData : vpElevationData;
+        if (!elevData || elevData.length < 2) return;
+        
+        const totalDist = elevData[elevData.length - 1].distNM;
+        const cruiseAlt = parseInt(document.getElementById('altSliderMap')?.value || document.getElementById('altSlider')?.value || 4500);
+        const maxTerrain = Math.max(...elevData.map(p => p.elevFt));
+        const maxAlt = Math.max(cruiseAlt + 500, maxTerrain + 1500);
+        
+        const scrollContainer = document.getElementById('mapProfileScroll');
+        const containerHeight = scrollContainer?.clientHeight || 100;
+        const baseWidth = scrollContainer?.clientWidth || 600;
+        const zoomFactor = 100 / vpZoomLevel;
+        const canvasWidth = Math.round(baseWidth * zoomFactor);
+        const padLeft = 40, padRight = 10, padTop = 12, padBottom = 22;
+        const plotW = canvasWidth - padLeft - padRight;
+        const plotH = containerHeight - padTop - padBottom;
+        
+        const scaleX = canvasWidth / rect.width;
+        const scaleY = containerHeight / rect.height;
+        const mx = (e.clientX - rect.left) * scaleX;
+        const my = (e.clientY - rect.top) * scaleY;
+
+        let foundWP = false;
+        
+        // 1. Check if clicking near a waypoint diamond
+        for (let i = 0; i < vpAltWaypoints.length; i++) {
+            const wp = vpAltWaypoints[i];
+            const wpx = padLeft + (wp.distNM / totalDist) * plotW;
+            const wpy = padTop + plotH - (wp.altFt / maxAlt) * plotH;
+            if (Math.abs(mx - wpx) < 15 && Math.abs(my - wpy) < 15) {
+                vpDraggingWP = i;
+                dragOrigWP = { ...wp };
+                dragStartX = e.clientX;
+                dragStartY = e.clientY;
+                e.preventDefault();
+                e.stopPropagation();
+                foundWP = true;
+                break;
+            }
+        }
+        
+        // 2. If not a waypoint, check if clicking the red flight line
+        if (!foundWP) {
+            const mouseDistNM = ((mx - padLeft) / plotW) * totalDist;
+            if (mouseDistNM >= 0 && mouseDistNM <= totalDist) {
+                const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
+                const profObj = typeof computeFlightProfile === 'function' ? computeFlightProfile(elevData, cruiseAlt, 500, 500, tas) : null;
+                const altAtMouse = getExactAltAtDist(mouseDistNM, profObj, cruiseAlt);
+                const lineY = padTop + plotH - (altAtMouse / maxAlt) * plotH;
+                
+                if (Math.abs(my - lineY) < 15) {
+                    // Find which segment index this falls into
+                    let segIdx = -1; // -1 = no waypoints, global
+                    
+                    if (vpAltWaypoints.length === 0) {
+                        segIdx = -1;
+                    } else if (vpAltWaypoints.length === 1) {
+                        // Only 1 waypoint: no middle segments. Climb or descent zone.
+                        // Let dragging affect the single waypoint's altitude
+                        segIdx = -2; // special: single WP mode
+                    } else {
+                        // Multiple waypoints: find the segment between two of them
+                        if (mouseDistNM <= vpAltWaypoints[0].distNM) {
+                            segIdx = -3; // climb zone (before first WP)
+                        } else if (mouseDistNM >= vpAltWaypoints[vpAltWaypoints.length - 1].distNM) {
+                            segIdx = -4; // descent zone (after last WP)
+                        } else {
+                            for (let k = 0; k < vpAltWaypoints.length - 1; k++) {
+                                if (mouseDistNM >= vpAltWaypoints[k].distNM && mouseDistNM <= vpAltWaypoints[k+1].distNM) {
+                                    segIdx = k;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    const origSegAlt = (segIdx >= 0 && segIdx < vpSegmentAlts.length) ? vpSegmentAlts[segIdx] : cruiseAlt;
+                    vpDraggingSegment = {
+                        segIdx: segIdx,
+                        origAlt: origSegAlt,
+                        origCruiseAlt: cruiseAlt
+                    };
+                    dragStartY = e.clientY;
+                    dragStartX = e.clientX;
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }
+        }
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+        if (vpDraggingWP < 0 && !vpDraggingSegment) return;
+        if (Math.abs(e.clientX - dragStartX) > 2 || Math.abs(e.clientY - dragStartY) > 2) vpWasDragging = true;
+        
+        const elevData = (vpZoomLevel < 100 && vpHighResData) ? vpHighResData : vpElevationData;
+        if (!elevData || elevData.length < 2) return;
+        
+        const totalDist = elevData[elevData.length - 1].distNM;
+        const cruiseAlt = parseInt(document.getElementById('altSliderMap')?.value || document.getElementById('altSlider')?.value || 4500);
+        const maxTerrain = Math.max(...elevData.map(p => p.elevFt));
+        const maxAlt = Math.max(cruiseAlt + 500, maxTerrain + 1500);
+        
+        const scrollContainer = document.getElementById('mapProfileScroll');
+        const containerHeight = scrollContainer?.clientHeight || 100;
+        const padTop = 12, padBottom = 22;
+        const plotH = containerHeight - padTop - padBottom;
+        
+        const baseWidth = scrollContainer?.clientWidth || 600;
+        const zoomFactor = 100 / vpZoomLevel;
+        const canvasWidth = Math.round(baseWidth * zoomFactor);
+        const padLeft = 40, padRight = 10;
+        const plotW = canvasWidth - padLeft - padRight;
+        
+        const deltaY = dragStartY - e.clientY; // up is positive
+        const altChange = (deltaY / plotH) * maxAlt;
+
+        if (vpDraggingWP >= 0) {
+            // Drag waypoint horizontally AND vertically
+            const canvas = document.getElementById('mapProfileCanvas');
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvasWidth / rect.width;
+            const deltaX = (e.clientX - dragStartX) * scaleX;
+            const distChange = (deltaX / plotW) * totalDist;
+            
+            let newDist = dragOrigWP.distNM + distChange;
+            newDist = Math.max(0, Math.min(totalDist, newDist));
+            
+            let newAlt = Math.round((dragOrigWP.altFt + altChange) / 100) * 100;
+            newAlt = Math.max(0, Math.min(maxAlt, newAlt));
+            
+            vpAltWaypoints[vpDraggingWP].distNM = newDist;
+            vpAltWaypoints[vpDraggingWP].altFt = newAlt;
+            renderMapProfile();
+            
+        } else if (vpDraggingSegment) {
+            const seg = vpDraggingSegment;
+            const newAlt = Math.max(0, Math.round((seg.origAlt + altChange) / 100) * 100);
+            
+            if (seg.segIdx >= 0 && seg.segIdx < vpSegmentAlts.length) {
+                // Dragging a middle segment between two WPs
+                vpSegmentAlts[seg.segIdx] = newAlt;
+                renderMapProfile();
+                if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+            } else if (seg.segIdx === -1) {
+                // No waypoints: move global slider
+                const newGlobalAlt = Math.max(500, Math.round((seg.origCruiseAlt + altChange) / 500) * 500);
+                const altMap = document.getElementById('altSliderMap');
+                const altMain = document.getElementById('altSlider');
+                if (altMap && altMap.value != newGlobalAlt) {
+                    altMap.value = newGlobalAlt;
+                    if (typeof handleSliderChange === 'function') handleSliderChange('alt', newGlobalAlt);
+                } else if (altMain && altMain.value != newGlobalAlt) {
+                    altMain.value = newGlobalAlt;
+                    if (typeof handleSliderChange === 'function') handleSliderChange('alt', newGlobalAlt);
+                }
+            } else if (seg.segIdx === -2) {
+                // Single WP: move that WP altitude
+                if (vpAltWaypoints.length > 0) {
+                    vpAltWaypoints[0].altFt = newAlt;
+                    renderMapProfile();
+                    if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+                }
+            } else if (seg.segIdx === -3) {
+                // Climb zone: move first WP altitude
+                if (vpAltWaypoints.length > 0) {
+                    vpAltWaypoints[0].altFt = newAlt;
+                    renderMapProfile();
+                    if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+                }
+            } else if (seg.segIdx === -4) {
+                // Descent zone: move last WP altitude
+                if (vpAltWaypoints.length > 0) {
+                    vpAltWaypoints[vpAltWaypoints.length - 1].altFt = newAlt;
+                    renderMapProfile();
+                    if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+                }
+            }
+        }
+    });
+    
+    document.addEventListener('mouseup', () => {
+        if (vpDraggingWP >= 0 || vpDraggingSegment) {
+            if (vpDraggingWP >= 0) {
+                vpAltWaypoints.sort((a, b) => a.distNM - b.distNM);
+            }
+            vpDraggingWP = -1;
+            vpDraggingSegment = null;
+            dragOrigWP = null;
+            renderMapProfile();
+            if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+        }
+    });
+}
+
+// Override computeFlightProfile to use altitude waypoints + segment altitudes
+const _origComputeProfile = computeFlightProfile;
+computeFlightProfile = function(elevationData, cruiseAltFt, climbRateFpm, descentRateFpm, tasKts) {
+    if (!elevationData || elevationData.length < 2) return null;
+    if (vpAltWaypoints.length === 0) return _origComputeProfile(elevationData, cruiseAltFt, climbRateFpm, descentRateFpm, tasKts);
+    
+    tasKts = tasKts || parseInt(document.getElementById('tasSlider')?.value || 115);
+    climbRateFpm = climbRateFpm || 500;
+    descentRateFpm = descentRateFpm || 500;
+    
+    const totalDistNM = elevationData[elevationData.length - 1].distNM;
+    const depElevFt = elevationData[0].elevFt;
+    const destElevFt = elevationData[elevationData.length - 1].elevFt;
+    const wps = vpAltWaypoints;
+    
+    // Ensure vpSegmentAlts has the right length
+    while (vpSegmentAlts.length < wps.length - 1) {
+        vpSegmentAlts.push(cruiseAltFt);
+    }
+    while (vpSegmentAlts.length > Math.max(0, wps.length - 1)) {
+        vpSegmentAlts.pop();
+    }
+    
+    const profile = [];
+    
+    // Climb: from departure to first WP altitude
+    const firstWpAlt = wps[0].altFt;
+    const climbFt = Math.max(0, firstWpAlt - depElevFt);
+    const climbDistNM = Math.max(0.5, (climbFt / climbRateFpm / 60) * tasKts * 0.85);
+    const tocDistNM = Math.min(climbDistNM, wps[0].distNM);
+    
+    // Descent: from last WP altitude to destination
+    const lastWpAlt = wps[wps.length - 1].altFt;
+    const descentFt = Math.max(0, lastWpAlt - destElevFt);
+    const descentDistNM = Math.max(0.5, (descentFt / descentRateFpm / 60) * tasKts * 0.9);
+    const todDistNM = Math.max(totalDistNM - descentDistNM, wps[wps.length - 1].distNM);
+
+    for (const pt of elevationData) {
+        const d = pt.distNM;
+        let altFt = cruiseAltFt;
+        
+        if (d <= wps[0].distNM) {
+            // CLIMB ZONE: departure → first WP
+            if (d < tocDistNM) {
+                const f = tocDistNM > 0 ? d / tocDistNM : 1;
+                altFt = depElevFt + f * (firstWpAlt - depElevFt);
+            } else {
+                altFt = firstWpAlt;
+            }
+        } else if (d >= wps[wps.length - 1].distNM) {
+            // DESCENT ZONE: last WP → destination
+            if (d > todDistNM) {
+                const rem = totalDistNM - todDistNM;
+                const f = rem > 0 ? (d - todDistNM) / rem : 1;
+                altFt = lastWpAlt - f * (lastWpAlt - destElevFt);
+            } else {
+                altFt = lastWpAlt;
+            }
+        } else if (wps.length === 1) {
+            // Only 1 WP — hold at that altitude
+            altFt = wps[0].altFt;
+        } else {
+            // MIDDLE: between two consecutive waypoints
+            for (let i = 0; i < wps.length - 1; i++) {
+                if (d >= wps[i].distNM && d <= wps[i+1].distNM) {
+                    const segAlt = vpSegmentAlts[i] !== undefined ? vpSegmentAlts[i] : Math.max(wps[i].altFt, wps[i+1].altFt);
+                    const segDist = wps[i+1].distNM - wps[i].distNM;
+                    const transitionDist = Math.min(segDist * 0.15, 3); // 15% of segment or max 3nm
+                    
+                    const distFromLeft = d - wps[i].distNM;
+                    const distFromRight = wps[i+1].distNM - d;
+                    
+                    if (distFromLeft < transitionDist && wps[i].altFt !== segAlt) {
+                        // Transition from WP[i].alt to segAlt
+                        const f = transitionDist > 0 ? distFromLeft / transitionDist : 1;
+                        altFt = wps[i].altFt + f * (segAlt - wps[i].altFt);
+                    } else if (distFromRight < transitionDist && wps[i+1].altFt !== segAlt) {
+                        // Transition from segAlt to WP[i+1].alt
+                        const f = transitionDist > 0 ? distFromRight / transitionDist : 1;
+                        altFt = wps[i+1].altFt + f * (segAlt - wps[i+1].altFt);
+                    } else {
+                        altFt = segAlt;
+                    }
+                    break;
+                }
+            }
+        }
+        
+        profile.push({ distNM: pt.distNM, altFt: Math.round(altFt) });
+    }
+    
+    return { profile, tocDistNM, todDistNM };
+};
+
+// Init altitude waypoints when map table canvas is ready
+setTimeout(() => initAltWaypoints(), 2000);

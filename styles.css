@@ -275,6 +275,7 @@ body.theme-retro .front-note { z-index: 2; transform: rotate(-1.5deg); box-shado
 body.theme-retro .back-note { z-index: 1; transform: rotate(2deg) translate(8px, 6px); box-shadow: 2px 3px 8px rgba(0,0,0,0.5); filter: brightness(0.85); }
 body.theme-retro .third-note { z-index: 0; transform: rotate(-3deg) translate(14px, 12px); box-shadow: 1px 2px 5px rgba(0,0,0,0.4); filter: brightness(0.7); }
 body.theme-retro .fourth-note { z-index: -1; transform: rotate(1deg) translate(2px, 18px); box-shadow: 1px 2px 5px rgba(0,0,0,0.3); filter: brightness(0.6); }
+body.theme-retro .fifth-note { z-index: -2; transform: rotate(-2deg) translate(-4px, 24px); box-shadow: 1px 2px 4px rgba(0,0,0,0.2); filter: brightness(0.5); }
 body.theme-retro .page-number { display: block; position: absolute; bottom: 5px; right: 10px; font-family: 'Caveat', cursive; font-size: 18px; color: #0b1f65; opacity: 0.6; }
 body.theme-retro #mTitle, body.theme-retro .wiki-title { display: block; font-family: 'Caveat', cursive; font-size: 28px; color: #0b1f65; text-shadow: none; margin-bottom: 8px; margin-top: 25px; transform: rotate(-1deg); line-height: 1.2; }
 body.theme-retro #mStory, body.theme-retro .wiki-info-note { font-family: 'Courier New', Courier, monospace; font-size: 14px; font-weight: bold; color: #222; line-height: 24px; border: none; padding-bottom: 0; margin-bottom: 0; text-shadow: none; letter-spacing: -0.5px; font-style: normal; }
@@ -382,34 +383,85 @@ body.theme-retro .api-fuel-meter .api-scale { border-left: 3px solid #d93829 !im
 /* ==========================================================================
    11. KARTENTISCH (MAP TABLE)
    ========================================================================== */
-.maptable-content { width: 1000px; height: 600px; background-image: url('map.jpg'); background-size: cover; background-position: center; position: relative; box-shadow: 0 10px 40px rgba(0,0,0,0.8); border-radius: 4px; display: flex; align-items: center; justify-content: center; }
-#map { width: 72%; height: 86%; display: block; border-radius: 3px; filter: sepia(0.35) contrast(0.95); box-shadow: inset 0 0 15px rgba(0,0,0,0.6), 0 0 5px rgba(0,0,0,0.4); border: 1px solid rgba(0,0,0,0.3); }
+.maptable-content { width: 1000px; height: 600px; background-image: url('map.jpg'); background-size: cover; background-position: center; position: relative; box-shadow: 0 10px 40px rgba(0,0,0,0.8); border-radius: 4px; display: flex; flex-direction: column; }
+#mapArea { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; min-height: 0; }
+#map { width: 92%; height: 90%; display: block; border-radius: 3px; filter: sepia(0.35) contrast(0.95); box-shadow: inset 0 0 15px rgba(0,0,0,0.6), 0 0 5px rgba(0,0,0,0.4); border: 1px solid rgba(0,0,0,0.3); }
+
+/* Map Profile Strip */
+.map-profile-strip { 
+    width: 100%; height: 20%; min-height: 80px; 
+    background: #1a1a1a; border-top: 2px solid #333; 
+    display: flex; flex-direction: column; flex-shrink: 0;
+}
+.map-profile-controls { 
+    display: flex; align-items: center; padding: 3px 10px; 
+    background: #111; border-bottom: 1px solid #333; flex-shrink: 0; gap: 2px;
+}
+.map-profile-controls input[type=range] { height: 4px; margin: 0; padding: 0; }
+.map-profile-controls input[type=range]::-webkit-slider-thumb { height: 14px; width: 14px; }
+.vp-zoom-btn { 
+    background: #333; color: #fff; border: 1px solid #555; 
+    width: 22px; height: 22px; font-size: 14px; font-weight: bold; 
+    cursor: pointer; border-radius: 3px; line-height: 1; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+}
+.vp-zoom-btn:hover { background: #555; }
+.vp-zoom-btn:active { background: #222; }
+.map-profile-scroll { 
+    flex: 1; overflow-x: auto; overflow-y: hidden; min-height: 0; 
+    scrollbar-width: thin; scrollbar-color: #555 #1a1a1a;
+}
+.map-profile-scroll::-webkit-scrollbar { height: 6px; }
+.map-profile-scroll::-webkit-scrollbar-track { background: #1a1a1a; }
+.map-profile-scroll::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+.map-profile-scroll canvas { display: block; height: 100%; }
+
+/* Resize Handle */
+.profile-resize-handle {
+    width: 100%; height: 14px; background: #222; cursor: ns-resize;
+    display: flex; align-items: center; justify-content: center;
+    color: #666; font-size: 16px; letter-spacing: 4px; line-height: 1;
+    user-select: none; -webkit-user-select: none; flex-shrink: 0;
+    border-top: 1px solid #333; border-bottom: 1px solid #333;
+    transition: background 0.15s;
+}
+.profile-resize-handle:hover { background: #333; color: #aaa; }
+.profile-resize-handle:active { background: #444; color: #fff; }
+
+/* Position Slider Bar */
+.map-profile-pos-bar {
+    height: 18px; background: #111; padding: 2px 10px; flex-shrink: 0;
+    display: flex; align-items: center; border-top: 1px solid #222;
+}
+.map-profile-pos-bar input[type=range] {
+    height: 3px; margin: 0; padding: 0; background: #333; border: none;
+}
+.map-profile-pos-bar input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent;
+    border-bottom: 10px solid #ff00ff; background: transparent; cursor: pointer;
+}
+
+/* Flush map edges with profile */
+#mapArea { padding: 0; }
+#mapArea #map { border-radius: 0 !important; border: none !important; box-shadow: none !important; width: 100% !important; height: 100% !important; filter: none !important; }
 
 body.map-is-fullscreen .container { display: none !important; }
 body.map-is-fullscreen { overflow: hidden !important; padding: 0 !important; margin: 0 !important; }
-/* Flex-Layout explizit erzwingen */
 body.map-is-fullscreen #mapTableOverlay { background: #111 !important; left: 0 !important; right: 0 !important; top: 0 !important; bottom: 0 !important; transform: none !important; width: 100vw !important; height: 100vh !important; z-index: 99999 !important; border-radius: 0 !important; display: flex !important; flex-direction: column !important; }
 
 body.map-is-fullscreen .maptable-content { 
-    width: 100% !important; 
-    height: 100% !important; 
-    max-width: none !important; /* Hebt die Desktop-Beschränkung auf */
-    max-height: none !important; 
-    aspect-ratio: auto !important; /* Hebt das 16:10 Format auf */
-    margin: 0 !important; /* Entfernt die Zentrierung */
-    transform: none !important; 
-    background: none !important; 
-    box-shadow: none !important; 
-    border-radius: 0 !important; 
+    width: 100% !important; height: 100% !important; 
+    max-width: none !important; max-height: none !important; 
+    aspect-ratio: auto !important; margin: 0 !important; 
+    transform: none !important; background: none !important; 
+    box-shadow: none !important; border-radius: 0 !important; 
 }
 
-/* Absolute Positionierung & harte 50px Höhe entfernt - flex-wrap erlaubt Umbrüche! */
 body.map-is-fullscreen .pinboard-header { position: relative !important; height: auto !important; z-index: 100000; box-sizing: border-box; background: rgba(26,26,26,0.95); flex-wrap: wrap; gap: 8px; }
-
-/* Nimmt sich flexibel den restlichen Platz */
 body.map-is-fullscreen .pinboard-scroll-area { position: relative !important; top: 0 !important; flex: 1 !important; display: block; padding: 0; margin: 0; overflow: hidden; }
-
 body.map-is-fullscreen #map { width: 100% !important; height: 100% !important; max-width: 100%; max-height: 100%; border-radius: 0 !important; filter: none !important; border: none !important; box-shadow: none !important; }
+body.map-is-fullscreen .map-profile-strip { min-height: 100px; height: 20%; max-height: 200px; }
 /* ==========================================================================
    12. DIE SCHUBLADEN-ANIMATION (PC LAYOUT DYNAMISCH - SCROLLBAR FIX)
    ========================================================================== */
