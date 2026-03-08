@@ -31,8 +31,8 @@
     
     <div id="classicInputs">
         <div class="grid-2">
-            <div><label>Start</label><input type="text" id="startLoc" value="EDTW" maxlength="4" onfocus="this.select()" onclick="this.select()" oninput="this.value=this.value.toUpperCase(); syncToNavCom('startLocRadio', this.value)" onchange="updateMapFromInputs()"></div>
-            <div><label>Ziel (Opt.)</label><input type="text" id="destLoc" placeholder="Zufall" maxlength="4" onfocus="this.select()" onclick="this.select()" oninput="this.value=this.value.toUpperCase(); syncToNavCom('destLocRadio', this.value)" onchange="updateMapFromInputs()"></div>
+            <div><label>Start</label><input type="text" id="startLoc" value="EDTW" maxlength="4" onfocus="this.select()" onclick="this.select()" oninput="this.value=this.value.toUpperCase(); syncToNavCom('startLocRadio', this.value)"></div>
+            <div><label>Ziel (Opt.)</label><input type="text" id="destLoc" placeholder="Zufall" maxlength="4" onfocus="this.select()" onclick="this.select()" oninput="this.value=this.value.toUpperCase(); syncToNavCom('destLocRadio', this.value)"></div>
         </div>
         
         <div class="grid-2">
@@ -138,7 +138,7 @@
                 <div class="radio-display-container">
                     <div class="radio-disp-inner">
                         <span class="lcd-label">DEP</span>
-                        <input type="text" id="startLocRadio" class="lcd-input" value="EDTW" maxlength="4" onfocus="this.select()" onclick="this.select()" oninput="this.value=this.value.toUpperCase(); document.getElementById('startLoc').value = this.value; updateMapFromInputs();">
+                        <input type="text" id="startLocRadio" class="lcd-input" value="EDTW" maxlength="4" onfocus="this.select()" onclick="this.select()" oninput="this.value=this.value.toUpperCase(); document.getElementById('startLoc').value = this.value;">
                     </div>
                 </div>
                 <button class="radio-transfer-btn" onclick="swapDepDest()" title="DEP &harr; DEST tauschen">↔</button>
@@ -150,7 +150,7 @@
                 <div class="radio-display-container">
                     <div class="radio-disp-inner">
                         <span class="lcd-label">DEST</span>
-                        <input type="text" id="destLocRadio" class="lcd-input" placeholder="----" maxlength="4" onfocus="this.select()" onclick="this.select()" oninput="this.value=this.value.toUpperCase(); document.getElementById('destLoc').value = this.value; updateMapFromInputs();">
+                        <input type="text" id="destLocRadio" class="lcd-input" placeholder="----" maxlength="4" onfocus="this.select()" onclick="this.select()" oninput="this.value=this.value.toUpperCase(); document.getElementById('destLoc').value = this.value;">
                     </div>
                 </div>
                 <button class="radio-transfer-btn" onclick="swapDepDest()" title="DEP &harr; DEST tauschen">↔</button>
@@ -262,11 +262,9 @@
             </div>
         </div>
 
-        <!-- KLN 90B GPS Module -->
         <div class="radio-module kln90b-module" id="kln90bModule" style="display:none;">
             <div class="radio-label">KLN 90B TSO</div>
             <div class="kln90b-body">
-                <!-- Split-Display: links | divider | rechts -->
                 <div class="kln90b-display" id="gpsDisplay">
                     <div class="kln90b-left" id="gpsLeft">
                         <div class="kln90b-line dim">---</div>
@@ -280,7 +278,6 @@
                         <span id="gpsPageLbl">PG 1/1</span>
                     </div>
                 </div>
-                <!-- Mode-Taster -->
                 <div class="kln90b-buttons">
                     <button class="kln90b-btn active" data-mode="FPL">FPL</button>
                     <button class="kln90b-btn" data-mode="DEP">DEP</button>
@@ -288,7 +285,6 @@
                     <button class="kln90b-btn" data-mode="AIP">AIP</button>
                     <button class="kln90b-btn" data-mode="WX">WX</button>
                 </div>
-                <!-- Encoder-Reihe: links = zurück, rechts = vor -->
                 <div class="kln90b-encoder-row">
                     <div class="kln90b-encoder" id="gpsEncoderL" title="Vorherige Seite ◂">
                         <div class="kln90b-enc-inner"></div>
@@ -364,6 +360,11 @@
                 <h2 class="wiki-title" style="margin-bottom: 2px;">Nav-Log</h2>
                 <div id="briefingNavLog" style="font-family: 'Courier New', Courier, monospace; font-size: 11px; line-height: 1.4; color: #222; margin-top: 10px;">
                 </div>
+                
+                <div id="routeAirspacesContainer" style="margin-top: 15px; font-size: 11px; display: none; background: rgba(255,255,255,0.5); padding: 8px; border-radius: 4px; border: 1px dashed #888;">
+                    <div style="font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid #444; padding-bottom: 4px; color: #d93829;">⚠️ Lufträume & ED-R auf Route</div>
+                    <div id="routeAirspacesList">Suche...</div>
+                </div>
             </div>
 
             <div class="mission-note-page third-note" id="notePage3">
@@ -389,8 +390,8 @@
                     <div id="wikiDepFreqText" style="color: var(--blue); font-weight: bold; margin-bottom: 10px; font-size: 13px; border-bottom: 1px dashed #ccc; padding-bottom: 5px;"></div>
                     📖 <span id="wikiDepDescText">Warte auf Daten...</span>
                 </div>
-                <img id="uiDepDetailMap" src="" style="width:100%; border-radius:4px; margin-top:15px; display:none; border: 2px solid #ccc; box-shadow: 2px 3px 6px rgba(0,0,0,0.3);">
-            </div>
+                <img id="uiDepDetailMap" src="" style="box-sizing: border-box; width:100%; border-radius:4px; margin-top:15px; display:none; border: 2px solid #ccc; box-shadow: 2px 3px 6px rgba(0,0,0,0.3);">
+                <div id="metarContainerDep" style="width:100%; height:auto; margin-top:15px; border-radius:6px; box-shadow: 2px 4px 8px rgba(0,0,0,0.4); display:none;"></div>            </div>
 
             <div class="mission-note-page fourth-note" id="notePage4">
                 <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
@@ -415,8 +416,8 @@
                     <div id="wikiDestFreqText" style="color: var(--blue); font-weight: bold; margin-bottom: 10px; font-size: 13px; border-bottom: 1px dashed #ccc; padding-bottom: 5px;"></div>
                     📖 <span id="wikiDestDescText">Warte auf Daten...</span>
                 </div>
-                <img id="uiDestDetailMap" src="" style="width:100%; border-radius:4px; margin-top:15px; display:none; border: 2px solid #ccc; box-shadow: 2px 3px 6px rgba(0,0,0,0.3);">
-            </div>
+                <img id="uiDestDetailMap" src="" style="box-sizing: border-box; width:100%; border-radius:4px; margin-top:15px; display:none; border: 2px solid #ccc; box-shadow: 2px 3px 6px rgba(0,0,0,0.3);">
+                <div id="metarContainerDest" style="width:100%; height:auto; margin-top:15px; border-radius:6px; box-shadow: 2px 4px 8px rgba(0,0,0,0.4); display:none;"></div>            </div>
         </div>
 
         <div class="flightplan-container" style="display:flex; flex-direction:column;">
