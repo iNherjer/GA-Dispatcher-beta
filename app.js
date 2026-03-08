@@ -548,6 +548,7 @@ function resetApp() {
     if(!confirm("Möchtest du das aktuelle Briefing wirklich verwerfen und alles auf Anfang setzen?")) return;
     localStorage.removeItem('ga_active_mission'); document.getElementById("briefingBox").style.display = "none";
     currentMissionData = null; routeWaypoints = [];
+    vpAltWaypoints = []; vpSegmentAlts = [];
     if(map) { routeMarkers.forEach(m => map.removeLayer(m)); if (polyline) map.removeLayer(polyline); if (window.hitBoxPolyline) map.removeLayer(window.hitBoxPolyline); clearAirspaceMapLayers(); }
     if (miniMap) { if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline); miniMapMarkers.forEach(m => miniMap.removeLayer(m)); miniMapMarkers = []; }
     
@@ -4165,7 +4166,7 @@ function triggerVerticalProfileUpdate() {
         
         const cacheKey = routeWaypoints.map(p => `${(p.lat||0).toFixed(4)},${((p.lng||p.lon)||0).toFixed(4)}`).join('|');
         if (window._lastVpRouteKey !== cacheKey) {
-            vpAltWaypoints = [];
+            vpAltWaypoints = []; vpSegmentAlts = [];
             vpHighResData = null;
             vpZoomLevel = 100;
             const zd = document.getElementById('vpZoomDisplay');
@@ -4275,7 +4276,11 @@ function computeFlightProfile(elevationData, cruiseAltFt, climbRateFpm, descentR
     if (!elevationData || elevationData.length < 2) return null;
     
     const depElevFt = elevationData[0].elevFt;
-    const destElevFt = elevationData[elevationData.length - 1].elevFt;
+    let destElevFt = elevationData[elevationData.length - 1].elevFt;
+    // If destination is a POI, stay at cruise altitude (no descent)
+    if (typeof currentMissionData !== 'undefined' && currentMissionData && currentMissionData.poiName) {
+        destElevFt = cruiseAltFt;
+    }
     const totalDistNM = elevationData[elevationData.length - 1].distNM;
 
     const climbFt = Math.max(0, cruiseAltFt - depElevFt);
@@ -5545,7 +5550,11 @@ computeFlightProfile = function(elevationData, cruiseAltFt, climbRateFpm, descen
     
     const totalDistNM = elevationData[elevationData.length - 1].distNM;
     const depElevFt = elevationData[0].elevFt;
-    const destElevFt = elevationData[elevationData.length - 1].elevFt;
+    let destElevFt = elevationData[elevationData.length - 1].elevFt;
+    // If destination is a POI (not an airport), keep cruise altitude — no descent to ground
+    if (typeof currentMissionData !== 'undefined' && currentMissionData && currentMissionData.poiName) {
+        destElevFt = cruiseAltFt;
+    }
     const wps = vpAltWaypoints;
     
     // Ensure vpSegmentAlts has the right length
