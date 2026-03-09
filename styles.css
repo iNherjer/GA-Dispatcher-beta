@@ -2217,16 +2217,18 @@ body.map-is-fullscreen .map-profile-strip {
         background: #080808 !important;
     }
 
-    #mapTableOverlay {
+       #mapTableOverlay {
         touch-action: none;
         overflow: hidden !important;
         position: fixed !important;
         top: 0 !important;
         left: 0 !important;
         width: 100vw !important;
-        height: 100vh !important;
+        height: 100vh !important;           /* Fallback für sehr alte Browser */
+        height: 100dvh !important;          /* FIX: Dynamische Höhe für iOS Safari */
         overscroll-behavior: none;
     }
+
 
     #mapTableOverlay .pinboard-scroll-area {
         overflow: hidden !important;
