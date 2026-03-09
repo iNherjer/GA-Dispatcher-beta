@@ -271,11 +271,15 @@ body.theme-retro .slider-label { background: transparent; border: none; box-shad
 body.theme-retro .notes-stack { 
     display: grid; grid-template-areas: "stack"; 
     position: relative; margin-bottom: 25px; cursor: pointer;
-    min-width: 250px; min-height: 400px; /* Explizite Mindestgröße für bessere Klick-Erkennung */
+    min-width: 250px;
+    max-width: 800px; /* VERHINDERT, DASS DAS KLEMMBRETT ZU BREIT WIRD */
+    margin-left: auto;
+    margin-right: auto;
+    min-height: 400px; /* Explizite Mindestgröße für bessere Klick-Erkennung */
     user-select: none; -webkit-user-select: none; /* Verhindert Text-Selektion statt Blättern */
 }
 body.theme-retro .paperclip { display: block; position: absolute; top: -18px; left: 20px; width: 25px; height: 60px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 60'%3E%3Cpath d='M10 40 V12 a4 4 0 0 1 8 0 v32 a6 6 0 0 1-12 0 V10 a8 8 0 0 1 16 0 v32' fill='none' stroke='%23889' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; z-index: 10; filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.5)); transform: rotate(-15deg); }
-body.theme-retro .mission-note-page { grid-area: stack; background-color: #fdf5e6; background-image: repeating-linear-gradient(transparent, transparent 23px, #a6bccc 24px); background-size: 100% 24px; background-position: 0 4px; padding: 15px 15px 15px 25px; border-radius: 2px 6px 4px 2px; border: 1px solid #d3cbb8; position: relative; transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1); }
+body.theme-retro .mission-note-page { grid-area: stack; background-color: #fdf5e6; background-image: repeating-linear-gradient(transparent, transparent 23px, #a6bccc 24px); background-size: 100% 24px; background-position: 0 4px; padding: 15px 15px 15px 25px; border-radius: 2px 6px 4px 2px; border: 1px solid #d3cbb8; position: relative; transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1); width: 100%; box-sizing: border-box; overflow-wrap: break-word; word-wrap: break-word; }
 body.theme-retro .mission-note-page::before { content: ''; position: absolute; top: 0; bottom: 0; left: 15px; width: 1px; background-color: rgba(220, 50, 50, 0.4); }
 body.theme-retro .front-note { z-index: 2; transform: rotate(-1.5deg); box-shadow: 3px 5px 12px rgba(0,0,0,0.6); opacity: 1; }
 body.theme-retro .back-note { z-index: 1; transform: rotate(2deg) translate(8px, 6px); box-shadow: 2px 3px 8px rgba(0,0,0,0.5); filter: brightness(0.85); }
@@ -643,7 +647,7 @@ body.theme-retro .wp-data { color: var(--piper-yellow); }
 /* ── iPad (768px–1249px): Bild passt ans Display – kein Scroll, kein Pinch-Zoom ── */
 @media (min-width: 768px) and (max-width: 1249px) {
     /* Kein Browser-Scroll und kein Pinch-Zoom auf den Overlays */
-    #mapTableOverlay, #pinboardOverlay { touch-action: none; }
+    #mapTableOverlay, #pinboardOverlay { touch-action: pan-x pan-y; }
 
     /* Karte: Vollbild, Hintergrundbild gestreckt auf das Div */
     #mapTableOverlay .pinboard-scroll-area { padding: 0 !important; }
@@ -891,6 +895,7 @@ body.theme-navcom .radio-label {
     border-right: 1px solid #ccc;
     top: -7px;
     padding: 0 6px;
+    z-index: 2;
 }
 
 /* Display allgemein (full-width Module: XPDR, etc.) – weiß gerahmt */
@@ -902,6 +907,9 @@ body.theme-navcom .radio-display-container {
     box-shadow:
         inset 0 0 14px rgba(0,0,0,0.97),
         inset 0 2px 8px rgba(0,0,0,0.9);
+    width: 100%;       /* DYNAMIC WIDTH FIX: erzwinge 100% Breite */
+    box-sizing: border-box; /* Verhindert das Überlappen der Padding/Borders */
+    min-height: 48px;  /* Verhindert "Springen" der Höhe */
 }
 
 /* Rote LED-Anzeige – Bendix/King Stil */
@@ -1152,9 +1160,9 @@ body.theme-navcom .kln90b-module .radio-label {
 }
 
 /* Radio Stack Modul Styling */
-.radio-stack { flex-direction: column; gap: 4px; background: #111; padding: 10px; border-radius: 8px; border: 4px solid #2a2a2a; box-shadow: 0 15px 35px rgba(0,0,0,0.9), inset 0 0 10px rgba(0,0,0,0.8); width: 100%; box-sizing: border-box; margin-bottom: 20px;}
-.radio-row { display: flex; gap: 6px; width: 100%; }
-.radio-module { background: #1a1a1a; border: 2px solid #ccc; border-radius: 4px; padding: 10px 12px 8px 12px; position: relative; display: flex; align-items: center; justify-content: space-between; box-shadow: inset 0 2px 5px rgba(255,255,255,0.1), 0 4px 6px rgba(0,0,0,0.5); }
+.radio-stack { flex-direction: column; gap: 4px; background: #111; padding: 10px; border-radius: 8px; border: 4px solid #2a2a2a; box-shadow: 0 15px 35px rgba(0,0,0,0.9), inset 0 0 10px rgba(0,0,0,0.8); width: 100%; max-width: 100%; box-sizing: border-box; margin-bottom: 20px;}
+.radio-row { display: flex; gap: 6px; width: 100%; max-width: 100%; box-sizing: border-box; }
+.radio-module { background: #1a1a1a; border: 2px solid #ccc; border-radius: 4px; padding: 10px 12px 8px 12px; position: relative; display: flex; align-items: center; justify-content: space-between; box-shadow: inset 0 2px 5px rgba(255,255,255,0.1), 0 4px 6px rgba(0,0,0,0.5); width: 100%; box-sizing: border-box; }
 .half-module { flex: 1; padding: 8px 10px 6px 10px; min-width: 0; }
 
 .radio-module::before, .radio-module::after, .radio-module-right-screws::before, .radio-module-right-screws::after { content: '⊕'; position: absolute; color: #666; font-size: 11px; }
@@ -1170,7 +1178,7 @@ body.theme-navcom .kln90b-module .radio-label {
 .lcd-label { display: block; color: #33ff33; font-family: 'Share Tech Mono', monospace; font-size: 10px; opacity: 0.7; margin-bottom: 2px; letter-spacing: 1px; }
 
 /* Bendix/King Style Encoder (Weiße Ringe & geriffeltes Inneres) */
-.radio-knob { width: 32px; height: 32px; border-radius: 50%; background: #111; border: 2px solid #e0e0e0; box-shadow: 2px 4px 6px rgba(0,0,0,0.6), inset 0 2px 4px rgba(255,255,255,0.2); position: relative; flex-shrink: 0; margin-left: 10px; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s; }
+.radio-knob { width: 32px; height: 32px; min-width: 32px; min-height: 32px; border-radius: 50%; background: #111; border: 2px solid #e0e0e0; box-shadow: 2px 4px 6px rgba(0,0,0,0.6), inset 0 2px 4px rgba(255,255,255,0.2); position: relative; flex-shrink: 0; margin-left: 10px; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s; box-sizing: border-box; transform-origin: center center; }
 .radio-knob:active { transform: scale(0.95); box-shadow: 1px 2px 3px rgba(0,0,0,0.6), inset 0 2px 4px rgba(255,255,255,0.2); }
 .radio-knob::before { content: ''; position: absolute; top: 2px; left: 2px; right: 2px; bottom: 2px; border-radius: 50%; background: repeating-conic-gradient(#333 0% 5%, #111 5% 10%); }
 .radio-knob::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 14px; height: 14px; border-radius: 50%; background: #111; border: 2px solid #e0e0e0; box-shadow: inset 0 1px 2px rgba(255,255,255,0.3); }
@@ -1202,12 +1210,12 @@ body.theme-navcom .kln90b-module .radio-label {
 
 /* Airspace Pulse Highlight Animation */
 @keyframes airspace-pulse {
-    0%, 100% { opacity: 0.2; }
-    50% { opacity: 0.55; }
+    0%, 100% { fill-opacity: 0.2; }
+    50% { fill-opacity: 0.6; }
 }
 @keyframes airspace-stroke-pulse {
-    0%, 100% { stroke-opacity: 0.5; stroke-width: 2; }
-    50% { stroke-opacity: 1; stroke-width: 4; }
+    0%, 100% { stroke-opacity: 0.5; stroke-width: 3; }
+    50% { stroke-opacity: 1; stroke-width: 5; }
 }
 .airspace-highlight-pulse path {
     animation: airspace-pulse 1.5s ease-in-out infinite, airspace-stroke-pulse 1.5s ease-in-out infinite;

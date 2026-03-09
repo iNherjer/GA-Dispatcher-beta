@@ -5392,21 +5392,32 @@ function initAltWaypoints() {
         for (const wp of vpAltWaypoints) {
             if (Math.abs(wp.distNM - clickDistNM) < totalDist * 0.03) return;
         }
+
+        // Get exact altitude at this point BEFORE we split the segment
+        const m = vpGetCanvasMetrics();
+        let currentAltAtClick = cruiseAlt;
+        if (m) {
+            const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
+            const profObj = typeof computeFlightProfile === 'function' ? computeFlightProfile(m.elevData, m.cruiseAlt, vpClimbRate, vpDescentRate, tas) : null;
+            currentAltAtClick = Math.round(getExactAltAtDist(clickDistNM, profObj, cruiseAlt) / 100) * 100;
+        }
+
         let insertIdx = vpAltWaypoints.length;
         for (let k = 0; k < vpAltWaypoints.length; k++) {
             if (clickDistNM < vpAltWaypoints[k].distNM) { insertIdx = k; break; }
         }
-        vpAltWaypoints.splice(insertIdx, 0, { distNM: clickDistNM, altFt: cruiseAlt });
+        vpAltWaypoints.splice(insertIdx, 0, { distNM: clickDistNM, altFt: currentAltAtClick });
         if (vpSegmentAlts.length > 0 && insertIdx < vpSegmentAlts.length) {
-            const oldSegAlt = vpSegmentAlts[insertIdx];
-            vpSegmentAlts.splice(insertIdx, 1, oldSegAlt, oldSegAlt);
+            // We split a segment in two. Both new segments should have an altitude
+            // that makes sense. The currentAltAtClick is a very good default.
+            vpSegmentAlts.splice(insertIdx, 1, currentAltAtClick, currentAltAtClick);
         } else if (vpSegmentAlts.length > 0 && insertIdx >= vpSegmentAlts.length) {
-            const prevAlt = vpSegmentAlts[vpSegmentAlts.length - 1] || cruiseAlt;
-            vpSegmentAlts.push(prevAlt);
+            // Inserted at the very end
+            vpSegmentAlts.push(currentAltAtClick);
         } else if (vpAltWaypoints.length >= 2 && vpSegmentAlts.length === 0) {
             vpSegmentAlts = [];
             for (let k = 0; k < vpAltWaypoints.length - 1; k++) {
-                vpSegmentAlts.push(cruiseAlt);
+                vpSegmentAlts.push(currentAltAtClick);
             }
         }
         renderMapProfile();
@@ -5505,7 +5516,9 @@ function initAltWaypoints() {
         if (vpWasDragging) return;
         const m = vpGetCanvasMetrics();
         if (!m) return;
-        const { mx } = vpClientToCanvas(e.clientX, e.clientY, m);
+        const { mx, my } = vpClientToCanvas(e.clientX, e.clientY, m);
+        // Only add if clicking near the red line
+        if (vpHitTestFlightLine(mx, my, m) === null) return;
         const clickDistNM = ((mx - m.padLeft) / m.plotW) * m.totalDist;
         vpAddWaypoint(clickDistNM, m.cruiseAlt, m.totalDist);
     });
@@ -5568,7 +5581,6 @@ function initAltWaypoints() {
 
     // === TOUCH EVENTS ===
     canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
         const touch = e.touches[0];
         vpWasDragging = false;
         const m = vpGetCanvasMetrics();
@@ -5591,6 +5603,7 @@ function initAltWaypoints() {
         // Priority 1: Magenta marker drag
         if (vpHitTestMagenta(mx, m)) {
             vpDraggingMagenta = true;
+            e.preventDefault();
             return;
         }
         // Priority 2: Waypoint drag
@@ -5598,6 +5611,7 @@ function initAltWaypoints() {
         if (wpIdx >= 0) {
             vpDraggingWP = wpIdx;
             dragOrigWP = { ...vpAltWaypoints[wpIdx] };
+            e.preventDefault();
             return;
         }
         // Priority 3: Flight line segment drag
@@ -5606,6 +5620,7 @@ function initAltWaypoints() {
             const segIdx = vpFindSegmentIdx(mouseDistNM);
             const origSegAlt = (segIdx >= 0 && segIdx < vpSegmentAlts.length) ? vpSegmentAlts[segIdx] : m.cruiseAlt;
             vpDraggingSegment = { segIdx, origAlt: origSegAlt, origCruiseAlt: m.cruiseAlt };
+            e.preventDefault();
         }
     }, {passive: false});
 
@@ -5629,7 +5644,9 @@ function initAltWaypoints() {
                 if (lastTapTime === 0) return; // was consumed by double-tap
                 const m = vpGetCanvasMetrics();
                 if (!m) return;
-                const { mx } = vpClientToCanvas(tapX, tapY, m);
+                const { mx, my } = vpClientToCanvas(tapX, tapY, m);
+                // Only add if tapping near the red line
+                if (vpHitTestFlightLine(mx, my, m) === null) return;
                 const clickDistNM = ((mx - m.padLeft) / m.plotW) * m.totalDist;
                 vpAddWaypoint(clickDistNM, m.cruiseAlt, m.totalDist);
             }, 320);
@@ -5708,19 +5725,45 @@ computeFlightProfile = function(elevationData, cruiseAltFt, climbRateFpm, descen
                 if (d >= wps[i].distNM && d <= wps[i+1].distNM) {
                     const segAlt = vpSegmentAlts[i] !== undefined ? vpSegmentAlts[i] : Math.max(wps[i].altFt, wps[i+1].altFt);
                     const segDist = wps[i+1].distNM - wps[i].distNM;
-                    const transitionDist = Math.min(segDist * 0.15, 3); // 15% of segment or max 3nm
                     
                     const distFromLeft = d - wps[i].distNM;
                     const distFromRight = wps[i+1].distNM - d;
                     
-                    if (distFromLeft < transitionDist && wps[i].altFt !== segAlt) {
-                        // Transition from WP[i].alt to segAlt
-                        const f = transitionDist > 0 ? distFromLeft / transitionDist : 1;
-                        altFt = wps[i].altFt + f * (segAlt - wps[i].altFt);
-                    } else if (distFromRight < transitionDist && wps[i+1].altFt !== segAlt) {
+                    if (distFromLeft > 0 && wps[i].altFt !== segAlt) {
+                        const altDiff = Math.abs(segAlt - wps[i].altFt);
+                        const rate = (segAlt > wps[i].altFt) ? climbRateFpm : descentRateFpm;
+                        const transitionDist = Math.max(0.5, (altDiff / rate / 60) * tasKts * (segAlt > wps[i].altFt ? 0.85 : 0.9));
+                        
+                        if (distFromLeft < transitionDist) {
+                            const f = transitionDist > 0 ? distFromLeft / transitionDist : 1;
+                            altFt = wps[i].altFt + f * (segAlt - wps[i].altFt);
+                        } else if (distFromRight > 0 && wps[i+1].altFt !== segAlt) {
+                            // Check right side transition within the left branch
+                            const rAltDiff = Math.abs(segAlt - wps[i+1].altFt);
+                            const rRate = (wps[i+1].altFt > segAlt) ? climbRateFpm : descentRateFpm;
+                            const rTransitionDist = Math.max(0.5, (rAltDiff / rRate / 60) * tasKts * (wps[i+1].altFt > segAlt ? 0.85 : 0.9));
+                            
+                            if (distFromRight < rTransitionDist) {
+                                const rf = rTransitionDist > 0 ? distFromRight / rTransitionDist : 1;
+                                altFt = wps[i+1].altFt + rf * (segAlt - wps[i+1].altFt);
+                            } else {
+                                altFt = segAlt;
+                            }
+                        } else {
+                            altFt = segAlt;
+                        }
+                    } else if (distFromRight > 0 && wps[i+1].altFt !== segAlt) {
                         // Transition from segAlt to WP[i+1].alt
-                        const f = transitionDist > 0 ? distFromRight / transitionDist : 1;
-                        altFt = wps[i+1].altFt + f * (segAlt - wps[i+1].altFt);
+                        const altDiff = Math.abs(segAlt - wps[i+1].altFt);
+                        const rate = (wps[i+1].altFt > segAlt) ? climbRateFpm : descentRateFpm;
+                        const transitionDist = Math.max(0.5, (altDiff / rate / 60) * tasKts * (wps[i+1].altFt > segAlt ? 0.85 : 0.9));
+                        
+                        if (distFromRight < transitionDist) {
+                            const f = transitionDist > 0 ? distFromRight / transitionDist : 1;
+                            altFt = wps[i+1].altFt + f * (segAlt - wps[i+1].altFt);
+                        } else {
+                            altFt = segAlt;
+                        }
                     } else {
                         altFt = segAlt;
                     }
