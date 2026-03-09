@@ -95,7 +95,15 @@
             </div>
             <input type="range" id="altSlider" min="1500" max="9500" value="4500" step="100" oninput="handleSliderChange('alt', this.value)">
         </div>
-        
+
+        <div class="slider-container">
+            <div class="slider-header">
+                <label class="slider-label">V/S Rate (ft/min)</label>
+                <span id="rateDrum" class="drum-readout-container theme-color-text" style="font-weight:bold;">500</span>
+            </div>
+            <input type="range" id="rateSlider" min="200" max="1500" value="500" step="50" oninput="handleRateChange(this.value)">
+        </div>
+
         <div class="action-bar" id="classicActionBar">
             <button class="btn-main" id="generateBtn" onclick="generateMission()">Auftrag generieren</button>
             
@@ -269,7 +277,7 @@
 
                 <div style="display: flex; align-items: center; gap: 8px; border-left: 2px solid #222; padding-left: 10px;">
                     <div style="text-align: center;">
-                        <span class="lcd-label">ALT</span>
+                        <span class="lcd-label" id="altRateToggle" onclick="toggleAltRateMode()" style="cursor:pointer; user-select:none;" title="Klick: ALT/V/S umschalten">ALT</span>
                         <div id="altRadioDisplay" class="lcd-input" style="width: 45px; pointer-events: none;">4500</div>
                     </div>
                     <div class="radio-knob drag-knob" id="altDragKnob" title="Ziehen zum Ändern"></div>
@@ -592,23 +600,28 @@
             <div id="mapArea" style="flex:1; display:flex; align-items:center; justify-content:center; width:100%; min-height:0;">
                 <div id="map"></div>
             </div>
-            <div id="profileResizeHandle" class="profile-resize-handle" title="Ziehen zum Ändern der Profilhöhe">⋯</div>
+            <div id="profileResizeHandle" class="profile-resize-handle" title="Ziehen zum Ändern der Profilhöhe"></div>
             <div id="mapProfileStrip" class="map-profile-strip">
                 <div class="map-profile-controls">
-                    <span style="color:#aaa; font-size:10px; font-family:monospace; margin-right:8px;">ALT</span>
-                    <input type="range" id="altSliderMap" min="1500" max="9500" value="4500" step="100" style="width:80px; height:4px;" oninput="syncAltFromMap(this.value)">
-                    <span id="altMapDisplay" style="color:#fff; font-size:11px; font-family:monospace; min-width:40px; margin:0 8px;">4500</span>
+                    <span style="color:#aaa; font-size:10px; font-family:monospace; margin-right:4px;">ALT</span>
+                    <input type="range" id="altSliderMap" min="1500" max="9500" value="4500" step="100" style="width:70px; height:4px;" oninput="syncAltFromMap(this.value)">
+                    <span id="altMapDisplay" style="color:#fff; font-size:11px; font-family:monospace; min-width:36px; margin:0 4px;">4500</span>
                     <span style="color:#555; font-size:10px;">|</span>
-                    <span style="color:#aaa; font-size:10px; font-family:monospace; margin:0 8px;">ZOOM</span>
+                    <span style="color:#aaa; font-size:10px; font-family:monospace; margin:0 4px;">V/S</span>
+                    <input type="range" id="rateSliderMap" min="200" max="1500" value="500" step="50" style="width:55px; height:4px;" oninput="handleRateChange(this.value)">
+                    <span id="rateMapDisplay" style="color:#fff; font-size:11px; font-family:monospace; min-width:28px;">500</span>
+                    <span style="color:#aaa; font-size:9px; font-family:monospace;">fpm</span>
+                    <span style="color:#555; font-size:10px;">|</span>
+                    <span style="color:#aaa; font-size:10px; font-family:monospace; margin:0 4px;">ZOOM</span>
                     <button class="vp-zoom-btn" onclick="vpZoom(-10)" title="Rauszoomen">−</button>
                     <span id="vpZoomDisplay" style="color:#fff; font-size:11px; font-family:monospace; min-width:35px; text-align:center;">100%</span>
                     <button class="vp-zoom-btn" onclick="vpZoom(10)" title="Reinzoomen">+</button>
                 </div>
-                <div id="mapProfileScroll" class="map-profile-scroll">
-                    <canvas id="mapProfileCanvas"></canvas>
-                </div>
                 <div class="map-profile-pos-bar">
                     <input type="range" id="vpPosSlider" min="0" max="1000" value="0" step="1" oninput="vpUpdatePosition(this.value / 1000)" style="width:100%;">
+                </div>
+                <div id="mapProfileScroll" class="map-profile-scroll" style="touch-action: none;">
+                    <canvas id="mapProfileCanvas"></canvas>
                 </div>
             </div>
         </div>
