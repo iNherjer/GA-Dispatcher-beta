@@ -79,7 +79,7 @@ function applyNavComPreset(t, g, s, n, btnElement) {
     handleSliderChange('tas', t);
     handleSliderChange('gph', g);
     syncToNavCom('tasRadioDisplay', t);
-    syncToNavCom('gphRadioDisplay', g);
+    syncToNavCom('gphRadioDisplay', g.toString().padStart(2, '0'));
     saveAudioButtonStates();
 }
 
@@ -335,7 +335,10 @@ function initDragKnob(knobId, displayId, sliderId, min, max, type) {
         const step = parseInt(slider.step) || 1;
         if (step > 1) newVal = Math.round(newVal / step) * step;
 
-        display.innerText = newVal;
+        let displayVal = newVal;
+        if (type === 'gph') displayVal = newVal.toString().padStart(2, '0');
+
+        display.innerText = displayVal;
         slider.value = newVal;
 
         currentRotation = delta * 5;
@@ -402,7 +405,7 @@ window.onload = () => {
 
     syncToNavCom('startLocRadio', document.getElementById('startLoc').value);
     syncToNavCom('tasRadioDisplay', document.getElementById('tasSlider').value);
-    syncToNavCom('gphRadioDisplay', document.getElementById('gphSlider').value);
+    syncToNavCom('gphRadioDisplay', document.getElementById('gphSlider').value.toString().padStart(2, '0'));
     syncToNavCom('maxSeatsRadio', document.getElementById('maxSeats').value);
 
     initDragKnob('tasDragKnob', 'tasRadioDisplay', 'tasSlider', 80, 260, 'tas');
@@ -642,7 +645,12 @@ function setDrumCounter(elementId, valueStr) {
 }
 
 function handleSliderChange(type, val) {
-    setDrumCounter(type + 'Drum', val);
+    let drumVal = val;
+    if (type === 'gph') {
+        drumVal = val.toString().padStart(2, '0');
+        syncToNavCom('gphRadioDisplay', drumVal);
+    }
+    setDrumCounter(type + 'Drum', drumVal);
     if (type !== 'alt') recalculatePerformance();
     syncToNavCom(type + 'Radio', val);
     if (type === 'alt') {
@@ -657,8 +665,7 @@ function handleRateChange(val) {
     vpClimbRate = val;
     vpDescentRate = val;
     // Sync displays
-    const rateDrum = document.getElementById('rateDrum');
-    if (rateDrum) rateDrum.textContent = val;
+    setDrumCounter('rateDrum', val);
     const rateMapDisplay = document.getElementById('rateMapDisplay');
     if (rateMapDisplay) rateMapDisplay.textContent = val;
     // Sync sliders
@@ -673,7 +680,7 @@ function handleRateChange(val) {
     }
     // Re-render profiles
     if (typeof renderMapProfile === 'function') renderMapProfile();
-    if (typeof renderVerticalProfile === 'function') renderVerticalProfile('vpCanvas');
+    if (typeof renderVerticalProfile === 'function') renderVerticalProfile('verticalProfileCanvas');
     if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
 }
 
@@ -686,8 +693,10 @@ function recalculatePerformance() {
 }
 
 function refreshAllDrums() {
-    setDrumCounter('tasDrum', document.getElementById('tasSlider').value); setDrumCounter('gphDrum', document.getElementById('gphSlider').value);
+    setDrumCounter('tasDrum', document.getElementById('tasSlider').value); 
+    setDrumCounter('gphDrum', document.getElementById('gphSlider').value.toString().padStart(2, '0'));
     const altSlider = document.getElementById('altSlider'); if (altSlider) setDrumCounter('altDrum', altSlider.value);
+    const rateSlider = document.getElementById('rateSlider'); if (rateSlider) setDrumCounter('rateDrum', rateSlider.value);
     if(currentMissionData) { setDrumCounter('distDrum', currentMissionData.dist); recalculatePerformance(); }
 }
 
@@ -2273,9 +2282,9 @@ function updateRoutePerformance() {
     let totalTime = 0;
     let totalFuel = 0;
 
-    let blHTML = '<table style="width:100%; border-collapse:collapse; text-align:left; font-size:14px; font-family:\'Courier New\', monospace; font-weight:bold; color:#222; margin-top:5px;">';
+    let blHTML = '<table style="width:100%; border-collapse:collapse; text-align:left; font-size:14px; font-family:\'Courier New\', monospace; font-weight:bold; color:var(--navlog-text); margin-top:5px;">';
     blHTML += '<colgroup><col style="width:30%;"><col style="width:20%;"><col style="width:16%;"><col style="width:10%;"><col style="width:10%;"><col style="width:14%;"></colgroup>';
-    blHTML += '<tr style="border-bottom:2px solid #888; color:#0b1f65;"><th>Route</th><th>FREQ</th><th>HDG</th><th>NM</th><th>Min</th><th>Gal</th></tr>';
+    blHTML += '<tr style="border-bottom:2px solid var(--navlog-border); color:var(--navlog-heading);"><th>Route</th><th>FREQ</th><th>HDG</th><th>NM</th><th>Min</th><th>Gal</th></tr>';
     
     for(let i=0; i<routeWaypoints.length - 1; i++) {
         let p1 = routeWaypoints[i], p2 = routeWaypoints[i+1], nav = calcNav(p1.lat, p1.lng || p1.lon, p2.lat, p2.lng || p2.lon);
@@ -2321,19 +2330,19 @@ function updateRoutePerformance() {
         const c1 = isV1 ? '#111' : '#0b1f65';
         const c2 = isV2 ? '#111' : '#0b1f65';
 
-        blHTML += `<tr style="border-bottom:1px dashed #ccc;">`;
-        blHTML += `<td style="padding:8px 0 8px 8px; color:#111; line-height: 1.4;"><span style="display:inline-block; min-width:20px; text-align:right;">${i+1}.</span> ${cleanName1}<br><span style="display:inline-block; min-width:20px; text-align:left;">➔</span> ${cleanName2}</td>`;
+        blHTML += `<tr style="border-bottom:1px dashed var(--navlog-border);">`;
+        blHTML += `<td style="padding:8px 0 8px 8px; color:var(--navlog-text); line-height: 1.4;"><span style="display:inline-block; min-width:20px; text-align:right;">${i+1}.</span> ${cleanName1}<br><span style="display:inline-block; min-width:20px; text-align:left;">➔</span> ${cleanName2}</td>`;
         blHTML += `<td style="padding:8px 0 8px 4px; font-size:14px; line-height: 1.6;"><span style="color:${c1}">${f1}</span><br><span style="color:${c2}">${f2}</span></td>`;
-        blHTML += `<td style="padding:8px 0 8px 16px; color:#d93829; vertical-align:middle;">${nav.brng}°</td>`;
-        blHTML += `<td style="padding:8px 0; color:#d93829; vertical-align:middle;">${nav.dist}</td>`;
-        blHTML += `<td style="padding:8px 0; color:#d93829; vertical-align:middle;">${legTime}</td>`;
-        blHTML += `<td style="padding:8px 0; color:#d93829; vertical-align:middle;">${legFuel.toFixed(1)}</td>`;
+        blHTML += `<td style="padding:8px 0 8px 16px; color:var(--navlog-data); vertical-align:middle;">${nav.brng}°</td>`;
+        blHTML += `<td style="padding:8px 0; color:var(--navlog-data); vertical-align:middle;">${nav.dist}</td>`;
+        blHTML += `<td style="padding:8px 0; color:var(--navlog-data); vertical-align:middle;">${legTime}</td>`;
+        blHTML += `<td style="padding:8px 0; color:var(--navlog-data); vertical-align:middle;">${legFuel.toFixed(1)}</td>`;
         blHTML += `</tr>`;
         
         wpHTML += `<div class="wp-row"><span class="wp-name">${cleanName1.replace(/<[^>]+>/g, '').trim()} ➔ ${cleanName2.replace(/<[^>]+>/g, '').trim()}</span><span class="wp-data">${nav.brng}° | ${nav.dist} NM</span></div>`;
     }
     
-    blHTML += `<tr style="border-top:2px solid #888; color:#0b1f65; font-size:15px;"><td style="padding-top:8px;">TOTAL</td><td style="padding-top:8px;"></td><td style="padding-top:8px;"></td><td style="padding-top:8px;">${totalNM}</td><td style="padding-top:8px;">${totalTime}</td><td style="padding-top:8px;">${totalFuel.toFixed(1)}</td></tr>`;
+    blHTML += `<tr style="border-top:2px solid var(--navlog-border); color:var(--navlog-heading); font-size:15px;"><td style="padding-top:8px;">TOTAL</td><td style="padding-top:8px;"></td><td style="padding-top:8px;"></td><td style="padding-top:8px;">${totalNM}</td><td style="padding-top:8px;">${totalTime}</td><td style="padding-top:8px;">${totalFuel.toFixed(1)}</td></tr>`;
     blHTML += '</table>';
     
     const blDiv = document.getElementById('briefingNavLog');
@@ -3295,13 +3304,72 @@ function drawRouteNavigationPage(doc, data, legs) {
         doc.setFont('Helvetica', 'bold'); doc.setTextColor(217, 56, 41); doc.text(item[0], x, y);
         doc.setFont('Helvetica', 'normal'); doc.setTextColor(40, 40, 40); doc.text(item[1], x, y + 5);
     });
+
+    // Embed Vertical Profile Canvas
+    const vpCanvas = document.getElementById('verticalProfileCanvas');
+    if (vpCanvas && vpCanvas.width > 0 && vpCanvas.height > 0) {
+        try {
+            const vpDataUrl = vpCanvas.toDataURL('image/png', 1.0);
+            const vpW = 158; 
+            const vpH = (vpCanvas.height / vpCanvas.width) * vpW;
+            y += 12;
+            doc.addImage(vpDataUrl, 'PNG', 32, y, vpW, vpH);
+            doc.setDrawColor(200, 200, 200); doc.setLineWidth(0.3);
+            doc.rect(32, y, vpW, vpH);
+            y += vpH;
+        } catch (e) {
+            console.error('Error adding vertical profile to PDF', e);
+        }
+    }
+
     y += 14;
 
     // --- AIRSPACE WARNINGS ---
     doc.setDrawColor(100, 100, 100); doc.setLineWidth(0.3); doc.setLineDashPattern([2, 2], 0); doc.line(32, y, 190, y); doc.setLineDashPattern([], 0); y += 6;
     doc.setFont('Helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(11, 31, 101); doc.text('AIRSPACE WARNINGS', 32, y); y += 8;
 
-    if (!activeAirspaces || activeAirspaces.length === 0) {
+    let finalAirspaces = activeAirspaces || [];
+    const filterCheckbox = document.getElementById('navLogAirspaceFilter');
+    const pdfFilterActive = filterCheckbox && filterCheckbox.checked;
+    if (pdfFilterActive && finalAirspaces.length > 0) {
+        let pdfFpResult = null;
+        if (typeof vpElevationData !== 'undefined' && vpElevationData && vpElevationData.length >= 2) {
+            const cruiseAlt = parseInt(document.getElementById('altSlider')?.value || 4500);
+            const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
+            pdfFpResult = computeFlightProfile(vpElevationData, cruiseAlt, vpClimbRate, vpDescentRate, tas);
+        }
+        if (pdfFpResult && pdfFpResult.profile) {
+            finalAirspaces = finalAirspaces.filter(a => {
+                if (!a.lowerLimit || !a.upperLimit) return true;
+                const lowerFt = airspaceLimitToFt(a.lowerLimit);
+                const upperFt = airspaceLimitToFt(a.upperLimit);
+                if (lowerFt === null || upperFt === null) return true;
+                let intersects = false;
+                if (a.geometry) {
+                    const polys = [];
+                    if (a.geometry.type === 'Polygon') polys.push(a.geometry.coordinates[0]);
+                    else if (a.geometry.type === 'MultiPolygon') a.geometry.coordinates.forEach(mc => polys.push(mc[0]));
+                    for (let pi = 0; pi < pdfFpResult.profile.length; pi++) {
+                        const pp = pdfFpResult.profile[pi];
+                        if (pp.altFt >= lowerFt && pp.altFt <= upperFt) {
+                            const pt = vpElevationData[pi];
+                            for (const poly of polys) {
+                                if (vpPointInPoly(pt, poly)) { intersects = true; break; }
+                            }
+                        }
+                        if (intersects) break;
+                    }
+                } else {
+                    for (const pp of pdfFpResult.profile) {
+                        if (pp.altFt >= lowerFt && pp.altFt <= upperFt) { intersects = true; break; }
+                    }
+                }
+                return intersects;
+            });
+        }
+    }
+
+    if (finalAirspaces.length === 0) {
         doc.setFont('Helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(40, 140, 40);
         doc.text('Route frei - keine Konflikte erkannt.', 34, y);
     } else {
@@ -3314,13 +3382,13 @@ function drawRouteNavigationPage(doc, data, legs) {
             return `${lim.value} ${u}${r}`;
         };
 
-        for (let i = 0; i < activeAirspaces.length; i++) {
+        for (let i = 0; i < finalAirspaces.length; i++) {
             if (y > 278) {
                 doc.setFont('Helvetica', 'italic'); doc.setFontSize(7); doc.setTextColor(120, 120, 120);
-                doc.text(`... und ${activeAirspaces.length - i} weitere`, 38, y);
+                doc.text(`... und ${finalAirspaces.length - i} weitere`, 38, y);
                 break;
             }
-            const a = activeAirspaces[i];
+            const a = finalAirspaces[i];
             const style = getAirspaceStyle(a);
             const displayName = getAirspaceDisplayName(a);
             
@@ -4420,8 +4488,9 @@ function renderVerticalProfile(canvasId) {
     const dpr = window.devicePixelRatio || 1;
     canvas.width = displayWidth * dpr;
     canvas.height = displayHeight * dpr;
-    canvas.style.width = displayWidth + 'px';
-    canvas.style.height = displayHeight + 'px';
+    canvas.style.width = '100%';
+    canvas.style.maxWidth = displayWidth + 'px';
+    canvas.style.height = 'auto';
 
     const ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
@@ -5316,7 +5385,7 @@ function initAltWaypoints() {
             const wp = vpAltWaypoints[i];
             const wpx = m.padLeft + (wp.distNM / m.totalDist) * m.plotW;
             const wpy = m.padTop + m.plotH - (wp.altFt / m.maxAlt) * m.plotH;
-            if (Math.abs(mx - wpx) < 18 && Math.abs(my - wpy) < 18) return i;
+            if (Math.abs(mx - wpx) < 26 && Math.abs(my - wpy) < 26) return i;
         }
         return -1;
     }
@@ -5328,7 +5397,7 @@ function initAltWaypoints() {
         const profObj = typeof computeFlightProfile === 'function' ? computeFlightProfile(m.elevData, m.cruiseAlt, vpClimbRate, vpDescentRate, tas) : null;
         const altAtMouse = getExactAltAtDist(mouseDistNM, profObj, m.cruiseAlt);
         const lineY = m.padTop + m.plotH - (altAtMouse / m.maxAlt) * m.plotH;
-        if (Math.abs(my - lineY) < 18) return mouseDistNM;
+        if (Math.abs(my - lineY) < 32) return mouseDistNM;
         return null;
     }
 
@@ -5398,19 +5467,38 @@ function initAltWaypoints() {
         }
         vpAltWaypoints.splice(insertIdx, 0, { distNM: clickDistNM, altFt: exactAlt });
         if (vpSegmentAlts.length > 0 && insertIdx < vpSegmentAlts.length) {
-            const oldSegAlt = vpSegmentAlts[insertIdx];
-            vpSegmentAlts.splice(insertIdx, 1, oldSegAlt, oldSegAlt);
+            vpSegmentAlts.splice(insertIdx, 1, exactAlt, exactAlt);
         } else if (vpSegmentAlts.length > 0 && insertIdx >= vpSegmentAlts.length) {
-            const prevAlt = vpSegmentAlts[vpSegmentAlts.length - 1] || cruiseAlt;
-            vpSegmentAlts.push(prevAlt);
+            vpSegmentAlts.push(exactAlt);
         } else if (vpAltWaypoints.length >= 2 && vpSegmentAlts.length === 0) {
             vpSegmentAlts = [];
             for (let k = 0; k < vpAltWaypoints.length - 1; k++) {
-                vpSegmentAlts.push(cruiseAlt);
+                vpSegmentAlts.push(exactAlt);
             }
         }
         renderMapProfile();
         if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+    }
+
+    function vpHandleDoubleHit(mx, my, m) {
+        // 1. Try removing existing waypoint
+        const wpIdx = vpHitTestWaypoint(mx, my, m);
+        if (wpIdx >= 0) {
+            const wp = vpAltWaypoints[wpIdx];
+            vpRemoveWaypoint(wp.distNM, m.totalDist);
+            return true;
+        }
+        // 2. Try adding new waypoint on flight line
+        const clickDistNM = vpHitTestFlightLine(mx, my, m);
+        if (clickDistNM !== null) {
+            const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
+            const profObj = typeof computeFlightProfile === 'function' ? computeFlightProfile(m.elevData, m.cruiseAlt, vpClimbRate, vpDescentRate, tas) : null;
+            let exactAlt = getExactAltAtDist(clickDistNM, profObj, m.cruiseAlt);
+            exactAlt = Math.round(exactAlt / 100) * 100;
+            vpAddWaypoint(clickDistNM, exactAlt, m.cruiseAlt, m.totalDist);
+            return true;
+        }
+        return false;
     }
 
     function vpHandleDragMove(clientX, clientY, dragStartX, dragStartY, dragOrigWP) {
@@ -5481,6 +5569,7 @@ function initAltWaypoints() {
             vpDraggingMagenta = false;
             dragOrigWP = null;
             renderMapProfile();
+            if (typeof renderVerticalProfile === 'function') renderVerticalProfile('verticalProfileCanvas');
             if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
         }
     }
@@ -5490,32 +5579,21 @@ function initAltWaypoints() {
     let vpDraggingMagenta = false;
     let dragStartY = 0, dragStartX = 0, dragOrigWP = null;
     let lastTapTime = 0;
+    let vpIsPanning = false;
+    let vpPanStartScrollLeft = 0;
+    let vpPanStartX = 0;
 
-    // === DOUBLE CLICK: remove waypoint ===
+    // === DOUBLE CLICK: remove/add waypoint ===
     canvas.addEventListener('dblclick', (e) => {
         const m = vpGetCanvasMetrics();
         if (!m) return;
-        const { mx } = vpClientToCanvas(e.clientX, e.clientY, m);
-        const clickDistNM = ((mx - m.padLeft) / m.plotW) * m.totalDist;
-        vpRemoveWaypoint(clickDistNM, m.totalDist);
+        const { mx, my } = vpClientToCanvas(e.clientX, e.clientY, m);
+        vpHandleDoubleHit(mx, my, m);
     });
 
-    // === CLICK: add waypoint ===
+    // === CLICK: no more single-click creation ===
     canvas.addEventListener('click', (e) => {
-        if (vpWasDragging) return;
-        const m = vpGetCanvasMetrics();
-        if (!m) return;
-        const { mx, my } = vpClientToCanvas(e.clientX, e.clientY, m);
-        const clickDistNM = vpHitTestFlightLine(mx, my, m);
-        if (clickDistNM !== null) {
-            const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
-            const vpClimbRate = parseInt(document.getElementById('climbSlider')?.value || 500);
-            const vpDescentRate = parseInt(document.getElementById('descentSlider')?.value || 500);
-            const profObj = typeof computeFlightProfile === 'function' ? computeFlightProfile(m.elevData, m.cruiseAlt, vpClimbRate, vpDescentRate, tas) : null;
-            let exactAlt = getExactAltAtDist(clickDistNM, profObj, m.cruiseAlt);
-            exactAlt = Math.round(exactAlt / 100) * 100;
-            vpAddWaypoint(clickDistNM, exactAlt, m.cruiseAlt, m.totalDist);
-        }
+        // Logic removed to prevent accidental creation on iPhone
     });
 
     // === HOVER CURSOR ===
@@ -5576,9 +5654,9 @@ function initAltWaypoints() {
 
     // === TOUCH EVENTS ===
     canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
         const touch = e.touches[0];
         vpWasDragging = false;
+        vpIsPanning = false;
         const m = vpGetCanvasMetrics();
         if (!m) return;
         const { mx, my } = vpClientToCanvas(touch.clientX, touch.clientY, m);
@@ -5588,9 +5666,8 @@ function initAltWaypoints() {
         // Double-tap detection (300ms window)
         const now = Date.now();
         if (now - lastTapTime < 300) {
-            // Double-tap: remove waypoint
-            const clickDistNM = ((mx - m.padLeft) / m.plotW) * m.totalDist;
-            vpRemoveWaypoint(clickDistNM, m.totalDist);
+            e.preventDefault();
+            vpHandleDoubleHit(mx, my, m);
             lastTapTime = 0;
             return;
         }
@@ -5598,12 +5675,14 @@ function initAltWaypoints() {
 
         // Priority 1: Magenta marker drag
         if (vpHitTestMagenta(mx, m)) {
+            e.preventDefault();
             vpDraggingMagenta = true;
             return;
         }
         // Priority 2: Waypoint drag
         const wpIdx = vpHitTestWaypoint(mx, my, m);
         if (wpIdx >= 0) {
+            e.preventDefault();
             vpDraggingWP = wpIdx;
             dragOrigWP = { ...vpAltWaypoints[wpIdx] };
             return;
@@ -5611,13 +5690,31 @@ function initAltWaypoints() {
         // Priority 3: Flight line segment drag
         const mouseDistNM = vpHitTestFlightLine(mx, my, m);
         if (mouseDistNM !== null) {
+            e.preventDefault();
             const segIdx = vpFindSegmentIdx(mouseDistNM);
             const origSegAlt = (segIdx >= 0 && segIdx < vpSegmentAlts.length) ? vpSegmentAlts[segIdx] : m.cruiseAlt;
             vpDraggingSegment = { segIdx, origAlt: origSegAlt, origCruiseAlt: m.cruiseAlt };
+            return;
+        }
+        // Priority 4: Pan when zoomed in
+        if (vpZoomLevel < 100) {
+            e.preventDefault();
+            vpIsPanning = true;
+            const scrollContainer = document.getElementById('mapProfileScroll');
+            vpPanStartScrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
+            vpPanStartX = touch.clientX;
         }
     }, {passive: false});
 
     canvas.addEventListener('touchmove', (e) => {
+        if (vpIsPanning) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const deltaX = vpPanStartX - touch.clientX;
+            const scrollContainer = document.getElementById('mapProfileScroll');
+            if (scrollContainer) scrollContainer.scrollLeft = vpPanStartScrollLeft + deltaX;
+            return;
+        }
         if (vpDraggingWP < 0 && !vpDraggingSegment && !vpDraggingMagenta) return;
         e.preventDefault();
         const touch = e.touches[0];
@@ -5626,29 +5723,13 @@ function initAltWaypoints() {
     }, {passive: false});
 
     canvas.addEventListener('touchend', (e) => {
-        if (vpDraggingWP >= 0 || vpDraggingSegment || vpDraggingMagenta) {
-            vpHandleDragEnd();
+        if (vpIsPanning) {
+            vpIsPanning = false;
             return;
         }
-        // Single tap without drag: add waypoint (delayed to allow double-tap detection)
-        if (!vpWasDragging) {
-            const tapX = dragStartX, tapY = dragStartY;
-            setTimeout(() => {
-                if (lastTapTime === 0) return; // was consumed by double-tap
-                const m = vpGetCanvasMetrics();
-                if (!m) return;
-                const { mx, my } = vpClientToCanvas(tapX, tapY, m);
-                const clickDistNM = vpHitTestFlightLine(mx, my, m);
-                if (clickDistNM !== null) {
-                    const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
-                    const vpClimbRate = parseInt(document.getElementById('climbSlider')?.value || 500);
-                    const vpDescentRate = parseInt(document.getElementById('descentSlider')?.value || 500);
-                    const profObj = typeof computeFlightProfile === 'function' ? computeFlightProfile(m.elevData, m.cruiseAlt, vpClimbRate, vpDescentRate, tas) : null;
-                    let exactAlt = getExactAltAtDist(clickDistNM, profObj, m.cruiseAlt);
-                    exactAlt = Math.round(exactAlt / 100) * 100;
-                    vpAddWaypoint(clickDistNM, exactAlt, m.cruiseAlt, m.totalDist);
-                }
-            }, 320);
+        // Single tap without drag: Logic removed to prevent accidental creation
+        if (vpDraggingWP >= 0 || vpDraggingSegment || vpDraggingMagenta) {
+            vpHandleDragEnd();
         }
     });
 }
