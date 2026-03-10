@@ -534,6 +534,10 @@ window.onload = () => {
         if(syncInput) syncInput.value = savedSyncId;
     }
 
+    // Sync Toggle Status laden
+    const syncTggl = document.getElementById('syncToggle');
+    if (syncTggl) { syncTggl.checked = (localStorage.getItem('ga_sync_enabled') !== 'false'); }
+
     // SW Version auslesen und im Footer anzeigen
     fetch('./sw.js?t=' + Date.now())
         .then(r => r.text())
@@ -6168,10 +6172,17 @@ computeFlightProfile = function (elevationData, cruiseAltFt, climbRateFpm, desce
 // Init altitude waypoints when map table canvas is ready
 
 /* =========================================================
-   CLOUD SYNC LOGIC
+   CLOUD SYNC LOGIC (Adaptive, Diffing, Debounce & Toggle)
    ========================================================= */
 const SYNC_URL = 'https://ga-proxy.einherjer.workers.dev/api/sync/';
 let localSyncTime = localStorage.getItem('ga_sync_time') ? parseInt(localStorage.getItem('ga_sync_time')) : 0;
+let syncSaveTimeout = null;
+let lastSyncedPayloadStr = "";
+function saveSyncToggle() {
+    const t = document.getElementById('syncToggle');
+    if (t) localStorage.setItem('ga_sync_enabled', t.checked);
+    if (t && t.checked) silentSyncLoad();
+}
 function getSyncId() {
     return document.getElementById('syncIdInput')?.value.trim() || localStorage.getItem('ga_sync_id') || "";
 }
@@ -6179,7 +6190,7 @@ function saveSyncId() {
     const id = document.getElementById('syncIdInput').value.trim();
     const oldId = localStorage.getItem('ga_sync_id');
     if (id !== oldId) {
-        localSyncTime = 0; // Reset bei neuer ID, um frischen Download zu erzwingen
+        localSyncTime = 0;
         localStorage.setItem('ga_sync_time', 0);
     }
     localStorage.setItem('ga_sync_id', id);
@@ -6192,13 +6203,13 @@ function generateSyncId() {
     const num = Math.floor(Math.random() * 900) + 100;
     const newId = `${w1}-${w2}-${num}`;
     document.getElementById('syncIdInput').value = newId;
-
     localSyncTime = 0;
     localStorage.setItem('ga_sync_time', 0);
     localStorage.setItem('ga_sync_id', newId);
-
+    const t = document.getElementById('syncToggle');
+    if (t) { t.checked = true; localStorage.setItem('ga_sync_enabled', 'true'); }
     updateSyncStatus("Neue ID generiert. Speichere...");
-    triggerCloudSave();
+    triggerCloudSave(true);
 }
 function updateSyncStatus(msg, isError = false) {
     const el = document.getElementById('syncStatus');
@@ -6208,24 +6219,55 @@ function updateSyncStatus(msg, isError = false) {
         setTimeout(() => { if(el.innerText === msg) el.style.color = "#888"; }, 4000);
     }
 }
-async function triggerCloudSave() {
-    const id = getSyncId();
-    if (!id) return;
-    updateSyncStatus("Sync läuft...");
-
-    localSyncTime = Date.now();
-    localStorage.setItem('ga_sync_time', localSyncTime);
-    const payload = {
+function flashSyncIndicator(direction) {
+    const ind = document.getElementById('syncTrafficIndicator');
+    if (!ind) return;
+    ind.innerText = direction === 'up' ? '⬆️' : '⬇️';
+    ind.style.opacity = '1';
+    setTimeout(() => { ind.style.opacity = '0'; }, 800);
+}
+function setLastSyncedPayload() {
+    const payloadToCompare = {
         pinboard: JSON.parse(localStorage.getItem('ga_pinboard') || '[]'),
         logbook: JSON.parse(localStorage.getItem('ga_logbook') || '[]'),
-        activeMission: JSON.parse(localStorage.getItem('ga_active_mission') || 'null'),
-        lastModified: localSyncTime
+        activeMission: JSON.parse(localStorage.getItem('ga_active_mission') || 'null')
     };
-
+    lastSyncedPayloadStr = JSON.stringify(payloadToCompare);
+}
+async function triggerCloudSave(immediate = false) {
+    const id = getSyncId();
+    const t = document.getElementById('syncToggle');
+    if (!id || (t && !t.checked)) return;
+    if (!immediate) {
+        updateSyncStatus("Warte auf Abschluss...");
+        if (syncSaveTimeout) clearTimeout(syncSaveTimeout);
+        // 10 Sekunden Debouncing: Sammelt alle Aktionen und lädt erst bei Inaktivität hoch
+        syncSaveTimeout = setTimeout(() => triggerCloudSave(true), 10000);
+        return;
+    }
+    localSyncTime = Date.now();
+    const payloadToCompare = {
+        pinboard: JSON.parse(localStorage.getItem('ga_pinboard') || '[]'),
+        logbook: JSON.parse(localStorage.getItem('ga_logbook') || '[]'),
+        activeMission: JSON.parse(localStorage.getItem('ga_active_mission') || 'null')
+    };
+    const currentPayloadStr = JSON.stringify(payloadToCompare);
+    if (currentPayloadStr === lastSyncedPayloadStr) {
+        updateSyncStatus("Cloud: Aktuell ✅");
+        return;
+    }
+    updateSyncStatus("Speichere in Cloud...");
+    localStorage.setItem('ga_sync_time', localSyncTime);
+    const payload = { ...payloadToCompare, lastModified: localSyncTime };
     try {
         const res = await fetch(SYNC_URL + id, { method: 'POST', body: JSON.stringify(payload) });
-        if (res.ok) updateSyncStatus("Cloud: Gespeichert ✅");
-        else updateSyncStatus("Cloud: Speicher-Fehler", true);
+        if (res.ok) {
+            lastSyncedPayloadStr = currentPayloadStr;
+            updateSyncStatus("Cloud: Gespeichert ✅");
+            flashSyncIndicator('up');
+        } else {
+            updateSyncStatus("Cloud: Speicher-Fehler", true);
+        }
     } catch (e) {
         updateSyncStatus("Cloud: Offline", true);
     }
@@ -6236,7 +6278,7 @@ async function forceSyncLoad() {
     updateSyncStatus("Lade Daten...");
     try {
         const res = await fetch(SYNC_URL + id);
-        if (res.status === 404) { alert("Zu dieser ID wurden keine Daten gefunden. (Evtl. abgelaufen oder vertippt?)"); updateSyncStatus("Nicht gefunden", true); return; }
+        if (res.status === 404) { alert("Zu dieser ID wurden keine Daten gefunden."); updateSyncStatus("Nicht gefunden", true); return; }
         if (!res.ok) throw new Error("Netzwerkfehler");
         const data = await res.json();
         if (data.lastModified) {
@@ -6252,7 +6294,9 @@ async function forceSyncLoad() {
             localStorage.removeItem('ga_active_mission');
             document.getElementById("briefingBox").style.display = "none";
         }
+        setLastSyncedPayload();
         updateSyncStatus("Cloud: Geladen ✅");
+        flashSyncIndicator('down');
         if (document.getElementById('pinboardOverlay').classList.contains('active')) renderNotes();
         renderLog();
         alert("Daten erfolgreich aus der Cloud synchronisiert!");
@@ -6263,20 +6307,17 @@ async function forceSyncLoad() {
 }
 async function silentSyncLoad() {
     const id = getSyncId();
-    if (!id) return;
+    const t = document.getElementById('syncToggle');
+    if (!id || (t && !t.checked)) return;
     try {
         const res = await fetch(SYNC_URL + id);
         if (!res.ok) return;
         const data = await res.json();
-
-        // Nur aktualisieren, wenn die Cloud-Daten neuer sind als unsere lokalen
         if (data.lastModified && data.lastModified > localSyncTime) {
             localSyncTime = data.lastModified;
             localStorage.setItem('ga_sync_time', localSyncTime);
-
             if (data.pinboard) localStorage.setItem('ga_pinboard', JSON.stringify(data.pinboard));
             if (data.logbook) localStorage.setItem('ga_logbook', JSON.stringify(data.logbook));
-
             if (data.activeMission) {
                 localStorage.setItem('ga_active_mission', JSON.stringify(data.activeMission));
                 restoreMissionState(data.activeMission);
@@ -6284,49 +6325,40 @@ async function silentSyncLoad() {
                 localStorage.removeItem('ga_active_mission');
                 document.getElementById("briefingBox").style.display = "none";
             }
-
+            setLastSyncedPayload();
             if (document.getElementById('pinboardOverlay').classList.contains('active')) renderNotes();
             renderLog();
             updateSyncStatus("Auto-Sync: Aktualisiert 🔄");
+            flashSyncIndicator('down');
         }
     } catch (e) {
         // Silently fail in background
     }
 }
-// === Auto-Sync Trigger (Adaptive Polling) ===
+// === Auto-Sync Trigger (Adaptive Polling: 10s / 30s / Sleep) ===
 let syncLastActivityTime = Date.now();
 let syncLastFetchTime = Date.now();
 let syncIsSleeping = false;
-// Aktivität registrieren
 function resetSyncTimer() {
     const now = Date.now();
     syncLastActivityTime = now;
-
-    // Wenn die App im Tiefschlaf war (nach > 3 Min), sofort wecken und synchen!
     if (syncIsSleeping) {
         syncIsSleeping = false;
         if (document.visibilityState === 'visible') silentSyncLoad();
         syncLastFetchTime = now;
     }
 }
-// Event-Listener für Benutzer-Aktivität (Click, Touch, Scroll, Tastatur)
 ['click', 'touchstart', 'scroll', 'keydown'].forEach(evt => {
     document.addEventListener(evt, resetSyncTimer, { passive: true, capture: true });
 });
-// Wenn der Tab wieder in den Vordergrund kommt
 document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === 'visible') {
-        resetSyncTimer();
-        silentSyncLoad();
-    }
+    if (document.visibilityState === 'visible') { resetSyncTimer(); silentSyncLoad(); }
 });
-window.addEventListener("focus", () => {
-    resetSyncTimer();
-    silentSyncLoad();
-});
-// Der intelligente Loop (läuft grundlegend alle 10 Sekunden)
+window.addEventListener("focus", () => { resetSyncTimer(); silentSyncLoad(); });
+setTimeout(setLastSyncedPayload, 1000);
 setInterval(() => {
-    if (document.visibilityState !== 'visible' || !getSyncId()) return;
+    const t = document.getElementById('syncToggle');
+    if (document.visibilityState !== 'visible' || !getSyncId() || (t && !t.checked)) return;
     const now = Date.now();
     const idleTime = now - syncLastActivityTime;
     if (idleTime < 60000) {
@@ -6334,13 +6366,13 @@ setInterval(() => {
         silentSyncLoad();
         syncLastFetchTime = now;
     } else if (idleTime < 180000) {
-        // Phase 2: Halbschlaf (Letzte Aktivität vor 1 bis 3 Minuten) -> Alle 30s
+        // Phase 2: Halbschlaf (1 bis 3 Minuten) -> Alle 30s
         if (now - syncLastFetchTime >= 30000) {
             silentSyncLoad();
             syncLastFetchTime = now;
         }
     } else {
-        // Phase 3: Tiefschlaf (Letzte Aktivität vor > 3 Minuten) -> Sync stoppen
+        // Phase 3: Tiefschlaf (> 3 Minuten) -> Sync stoppen
         syncIsSleeping = true;
     }
 }, 10000);

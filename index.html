@@ -543,7 +543,8 @@
                 </label>
             </div>
         </div>
-        <input type="password" id="apiKeyInput" placeholder="Optional. Leer = Lokale Datenbank" onchange="saveApiKey()">
+        <input type="text" style="display:none;" aria-hidden="true" autocomplete="username">
+        <input type="password" id="apiKeyInput" placeholder="Optional. Leer = Lokale Datenbank" onchange="saveApiKey()" autocomplete="new-password">
         <div class="api-hint">
             <strong>Tipp:</strong> Mehr Abwechslung? <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">Gemini API-Key</a> benutzen um dynamische Missionen generieren zu lassen. <br>
             <span style="opacity: 0.7;">🔒 Sicher: Der Key wird ausschließlich lokal in deinem Browser gespeichert.</span>
@@ -552,16 +553,25 @@
 
     <div class="api-settings" style="margin-top: 15px; padding-top: 15px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <label style="margin: 0;">☁️ Cloud Sync (Pilot-ID)</label>
-            <span id="syncStatus" style="font-size: 10px; color: #888;">Offline</span>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <label style="margin: 0;">☁️ Cloud Sync (Pilot-ID)</label>
+                <label class="switch" style="transform: scale(0.6); margin: 0; transform-origin: left;">
+                    <input type="checkbox" id="syncToggle" onchange="saveSyncToggle()" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div style="display: flex; align-items: center;">
+                <span id="syncTrafficIndicator" style="font-size: 13px; margin-right: 6px; opacity: 0; transition: opacity 0.3s;"></span>
+                <span id="syncStatus" style="font-size: 10px; color: #888;">Offline</span>
+            </div>
         </div>
         <div style="display: flex; gap: 8px; align-items: center;">
-            <input type="text" id="syncIdInput" placeholder="z.B. Echo-Bravo-123" style="flex: 1; margin: 0; font-family: monospace;" onchange="saveSyncId()">
+            <input type="text" id="syncIdInput" placeholder="z.B. Echo-Bravo-123" style="flex: 1; margin: 0; font-family: monospace;" onchange="saveSyncId()" autocomplete="off" spellcheck="false" data-1p-ignore>
             <button class="btn-preset" style="flex: 0 0 auto; width: 40px; margin: 0; height: 42px;" onclick="generateSyncId()" title="Neue ID generieren">🎲</button>
             <button class="btn-preset" style="flex: 0 0 auto; margin: 0; height: 42px;" onclick="forceSyncLoad()">📥 Laden</button>
         </div>
         <div class="api-hint">
-            Sichere Flüge &amp; Pinnwand geräteübergreifend. ID eingeben und laden. Danach wird automatisch im Hintergrund gespeichert!
+            Sichere Flüge &amp; Pinnwand geräteübergreifend. ID eingeben und laden. Danach synct die App automatisch (Schalter = An).
         </div>
     </div>
 
@@ -650,12 +660,23 @@
 <script src="missions.js"></script>
 <script src="app.js"></script>
 <script>
-    // Service Worker
+    // Service Worker mit Auto-Reload bei Updates
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-            navigator.serviceWorker.register('./sw.js')
-                .then(reg => console.log('[PWA] Service Worker registriert:', reg.scope))
-                .catch(err => console.warn('[PWA] SW-Registrierung fehlgeschlagen:', err));
+            navigator.serviceWorker.register('./sw.js').then(reg => {
+                console.log('[PWA] Service Worker registriert:', reg.scope);
+
+                // Prüft auf Updates, wenn die Seite aus dem Hintergrund geholt wird
+                reg.update();
+            }).catch(err => console.warn('[PWA] SW-Registrierung fehlgeschlagen:', err));
+            // Wenn ein neuer Service Worker die Kontrolle übernimmt, Seite sofort neu laden!
+            let refreshing = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (!refreshing) {
+                    refreshing = true;
+                    window.location.reload();
+                }
+            });
         });
     }
 
