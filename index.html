@@ -3,14 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
-    <title>GA Dispatcher (Analog Edition)</title>
+    <title>GA Dispatcher</title>
     
     <link rel="icon" type="image/png" href="IconDRK.PNG">
     <link rel="icon" type="image/png" sizes="32x32" href="Icon.PNG" media="(prefers-color-scheme: light)">
     <link rel="icon" type="image/png" sizes="32x32" href="IconDRK.PNG" media="(prefers-color-scheme: dark)">
+    <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="GA Dispatcher">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#080808">
+    <meta name="mobile-web-app-capable" content="yes">
     <link rel="apple-touch-icon" href="IconDRK.PNG">
     <link rel="apple-touch-icon" sizes="180x180" href="IconDRK.PNG">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -631,6 +634,67 @@
 <script src="datenbank.js"></script>
 <script src="missions.js"></script>
 <script src="app.js"></script>
+<script>
+    // Service Worker
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./sw.js')
+                .then(reg => console.log('[PWA] Service Worker registriert:', reg.scope))
+                .catch(err => console.warn('[PWA] SW-Registrierung fehlgeschlagen:', err));
+        });
+    }
+
+    // iOS Install-Hinweis (iOS zeigt keinen nativen Install-Banner)
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isStandalone = window.navigator.standalone === true;
+    const dismissed = localStorage.getItem('pwa-hint-dismissed');
+    if (isIos && !isStandalone && !dismissed) {
+        const hint = document.createElement('div');
+        hint.id = 'pwa-hint';
+        hint.innerHTML = `
+            <span>⬆️ Zum Homescreen: <b>Teilen</b> → <b>Zum Home-Bildschirm</b></span>
+            <button onclick="localStorage.setItem('pwa-hint-dismissed','1');this.parentElement.remove()">✕</button>
+        `;
+        hint.style.cssText = `
+            position:fixed; bottom:0; left:0; right:0; z-index:99999;
+            background:#1a1a1a; color:#e0e0e0; font-size:13px;
+            display:flex; align-items:center; justify-content:space-between;
+            padding:10px 14px; gap:10px;
+            border-top:1px solid #444;
+            padding-bottom: max(10px, env(safe-area-inset-bottom));
+        `;
+        hint.querySelector('button').style.cssText = `
+            background:none; border:none; color:#aaa; font-size:18px; cursor:pointer; flex-shrink:0;
+        `;
+        document.body.appendChild(hint);
+    }
+
+    // Android Install-Prompt abfangen & Button zeigen
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', e => {
+        e.preventDefault();
+        deferredPrompt = e;
+        const btn = document.createElement('div');
+        btn.id = 'pwa-install-btn';
+        btn.innerHTML = `📲 App installieren <button onclick="this.parentElement.remove()">✕</button>`;
+        btn.style.cssText = `
+            position:fixed; bottom:0; left:0; right:0; z-index:99999;
+            background:#1a1a1a; color:#ffcc00; font-size:13px; font-weight:bold;
+            display:flex; align-items:center; justify-content:space-between;
+            padding:10px 14px; gap:10px; border-top:1px solid #444; cursor:pointer;
+            padding-bottom: max(10px, env(safe-area-inset-bottom));
+        `;
+        btn.addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            deferredPrompt = null;
+            btn.remove();
+        });
+        btn.querySelector('button').style.cssText = `background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;`;
+        document.body.appendChild(btn);
+    });
+</script>
 
 </body>
 </html>
