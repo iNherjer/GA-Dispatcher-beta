@@ -6241,8 +6241,8 @@ async function triggerCloudSave(immediate = false) {
     if (!immediate) {
         updateSyncStatus("Warte auf Abschluss...");
         if (syncSaveTimeout) clearTimeout(syncSaveTimeout);
-        // 10 Sekunden Debouncing: Sammelt alle Aktionen und lädt erst bei Inaktivität hoch
-        syncSaveTimeout = setTimeout(() => triggerCloudSave(true), 10000);
+        // 15 Sekunden Debouncing als Write-Schutz!
+        syncSaveTimeout = setTimeout(() => triggerCloudSave(true), 15000);
         return;
     }
     localSyncTime = Date.now();
@@ -6260,7 +6260,8 @@ async function triggerCloudSave(immediate = false) {
     localStorage.setItem('ga_sync_time', localSyncTime);
     const payload = { ...payloadToCompare, lastModified: localSyncTime };
     try {
-        const res = await fetch(SYNC_URL + id, { method: 'POST', body: JSON.stringify(payload) });
+        // WICHTIG: keepalive: true sorgt dafür, dass der Browser den Upload beendet, selbst wenn die App gerade geschlossen wird!
+        const res = await fetch(SYNC_URL + id, { method: 'POST', body: JSON.stringify(payload), keepalive: true });
         if (res.ok) {
             lastSyncedPayloadStr = currentPayloadStr;
             updateSyncStatus("Cloud: Gespeichert ✅");
@@ -6351,10 +6352,29 @@ function resetSyncTimer() {
 ['click', 'touchstart', 'scroll', 'keydown'].forEach(evt => {
     document.addEventListener(evt, resetSyncTimer, { passive: true, capture: true });
 });
+// Wenn der Tab in den Vordergrund/Hintergrund wechselt
 document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === 'visible') { resetSyncTimer(); silentSyncLoad(); }
+    if (document.visibilityState === 'visible') {
+        resetSyncTimer();
+        silentSyncLoad();
+    } else if (document.visibilityState === 'hidden') {
+        // App wird in den Hintergrund gewischt oder geschlossen
+        if (syncSaveTimeout) {
+            clearTimeout(syncSaveTimeout);
+            syncSaveTimeout = null;
+            triggerCloudSave(true); // Sofort pushen!
+        }
+    }
 });
 window.addEventListener("focus", () => { resetSyncTimer(); silentSyncLoad(); });
+// Fallback für alte iOS-Versionen oder explizites Tab-Schließen
+window.addEventListener("pagehide", () => {
+    if (syncSaveTimeout) {
+        clearTimeout(syncSaveTimeout);
+        syncSaveTimeout = null;
+        triggerCloudSave(true);
+    }
+});
 setTimeout(setLastSyncedPayload, 1000);
 setInterval(() => {
     const t = document.getElementById('syncToggle');
