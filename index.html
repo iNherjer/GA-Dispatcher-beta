@@ -550,6 +550,21 @@
         </div>
     </div>
 
+    <div class="api-settings" style="margin-top: 15px; padding-top: 15px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <label style="margin: 0;">☁️ Cloud Sync (Pilot-ID)</label>
+            <span id="syncStatus" style="font-size: 10px; color: #888;">Offline</span>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="text" id="syncIdInput" placeholder="z.B. Echo-Bravo-123" style="flex: 1; margin: 0; font-family: monospace;" onchange="saveSyncId()">
+            <button class="btn-preset" style="flex: 0 0 auto; width: 40px; margin: 0; height: 42px;" onclick="generateSyncId()" title="Neue ID generieren">🎲</button>
+            <button class="btn-preset" style="flex: 0 0 auto; margin: 0; height: 42px;" onclick="forceSyncLoad()">📥 Laden</button>
+        </div>
+        <div class="api-hint">
+            Sichere Flüge &amp; Pinnwand geräteübergreifend. ID eingeben und laden. Danach wird automatisch im Hintergrund gespeichert!
+        </div>
+    </div>
+
     <div class="theme-switch-wrapper" style="flex-direction: column; align-items: center; border-top: 2px dashed #444; margin-top: 30px; padding-top: 15px;">
         <div style="display: flex; justify-content: space-between; width: 150px; font-size: 10px; font-weight: bold; text-transform: uppercase;">
             <span id="lbl-classic" style="color: #888; cursor: pointer; text-shadow: 0 1px 2px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.9);" onclick="changeThemeFromSlider(0)">Modern</span>

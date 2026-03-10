@@ -527,6 +527,12 @@ window.onload = () => {
         const btnAI = document.getElementById('btnToggleAI');
         if (btnAI) btnAI.classList.add('active');
     }
+
+    const savedSyncId = localStorage.getItem('ga_sync_id');
+    if (savedSyncId) {
+        const syncInput = document.getElementById('syncIdInput');
+        if(syncInput) syncInput.value = savedSyncId;
+    }
 };
 
 function saveApiKey() { localStorage.setItem('ga_gemini_key', document.getElementById('apiKeyInput').value.trim()); }
@@ -581,6 +587,7 @@ function saveMissionState() {
         vpElevationData: typeof vpElevationData !== 'undefined' ? vpElevationData : null
     };
     localStorage.setItem('ga_active_mission', JSON.stringify(state));
+    triggerCloudSave();
 }
 
 async function restoreMissionState(state) {
@@ -2762,6 +2769,7 @@ function logCurrentFlight() {
     if (startLocRadioEl) startLocRadioEl.value = newStart;
     if (destLocRadioEl) destLocRadioEl.value = '';
     renderLog(); alert(`Flug geloggt! Du bist in ${currentMissionData.dest}.`);
+    triggerCloudSave();
 }
 
 function renderLog() {
@@ -2777,7 +2785,7 @@ function renderLog() {
         container.appendChild(div);
     });
 }
-function clearLog() { if (confirm("Gesamtes Logbuch löschen?")) { localStorage.removeItem('ga_logbook'); localStorage.removeItem('last_icao_dest'); renderLog(); } }
+function clearLog() { if (confirm("Gesamtes Logbuch löschen?")) { localStorage.removeItem('ga_logbook'); localStorage.removeItem('last_icao_dest'); renderLog(); triggerCloudSave(); } }
 
 /* =========================================================
    10. HANGAR PINNWAND (LOKAL & TUTORIAL & SKALIERUNG)
@@ -2812,6 +2820,7 @@ function clearPinboard() {
     if (confirm("🗑️ Möchtest du wirklich ALLE Zettel von der Pinnwand in den Müll werfen?")) {
         localStorage.setItem('ga_pinboard', JSON.stringify([]));
         renderNotes();
+        triggerCloudSave();
     }
 }
 
@@ -2836,6 +2845,7 @@ function addNote() {
     notes.push({ id: Date.now(), text: text, x: 30 + Math.random() * 15, y: 30 + Math.random() * 15, rot: Math.floor(Math.random() * 9) - 4 });
     localStorage.setItem('ga_pinboard', JSON.stringify(notes));
     renderNotes();
+    triggerCloudSave();
 }
 
 function deleteNote(id) {
@@ -2844,6 +2854,7 @@ function deleteNote(id) {
     notes = notes.filter(n => n.id !== id);
     localStorage.setItem('ga_pinboard', JSON.stringify(notes));
     renderNotes();
+    triggerCloudSave();
 }
 
 function editNote(id) {
@@ -2857,6 +2868,7 @@ function editNote(id) {
             renderNotes();
         }
     }
+    triggerCloudSave();
 }
 
 function pinCurrentFlight() {
@@ -2900,6 +2912,7 @@ function pinCurrentFlight() {
     localStorage.setItem('ga_pinboard', JSON.stringify(notes));
     renderNotes();
     if (!document.getElementById('pinboardOverlay').classList.contains('active')) alert("📌 Flugauftrag erfolgreich ans schwarze Brett geheftet!");
+    triggerCloudSave();
 }
 
 function loadPinnedFlight(id) {
@@ -2971,6 +2984,7 @@ function importMission() {
         localStorage.setItem('ga_pinboard', JSON.stringify(notes));
         renderNotes();
         alert("📥 Flugauftrag erfolgreich empfangen und ans Brett geheftet!");
+        triggerCloudSave();
     } catch (e) { alert("❌ Fehler: Der Code ist ungültig oder beschädigt."); }
 }
 
@@ -6138,4 +6152,80 @@ computeFlightProfile = function (elevationData, cruiseAltFt, climbRateFpm, desce
 };
 
 // Init altitude waypoints when map table canvas is ready
+
+/* =========================================================
+   CLOUD SYNC LOGIC
+   ========================================================= */
+const SYNC_URL = 'https://ga-proxy.einherjer.workers.dev/api/sync/';
+function getSyncId() {
+    return document.getElementById('syncIdInput')?.value.trim() || localStorage.getItem('ga_sync_id') || "";
+}
+function saveSyncId() {
+    const id = document.getElementById('syncIdInput').value.trim();
+    localStorage.setItem('ga_sync_id', id);
+}
+function generateSyncId() {
+    const words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett", "Kilo", "Lima", "Mike", "November", "Oscar", "Papa", "Quebec", "Romeo", "Sierra", "Tango", "Uniform", "Victor", "Whiskey", "Xray", "Yankee", "Zulu"];
+    const w1 = words[Math.floor(Math.random() * words.length)];
+    const w2 = words[Math.floor(Math.random() * words.length)];
+    const num = Math.floor(Math.random() * 900) + 100;
+    const newId = `${w1}-${w2}-${num}`;
+    document.getElementById('syncIdInput').value = newId;
+    saveSyncId();
+    updateSyncStatus("Neue ID generiert. Speichere...");
+    triggerCloudSave();
+}
+function updateSyncStatus(msg, isError = false) {
+    const el = document.getElementById('syncStatus');
+    if (el) {
+        el.innerText = msg;
+        el.style.color = isError ? "var(--red)" : "var(--green)";
+        setTimeout(() => { if(el.innerText === msg) el.style.color = "#888"; }, 4000);
+    }
+}
+async function triggerCloudSave() {
+    const id = getSyncId();
+    if (!id) return;
+    updateSyncStatus("Sync läuft...");
+    const payload = {
+        pinboard: JSON.parse(localStorage.getItem('ga_pinboard') || '[]'),
+        logbook: JSON.parse(localStorage.getItem('ga_logbook') || '[]'),
+        activeMission: JSON.parse(localStorage.getItem('ga_active_mission') || 'null')
+    };
+    try {
+        const res = await fetch(SYNC_URL + id, { method: 'POST', body: JSON.stringify(payload) });
+        if (res.ok) updateSyncStatus("Cloud: Gespeichert ✅");
+        else updateSyncStatus("Cloud: Speicher-Fehler", true);
+    } catch (e) {
+        updateSyncStatus("Cloud: Offline", true);
+    }
+}
+async function forceSyncLoad() {
+    const id = getSyncId();
+    if (!id) { alert("Bitte zuerst eine Pilot-ID eingeben oder generieren (🎲)."); return; }
+    updateSyncStatus("Lade Daten...");
+    try {
+        const res = await fetch(SYNC_URL + id);
+        if (res.status === 404) { alert("Zu dieser ID wurden keine Daten gefunden. (Evtl. abgelaufen oder vertippt?)"); updateSyncStatus("Nicht gefunden", true); return; }
+        if (!res.ok) throw new Error("Netzwerkfehler");
+        const data = await res.json();
+
+        if (data.pinboard) localStorage.setItem('ga_pinboard', JSON.stringify(data.pinboard));
+        if (data.logbook) localStorage.setItem('ga_logbook', JSON.stringify(data.logbook));
+        if (data.activeMission) {
+            localStorage.setItem('ga_active_mission', JSON.stringify(data.activeMission));
+            restoreMissionState(data.activeMission);
+        } else {
+            resetApp(); // Wenn kein aktiver Flug im Savegame, UI leeren
+        }
+
+        updateSyncStatus("Cloud: Geladen ✅");
+        if (document.getElementById('pinboardOverlay').classList.contains('active')) renderNotes();
+        renderLog();
+        alert("Daten erfolgreich aus der Cloud synchronisiert!");
+    } catch (e) {
+        updateSyncStatus("Cloud: Lade-Fehler", true);
+        alert("Fehler beim Laden aus der Cloud.");
+    }
+}
 setTimeout(() => initAltWaypoints(), 2000);
