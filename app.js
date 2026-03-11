@@ -538,16 +538,6 @@ window.onload = () => {
     const syncTggl = document.getElementById('syncToggle');
     if (syncTggl) { syncTggl.checked = (localStorage.getItem('ga_sync_enabled') !== 'false'); }
 
-    // SW Version auslesen und im Footer anzeigen
-    fetch('./sw.js?t=' + Date.now())
-        .then(r => r.text())
-        .then(text => {
-            const match = text.match(/const CACHE = ['"]([^'"]+)['"]/);
-            if (match) {
-                const el = document.getElementById('swVersionDisplay');
-                if (el) el.innerText = match[1];
-            }
-        }).catch(() => {});
 };
 
 function saveApiKey() { localStorage.setItem('ga_gemini_key', document.getElementById('apiKeyInput').value.trim()); }
@@ -4449,6 +4439,20 @@ document.addEventListener('DOMContentLoaded', () => {
     initGPSEncoders();
     initCom2Knob();
     restoreAudioButtonStates();
+
+    // SW Version auslesen und sofort anzeigen (wartet nicht auf Bilder)
+    fetch('sw.js', { cache: 'no-store' })
+        .then(r => r.text())
+        .then(text => {
+            const match = text.match(/const CACHE = ['"]([^'"]+)['"]/);
+            if (match) {
+                const el = document.getElementById('swVersionDisplay');
+                if (el) el.innerText = match[1];
+            }
+        }).catch(() => {
+            const el = document.getElementById('swVersionDisplay');
+            if (el) el.innerText = "Offline";
+        });
 });
 
 /* =========================================================
@@ -4480,24 +4484,37 @@ function updateSnapButtonUI() {
 
 async function fetchOpenAIPData() {
     if (!map || !snapMode) return;
-    const b = map.getBounds();
-    const bbox = `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
-    const proxy = 'https://ga-proxy.einherjer.workers.dev';
 
+    // 1. Schutz: Nicht laden, wenn man zu weit rausgezoomt ist (verhindert "Box too large" 500er Fehler)
+    if (map.getZoom() < 8) {
+        cachedNavData = [];
+        return;
+    }
+    const b = map.getBounds();
+
+    // 2. Schutz: Koordinaten auf die reale Weltkarte limitieren (-180 bis 180 / -90 bis 90)
+    const w = Math.max(-180, b.getWest());
+    const s = Math.max(-90, b.getSouth());
+    const e = Math.min(180, b.getEast());
+    const n = Math.min(90, b.getNorth());
+
+    const bbox = `${w},${s},${e},${n}`;
+    const proxy = 'https://ga-proxy.einherjer.workers.dev';
     try {
         const [navRes, repRes, aptRes] = await Promise.all([
             fetch(`${proxy}/api/navaids?bbox=${bbox}&limit=250&t=${Date.now()}`),
             fetch(`${proxy}/api/reporting-points?bbox=${bbox}&limit=250&t=${Date.now()}`),
             fetch(`${proxy}/api/airports?bbox=${bbox}&limit=250&t=${Date.now()}`)
         ]);
-
+        // 3. Schutz: Falls OpenAIP blockt, breche leise ab statt abzustürzen
+        if (!navRes.ok || !repRes.ok || !aptRes.ok) {
+            return;
+        }
         const navJson = await navRes.json(), repJson = await repRes.json(), aptJson = await aptRes.json();
         cachedNavData = [];
-
         let navArray = navJson.items || [];
         let repArray = repJson.items || [];
         let aptArray = aptJson.items || [];
-
         navArray.forEach(i => {
             if (!i.geometry) return;
             let freqVal = '';
@@ -4511,19 +4528,19 @@ async function fetchOpenAIPData() {
             let ident = idVal ? ` [${idVal}]` : '';
             cachedNavData.push({ name: `${i.name}${ident}${freq}`, lat: i.geometry.coordinates[1], lng: i.geometry.coordinates[0] });
         });
-
         repArray.forEach(i => {
             if (!i.geometry) return;
             cachedNavData.push({ name: `RPP ${i.name}`, lat: i.geometry.coordinates[1], lng: i.geometry.coordinates[0] });
         });
-
         aptArray.forEach(i => {
             if (!i.geometry) return;
             let freq = (i.frequencies && i.frequencies.length > 0 && i.frequencies[0].value) ? ` (${i.frequencies[0].value})` : '';
             let displayName = i.icaoCode ? i.icaoCode : i.name;
             cachedNavData.push({ name: `APT ${displayName}${freq}`, lat: i.geometry.coordinates[1], lng: i.geometry.coordinates[0] });
         });
-    } catch (e) { console.error("❌ Fetch Error:", e); }
+    } catch (e) {
+        // Leiser Fallback, wenn das Netzwerk mal hakt
+    }
 }
 
 /* =========================================================
@@ -6241,8 +6258,8 @@ async function triggerCloudSave(immediate = false) {
     if (!immediate) {
         updateSyncStatus("Warte auf Abschluss...");
         if (syncSaveTimeout) clearTimeout(syncSaveTimeout);
-        // 15 Sekunden Debouncing als Write-Schutz!
-        syncSaveTimeout = setTimeout(() => triggerCloudSave(true), 15000);
+        // 25 Sekunden Debouncing als massiver Write-Schutz für Skalierbarkeit!
+        syncSaveTimeout = setTimeout(() => triggerCloudSave(true), 25000);
         return;
     }
     localSyncTime = Date.now();
