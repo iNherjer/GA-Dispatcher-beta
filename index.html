@@ -143,8 +143,8 @@
                     <div class="audio-btn" id="btnAC-AERO" onclick="applyNavComPreset(220, 25, 6, 'AERO', this)">AERO<div class="audio-led"></div></div>
                     <div class="audio-btn" id="btnToggleAI" onclick="toggleNavComAI(this)">KI Mode<div class="audio-led"></div></div>
                     
-                    <div class="audio-btn" onclick="exportMission()">SAVE<div class="audio-led"></div></div>
-                    <div class="audio-btn" onclick="importMission()">LOAD<div class="audio-led"></div></div>
+                    <div class="audio-btn" id="navcomSaveBtn" onclick="triggerCloudSave('manual')">☁️ SAVE<div class="audio-led"></div></div>
+                    <div class="audio-btn" id="navcomLoadBtn" onclick="forceSyncLoad()">☁️ LOAD<div class="audio-led"></div></div>
                     <div class="audio-btn" id="btnToggleGPS" onclick="toggleGPSModule(this)">GPS<div class="audio-led"></div></div>
                 </div>
             </div>
@@ -341,7 +341,7 @@
     
     <div style="display:flex; gap: 10px; margin-top: 15px; margin-bottom: 5px;">
         <button class="btn-preset" style="flex:1; background-color: #444; color: #fff; border-color: #222;" onclick="toggleMapTable()">🗺️ Kartentisch</button>
-        <button class="btn-preset" style="flex:1; background-color: #444; color: #fff; border-color: #222;" onclick="togglePinboard()">📋 Pinnwand</button>
+        <button class="btn-preset" style="flex:1; background-color: #444; color: #fff; border-color: #222; position:relative;" onclick="togglePinboard()">📋 Pinnwand <span id="mainPinboardBadge" style="display:none; background:#ff4444; color:#fff; border-radius:50%; padding:1px 5px; font-size:10px; margin-left:4px; transform:translateY(-2px);">!</span></button>
     </div>
 
 <div class="briefing" id="briefingBox">
@@ -556,7 +556,7 @@
             <div style="display: flex; align-items: center; gap: 10px;">
                 <label style="margin: 0;">☁️ Cloud Sync (Pilot-ID)</label>
                 <label class="switch" style="transform: scale(0.6); margin: 0; transform-origin: left;">
-                    <input type="checkbox" id="syncToggle" onchange="saveSyncToggle()" checked>
+                    <input type="checkbox" id="syncToggle" onchange="saveSyncToggle()">
                     <span class="slider"></span>
                 </label>
             </div>
@@ -568,7 +568,8 @@
         <div style="display: flex; gap: 8px; align-items: center;">
             <input type="text" id="syncIdInput" placeholder="z.B. Echo-Bravo-123" style="flex: 1; margin: 0; font-family: monospace;" onchange="saveSyncId()" autocomplete="off" spellcheck="false" data-1p-ignore>
             <button class="btn-preset" style="flex: 0 0 auto; width: 40px; margin: 0; height: 42px;" onclick="generateSyncId()" title="Neue ID generieren">🎲</button>
-            <button class="btn-preset" style="flex: 0 0 auto; margin: 0; height: 42px;" onclick="forceSyncLoad()">📥 Laden</button>
+            <button class="btn-preset" style="flex: 0 0 auto; margin: 0; height: 42px; background: #333; color: #4da6ff;" onclick="triggerCloudSave('manual')" title="Daten manuell hochladen">☁️ Push</button>
+            <button class="btn-preset" style="flex: 0 0 auto; margin: 0; height: 42px; background: #333; color: #f2c12e;" onclick="forceSyncLoad()">📥 Pull</button>
         </div>
         <div class="api-hint">
             Sichere Flüge &amp; Pinnwand geräteübergreifend. ID eingeben und laden. Danach synct die App automatisch (Schalter = An).

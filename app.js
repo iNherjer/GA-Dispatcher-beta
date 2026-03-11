@@ -534,9 +534,9 @@ window.onload = () => {
         if(syncInput) syncInput.value = savedSyncId;
     }
 
-    // Sync Toggle Status laden
+    // Sync Toggle Status laden (Standardmäßig auf AUS / false)
     const syncTggl = document.getElementById('syncToggle');
-    if (syncTggl) { syncTggl.checked = (localStorage.getItem('ga_sync_enabled') !== 'false'); }
+    if (syncTggl) { syncTggl.checked = (localStorage.getItem('ga_sync_enabled') === 'true'); }
 
     // Lade Gruppen-Settings
     const gName = localStorage.getItem('ga_group_name');
@@ -2911,6 +2911,33 @@ function updateGroupUIFromSync(gName, gNick) {
         leaveGroup(true); // Lautlos aufräumen
     }
 }
+function setNavComLed(btnId, state) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.classList.remove('led-syncing', 'led-success', 'led-error');
+    if (state !== 'off') btn.classList.add(`led-${state}`);
+}
+function updateGroupBadgeUI() {
+    let newBadges = JSON.parse(localStorage.getItem('ga_group_new')) || [];
+    let hidden = JSON.parse(localStorage.getItem('ga_group_hidden')) || [];
+
+    // GHOST BUSTER: Wenn ein Zettel im lokalen Müll liegt, kann er nicht "Neu" sein!
+    let initialLen = newBadges.length;
+    newBadges = newBadges.filter(id => !hidden.includes(id));
+    if (newBadges.length !== initialLen) {
+        localStorage.setItem('ga_group_new', JSON.stringify(newBadges));
+    }
+    const mainBadge = document.getElementById('mainPinboardBadge');
+    const tabBadge = document.getElementById('groupBadge');
+    const hasNew = newBadges.length > 0;
+
+    if (mainBadge) mainBadge.style.display = hasNew ? 'inline-block' : 'none';
+    if (tabBadge && currentBoardMode !== 'group') {
+        tabBadge.style.display = hasNew ? 'inline-block' : 'none';
+    } else if (tabBadge && currentBoardMode === 'group') {
+        tabBadge.style.display = 'none';
+    }
+}
 function switchPinboardMode(mode) {
     if(mode === 'group' && !getGroupName()) {
         alert("Bitte zuerst unten in den Einstellungen einer Crew beitreten!"); return;
@@ -2918,7 +2945,7 @@ function switchPinboardMode(mode) {
     currentBoardMode = mode;
     document.getElementById('tabPrivate').classList.toggle('active', mode === 'private');
     document.getElementById('tabGroup').classList.toggle('active', mode === 'group');
-    if(mode === 'group') document.getElementById('groupBadge').style.display = 'none';
+    updateGroupBadgeUI();
     renderNotes();
 }
 function toggleTutorialNotes() {
@@ -2975,6 +3002,7 @@ function addNote() {
     }
 }
 function deleteNote(id, isGroup) {
+    clearNewBadge(id);
     if (isGroup) {
         let gNotes = groupDataCache.notes || [];
         const note = gNotes.find(n => n.id === id);
@@ -3175,9 +3203,12 @@ function clearNewBadge(id) {
     if(newBadges.includes(id)) {
         newBadges = newBadges.filter(nid => nid !== id);
         localStorage.setItem('ga_group_new', JSON.stringify(newBadges));
+        updateGroupBadgeUI();
+        triggerCloudSave(true); // "Gelesen"-Status sofort geräteübergreifend in die Cloud pushen
+
         const b = document.getElementById('pinboard');
         const renderedBadges = b.querySelectorAll('.post-it-new-badge');
-        renderedBadges.forEach(el => el.style.display = 'none'); 
+        renderedBadges.forEach(el => el.style.display = 'none');
         if(currentBoardMode === 'group') renderNotes();
     }
 }
@@ -5523,14 +5554,21 @@ function setLastSyncedPayload() {
         logbook: JSON.parse(localStorage.getItem('ga_logbook') || '[]'),
         activeMission: JSON.parse(localStorage.getItem('ga_active_mission') || 'null'),
         groupName: getGroupName(),
-        groupNick: getGroupNick()
+        groupNick: getGroupNick(),
+        knownNotes: JSON.parse(localStorage.getItem('ga_known_group_notes') || '[]'),
+        newBadges: JSON.parse(localStorage.getItem('ga_group_new') || '[]')
     };
     lastSyncedPayloadStr = JSON.stringify(payloadToCompare);
 }
 async function triggerCloudSave(immediate = false) {
     const id = getSyncId();
     const t = document.getElementById('syncToggle');
-    if (!id || (t && !t.checked)) return;
+    if (!id) return;
+    if (immediate !== 'manual' && t && !t.checked) return;
+    if (immediate === 'manual') {
+        if (!confirm("⬆️ CLOUD UPLOAD\nMöchtest du deinen aktuellen, lokalen Stand hochladen und das bisherige Cloud-Backup überschreiben?")) return;
+        setNavComLed('navcomSaveBtn', 'syncing');
+    }
     if (!immediate) {
         updateSyncStatus("Warte auf Abschluss...");
         if (syncSaveTimeout) clearTimeout(syncSaveTimeout);
@@ -5543,10 +5581,13 @@ async function triggerCloudSave(immediate = false) {
         logbook: JSON.parse(localStorage.getItem('ga_logbook') || '[]'),
         activeMission: JSON.parse(localStorage.getItem('ga_active_mission') || 'null'),
         groupName: getGroupName(),
-        groupNick: getGroupNick()
+        groupNick: getGroupNick(),
+        knownNotes: JSON.parse(localStorage.getItem('ga_known_group_notes') || '[]'),
+        newBadges: JSON.parse(localStorage.getItem('ga_group_new') || '[]')
     };
+
     const currentPayloadStr = JSON.stringify(payloadToCompare);
-    if (currentPayloadStr === lastSyncedPayloadStr) {
+    if (currentPayloadStr === lastSyncedPayloadStr && immediate !== 'manual') {
         updateSyncStatus("Cloud: Aktuell ✅");
         return;
     }
@@ -5559,22 +5600,41 @@ async function triggerCloudSave(immediate = false) {
             lastSyncedPayloadStr = currentPayloadStr;
             updateSyncStatus("Cloud: Gespeichert ✅");
             flashSyncIndicator('up');
+            if (immediate === 'manual') {
+                setNavComLed('navcomSaveBtn', 'success');
+                setTimeout(() => setNavComLed('navcomSaveBtn', 'off'), 3000);
+            }
         } else {
-            updateSyncStatus("Cloud: Speicher-Fehler", true);
+            throw new Error("Server Error");
         }
     } catch (e) {
-        updateSyncStatus("Cloud: Offline", true);
+        updateSyncStatus("Cloud: Speicher-Fehler", true);
+        if (immediate === 'manual') {
+            setNavComLed('navcomSaveBtn', 'error');
+            setTimeout(() => setNavComLed('navcomSaveBtn', 'off'), 3000);
+        }
     }
 }
 async function forceSyncLoad() {
+    if (!confirm("⬇️ CLOUD DOWNLOAD\nMöchtest du deinen Spielstand aus der Cloud laden? Alle lokalen Änderungen (die nicht hochgeladen wurden) gehen dabei verloren!")) return;
     const id = getSyncId();
     if (!id) { alert("Bitte zuerst eine Pilot-ID eingeben oder generieren (🎲)."); return; }
+
+    setNavComLed('navcomLoadBtn', 'syncing');
     updateSyncStatus("Lade Daten...");
+
     try {
         const res = await fetch(SYNC_URL + id);
-        if (res.status === 404) { alert("Zu dieser ID wurden keine Daten gefunden."); updateSyncStatus("Nicht gefunden", true); return; }
+        if (res.status === 404) {
+            alert("Zu dieser ID wurden keine Daten gefunden.");
+            updateSyncStatus("Nicht gefunden", true);
+            setNavComLed('navcomLoadBtn', 'error');
+            setTimeout(() => setNavComLed('navcomLoadBtn', 'off'), 3000);
+            return;
+        }
         if (!res.ok) throw new Error("Netzwerkfehler");
         const data = await res.json();
+
         if (data.lastModified) {
             localSyncTime = data.lastModified;
             localStorage.setItem('ga_sync_time', localSyncTime);
@@ -5588,19 +5648,26 @@ async function forceSyncLoad() {
             localStorage.removeItem('ga_active_mission');
             document.getElementById("briefingBox").style.display = "none";
         }
-        // NEU: Gruppenstatus anwenden
+        if (data.knownNotes) localStorage.setItem('ga_known_group_notes', JSON.stringify(data.knownNotes));
+        if (data.newBadges) localStorage.setItem('ga_group_new', JSON.stringify(data.newBadges));
+
         if (data.groupName !== undefined) {
             updateGroupUIFromSync(data.groupName, data.groupNick);
         }
         setLastSyncedPayload();
+        updateGroupBadgeUI();
         updateSyncStatus("Cloud: Geladen ✅");
         flashSyncIndicator('down');
+
+        setNavComLed('navcomLoadBtn', 'success');
+        setTimeout(() => setNavComLed('navcomLoadBtn', 'off'), 3000);
         if (document.getElementById('pinboardOverlay').classList.contains('active')) renderNotes();
         renderLog();
-        alert("Daten erfolgreich aus der Cloud synchronisiert!");
     } catch (e) {
         updateSyncStatus("Cloud: Lade-Fehler", true);
         alert("Fehler beim Laden aus der Cloud.");
+        setNavComLed('navcomLoadBtn', 'error');
+        setTimeout(() => setNavComLed('navcomLoadBtn', 'off'), 3000);
     }
 }
 async function silentSyncLoad() {
@@ -5623,19 +5690,21 @@ async function silentSyncLoad() {
                 localStorage.removeItem('ga_active_mission');
                 document.getElementById("briefingBox").style.display = "none";
             }
-            // NEU: Gruppenstatus anwenden
+            if (data.knownNotes) localStorage.setItem('ga_known_group_notes', JSON.stringify(data.knownNotes));
+            if (data.newBadges) localStorage.setItem('ga_group_new', JSON.stringify(data.newBadges));
+
             if (data.groupName !== undefined) {
                 updateGroupUIFromSync(data.groupName, data.groupNick);
             }
+
             setLastSyncedPayload();
+            updateGroupBadgeUI();
             if (document.getElementById('pinboardOverlay').classList.contains('active')) renderNotes();
             renderLog();
             updateSyncStatus("Auto-Sync: Aktualisiert 🔄");
             flashSyncIndicator('down');
         }
-    } catch (e) {
-        // Silently fail in background
-    }
+    } catch (e) {}
 }
 // === GROUP SYNC LOGIC ===
 let groupSyncTime = 0;
@@ -5652,31 +5721,37 @@ async function silentGroupSync() {
 
         if (data.lastModified && data.lastModified > groupSyncTime) {
             groupSyncTime = data.lastModified;
-
-            const oldNotes = groupDataCache.notes || [];
-            const oldIds = oldNotes.map(n => n.id);
+            let knownNotes = JSON.parse(localStorage.getItem('ga_known_group_notes')) || [];
             let newBadges = JSON.parse(localStorage.getItem('ga_group_new')) || [];
-
+            let changed = false;
             if (data.kicked && data.kicked.includes(gNick)) {
                 alert("❌ Du wurdest vom Admin aus der Crew entfernt.");
-                leaveGroup(true); // Lautlos verlassen & Profil updaten
+                leaveGroup(true);
                 return;
             }
             const downloadedNotes = data.notes || [];
+            const activeNoteIds = downloadedNotes.map(n => n.id);
+
+            // Ghost-Badge Fix: Entferne alte Badges von Zetteln, die gelöscht wurden
+            const originalBadgeCount = newBadges.length;
+            newBadges = newBadges.filter(id => activeNoteIds.includes(id));
+            if (originalBadgeCount !== newBadges.length) changed = true;
             downloadedNotes.forEach(dn => {
-                if(!oldIds.includes(dn.id) && dn.author !== gNick) {
-                    newBadges.push(dn.id);
+                if(!knownNotes.includes(dn.id)) {
+                    knownNotes.push(dn.id);
+                    if (dn.author !== gNick) {
+                        newBadges.push(dn.id);
+                    }
+                    changed = true;
                 }
             });
-            localStorage.setItem('ga_group_new', JSON.stringify(newBadges));
-
-            groupDataCache = data;
-
-            if (currentBoardMode !== 'group' && newBadges.length > 0) {
-                const badge = document.getElementById('groupBadge');
-                if (badge) badge.style.display = 'inline-block';
+            if (changed) {
+                localStorage.setItem('ga_known_group_notes', JSON.stringify(knownNotes));
+                localStorage.setItem('ga_group_new', JSON.stringify(newBadges));
+                triggerCloudSave(true); // Ins Profil sichern
             }
-
+            groupDataCache = data;
+            updateGroupBadgeUI();
             if (document.getElementById('pinboardOverlay').classList.contains('active') && currentBoardMode === 'group') {
                 renderNotes();
             }
@@ -5776,20 +5851,25 @@ window.addEventListener("pagehide", () => {
 });
 setTimeout(setLastSyncedPayload, 1000);
 setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
     const t = document.getElementById('syncToggle');
-    if (document.visibilityState !== 'visible' || !getSyncId() || (t && !t.checked)) return;
+    const personalSyncActive = getSyncId() && t && t.checked;
+    const groupSyncActive = !!getGroupName();
+    // Loop abbrechen, wenn weder Personal noch Group Sync an sind
+    if (!personalSyncActive && !groupSyncActive) return;
     const now = Date.now();
     const idleTime = now - syncLastActivityTime;
+
     if (idleTime < 60000) {
         // Phase 1: Aktiv (Letzte Aktivität vor < 60 Sekunden) -> Alle 10s
-        silentSyncLoad();
-        if(getGroupName()) silentGroupSync();
+        if (personalSyncActive) silentSyncLoad();
+        if (groupSyncActive) silentGroupSync();
         syncLastFetchTime = now;
     } else if (idleTime < 180000) {
         // Phase 2: Halbschlaf (1 bis 3 Minuten) -> Alle 30s
         if (now - syncLastFetchTime >= 30000) {
-            silentSyncLoad();
-            if(getGroupName()) silentGroupSync();
+            if (personalSyncActive) silentSyncLoad();
+            if (groupSyncActive) silentGroupSync();
             syncLastFetchTime = now;
         }
     } else {
