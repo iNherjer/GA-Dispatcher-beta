@@ -575,6 +575,25 @@
         </div>
     </div>
 
+    <div class="api-settings" style="margin-top: 15px; padding-top: 15px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <label style="margin: 0;">👥 Crew Board (Multiplayer)</label>
+            <span id="groupStatus" style="font-size: 10px; color: #888;">Nicht verbunden</span>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+            <input type="text" id="groupNameInput" placeholder="Crew-Code (z.B. EDTK)" style="flex: 2; margin: 0; font-family: monospace;" autocomplete="off" spellcheck="false">
+            <input type="text" id="groupNickInput" placeholder="Rufname" style="flex: 2; margin: 0; font-family: monospace;" autocomplete="off" spellcheck="false">
+            <input type="text" id="groupPinInput" placeholder="PIN (Opt.)" maxlength="4" style="flex: 1; margin: 0; font-family: monospace; text-align: center;" autocomplete="off" spellcheck="false" data-1p-ignore>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn-preset" style="flex: 1; margin: 0; height: 42px; background: #333; color: #4da6ff;" onclick="joinGroup()">🤝 Beitreten / Update</button>
+            <button class="btn-preset" style="flex: 1; margin: 0; height: 42px; background: #332222; color: #ff4444; border-color: #552222;" onclick="leaveGroup()">🚪 Verlassen</button>
+        </div>
+        <div class="api-hint">
+            Teile Flüge und Notizen mit bis zu 10 Freunden in Echtzeit.
+        </div>
+    </div>
+
     <div class="theme-switch-wrapper" style="flex-direction: column; align-items: center; border-top: 2px dashed #444; margin-top: 30px; padding-top: 15px;">
         <div style="display: flex; justify-content: space-between; width: 150px; font-size: 10px; font-weight: bold; text-transform: uppercase;">
             <span id="lbl-classic" style="color: #888; cursor: pointer; text-shadow: 0 1px 2px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.9);" onclick="changeThemeFromSlider(0)">Modern</span>
@@ -597,7 +616,13 @@
 
 <div id="pinboardOverlay" class="pinboard-overlay">
     <div class="pinboard-header">
-        <span style="color: #fff; font-weight: bold; font-family: monospace;">AIRCRAFT STATUS LOG</span>
+        <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+            <span style="color: #fff; font-weight: bold; font-family: monospace;">AIRCRAFT STATUS LOG</span>
+            <div class="pb-tabs">
+                <button class="pb-tab active" id="tabPrivate" onclick="switchPinboardMode('private')">👤 Privat</button>
+                <button class="pb-tab" id="tabGroup" onclick="switchPinboardMode('group')">👥 Crew <span id="groupBadge" style="display:none; background:#ff4444; color:#fff; border-radius:50%; padding:1px 5px; font-size:10px; margin-left:4px; transform:translateY(-1px);">!</span></button>
+            </div>
+        </div>
         <div>
             <button class="pb-btn" style="background:#4da6ff; color:#fff; font-weight:bold; border:1px solid #222;" onclick="toggleTutorialNotes()">💡 Tipps an/aus</button>
             <button class="pb-btn" style="background:#f2c12e; color:#111; font-weight:bold; border:1px solid #222;" onclick="importMission()">📥 Code laden</button>
@@ -731,6 +756,18 @@
         document.body.appendChild(btn);
     });
 </script>
+
+<div id="pinModalOverlay" class="pin-modal-overlay">
+    <div class="pin-modal-box">
+        <h3 style="margin-top:0; color: #fff; margin-bottom: 8px; font-family: 'Arial', sans-serif;">📌 Flug anpinnen</h3>
+        <p style="color: #aaa; font-size: 13px; margin:0 0 20px 0;">Wohin möchtest du diesen Flug heften?</p>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+            <button class="btn-main" style="padding:12px; font-size:14px; text-transform:none;" onclick="executePin('private')">👤 An mein privates Brett</button>
+            <button class="btn-main" style="padding:12px; font-size:14px; text-transform:none; background:linear-gradient(to bottom, #4da6ff, #1a73e8);" id="btnPinGroup" onclick="executePin('group')">👥 An das Crew-Brett</button>
+            <button class="btn-preset" style="padding:12px; margin-top:5px;" onclick="closePinModal()">❌ Abbrechen</button>
+        </div>
+    </div>
+</div>
 
 </body>
 </html>
