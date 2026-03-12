@@ -3942,7 +3942,23 @@ async function fetchOpenAIPData() {
    ========================================================= */
 let vpElevationData = null;
 let vpWeatherData = null;
-let vpProfileTimeout = null;
+let vpProfileFastTimeout = null;
+let vpProfileSlowTimeout = null;
+let globalCities = null;
+
+async function loadGlobalCities() {
+    if (globalCities) return;
+    if (typeof window.GLOBAL_CITIES_DATA !== 'undefined') {
+        globalCities = window.GLOBAL_CITIES_DATA;
+        return;
+    }
+    try {
+        const res = await fetch('./cities.json');
+        if (res.ok) globalCities = await res.json();
+        else globalCities = []; 
+    } catch (e) { globalCities = []; }
+}
+
 let vpZoomLevel = 100; // 100 = full route, 10 = 10% view
 let vpHighResData = null; // Higher resolution elevation data for zoom
 let vpElevationCache = {}; // Cache to prevent API rate limits (HTTP 429)
@@ -3960,7 +3976,7 @@ async function fetchProfileLandmarks(elevData) {
     });
     minL -= 0.1; maxL += 0.1; minLo -= 0.15; maxLo += 0.15;
     let landmarks = [];
-    // 1. Flugplätze (Höchste Priorität)
+    
     await loadGlobalAirports();
     for(let k in globalAirports) {
         let a = globalAirports[k];
@@ -3973,85 +3989,74 @@ async function fetchProfileLandmarks(elevData) {
             if (bestD < 3.5) landmarks.push({ name: a.icao, type: 'apt', pop: 100000000, distNM: bestDistNM });
         }
     }
-    // 2. Städte & Dörfer via Overpass (mit Fallback & 429 Schutz)
-    try {
-        let query = `[out:json][timeout:8];(node["place"="city"](${minL.toFixed(4)},${minLo.toFixed(4)},${maxL.toFixed(4)},${maxLo.toFixed(4)});node["place"="town"](${minL.toFixed(4)},${minLo.toFixed(4)},${maxL.toFixed(4)},${maxLo.toFixed(4)}););out;`;
-        let url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-        let res = await fetch(url);
-
-        // Fallback, falls der Hauptserver uns wegen 429 blockt
-        if (!res.ok) {
-            url = `https://lz4.overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-            res = await fetch(url);
-        }
-
-        if (!res.ok) throw new Error("Overpass HTTP " + res.status);
-
-        let json = await res.json();
-        if(json.elements) {
-            json.elements.forEach(e => {
-                if (!e.lat || !e.lon) return;
-                let pop = parseInt(e.tags.population) || (e.tags.place === 'city' ? 50000 : 10000);
+    
+    await loadGlobalCities();
+    if (globalCities && globalCities.length > 0) {
+        globalCities.forEach(c => {
+            if (c.lat > minL && c.lat < maxL && c.lon > minLo && c.lon < maxLo) {
                 let bestD = Infinity, bestDistNM = 0;
                 elevData.forEach(ep => {
-                    let d = calcNav(e.lat, e.lon, ep.lat, ep.lon).dist;
+                    let d = calcNav(c.lat, c.lon, ep.lat, ep.lon).dist;
                     if(d < bestD) { bestD = d; bestDistNM = ep.distNM; }
                 });
-                if (bestD < 3.5) landmarks.push({ name: e.tags.name, type: e.tags.place, pop: pop, distNM: bestDistNM });
-            });
-        }
-    } catch(e) { console.warn("Landmark Fetch Error:", e.message); }
-    console.log("🏙️ Landmarks geladen:", landmarks.length, "Stück.");
-    // Sortieren: Groß nach Klein. Größere Städte werden zuerst gezeichnet und blockieren den Platz für kleine.
+                if (bestD < 3.5) {
+                    let cType = c.pop >= 15000 ? 'city' : 'town';
+                    landmarks.push({ name: c.name, type: cType, pop: c.pop || 5000, distNM: bestDistNM });
+                }
+            }
+        });
+    }
     return landmarks.sort((a,b) => b.pop - a.pop);
 }
 
 async function fetchProfileObstacles(elevData) {
     if (!elevData || elevData.length < 2) return [];
-    let minL = 90, maxL = -90, minLo = 180, maxLo = -180;
-    elevData.forEach(p => {
-        if(p.lat < minL) minL = p.lat; if(p.lat > maxL) maxL = p.lat;
-        if(p.lon < minLo) minLo = p.lon; if(p.lon > maxLo) maxLo = p.lon;
-    });
-    // Etwas engerer Suchradius als bei Städten, um Datenmenge zu schonen
-    minL -= 0.06; maxL += 0.06; minLo -= 0.1; maxLo += 0.1;
+    const totalDist = elevData[elevData.length - 1].distNM;
+    const searchNodes = [];
+    for (let d = 0; d <= totalDist; d += 5) {
+        let pt = elevData.find(p => p.distNM >= d) || elevData[elevData.length - 1];
+        searchNodes.push(`node["generator:source"="wind"](around:4000,${pt.lat.toFixed(4)},${pt.lon.toFixed(4)});node["man_made"~"mast|tower"]["height"](around:4000,${pt.lat.toFixed(4)},${pt.lon.toFixed(4)});`);
+    }
+    
     let rawObstacles = [];
-    try {
-        let query = `[out:json][timeout:10];(node["generator:source"="wind"](${minL.toFixed(4)},${minLo.toFixed(4)},${maxL.toFixed(4)},${maxLo.toFixed(4)});node["man_made"~"mast|tower"]["height"](${minL.toFixed(4)},${minLo.toFixed(4)},${maxL.toFixed(4)},${maxLo.toFixed(4)}););out;`;
-        let url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-        let res = await fetch(url);
+    const chunks = [];
+    for (let i = 0; i < searchNodes.length; i += 40) {
+        chunks.push(searchNodes.slice(i, i + 40).join(''));
+    }
 
-        if (!res.ok) {
-            url = `https://lz4.overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-            res = await fetch(url);
-        }
-        if (!res.ok) throw new Error("Overpass HTTP " + res.status);
+    for (const chunk of chunks) {
+        let query = `[out:json][timeout:15];(${chunk});out;`;
+        try {
+            let url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+            let res = await fetch(url);
+            if (!res.ok) {
+                url = `https://lz4.overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+                res = await fetch(url);
+            }
+            if (!res.ok) continue;
 
-        let json = await res.json();
-        if(json.elements) {
-            json.elements.forEach(e => {
-                if (!e.lat || !e.lon) return;
-
-                // Höhe extrahieren (Meter -> Feet). Default Windrad: 120m (400ft). Default Mast: 50m (160ft)
-                let isWind = e.tags["generator:source"] === "wind";
-                let hStr = e.tags.height;
-                let hMeter = hStr ? parseFloat(hStr.replace(',', '.')) : (isWind ? 120 : 50);
-                if (isNaN(hMeter) || hMeter < 30) return; // Unter 30m ignorieren wir
-                let hFt = Math.round(hMeter * 3.28084);
-                let bestD = Infinity, bestDistNM = 0, baseElevFt = 0;
-                elevData.forEach(ep => {
-                    let d = calcNav(e.lat, e.lon, ep.lat, ep.lon).dist;
-                    if(d < bestD) { bestD = d; bestDistNM = ep.distNM; baseElevFt = ep.elevFt; }
+            let json = await res.json();
+            if(json.elements) {
+                json.elements.forEach(e => {
+                    if (!e.lat || !e.lon) return;
+                    let isWind = e.tags["generator:source"] === "wind";
+                    let hStr = e.tags.height;
+                    let hMeter = hStr ? parseFloat(hStr.replace(',', '.')) : (isWind ? 120 : 50);
+                    if (isNaN(hMeter) || hMeter < 30) return;
+                    let hFt = Math.round(hMeter * 3.28084);
+                    let bestD = Infinity, bestDistNM = 0, baseElevFt = 0;
+                    elevData.forEach(ep => {
+                        let d = calcNav(e.lat, e.lon, ep.lat, ep.lon).dist;
+                        if(d < bestD) { bestD = d; bestDistNM = ep.distNM; baseElevFt = ep.elevFt; }
+                    });
+                    if (bestD < 2.0) {
+                        rawObstacles.push({ type: isWind ? 'wind' : 'mast', hFt: hFt, distNM: bestDistNM, elevFt: baseElevFt });
+                    }
                 });
+            }
+        } catch(e) { console.warn("Obstacles Chunk Error:", e.message); }
+    }
 
-                // Nur Hindernisse näher als 2 NM zur direkten Fluglinie
-                if (bestD < 2.0) {
-                    rawObstacles.push({ type: isWind ? 'wind' : 'mast', hFt: hFt, distNM: bestDistNM, elevFt: baseElevFt });
-                }
-            });
-        }
-    } catch(e) { console.warn("Obstacles Fetch Error:", e.message); }
-    // Clustering: Gruppiere in 0.5 NM "Eimer" (Windparks zusammenfassen)
     let buckets = {};
     rawObstacles.forEach(obs => {
         let bIdx = Math.floor(obs.distNM / 0.5);
@@ -4061,68 +4066,91 @@ async function fetchProfileObstacles(elevData) {
     let finalObs = [];
     for (let k in buckets) {
         let group = buckets[k];
-        group.sort((a,b) => b.hFt - a.hFt); // Das höchste Hindernis der Gruppe gewinnt
+        group.sort((a,b) => b.hFt - a.hFt);
         let rep = group[0];
-        rep.count = group.length; // Merken, wie viele es hier gibt (für Windparks)
+        rep.count = group.length;
         finalObs.push(rep);
     }
-    console.log("🗼 Obstacles geladen & geclustert:", finalObs.length, "Stück.");
     return finalObs;
 }
 
 function triggerVerticalProfileUpdate() {
-    if (vpProfileTimeout) clearTimeout(vpProfileTimeout);
-    // SOFORT pulsieren, um dem User zu zeigen, dass Änderungen registriert wurden
+    if (vpProfileFastTimeout) clearTimeout(vpProfileFastTimeout);
+    if (vpProfileSlowTimeout) clearTimeout(vpProfileSlowTimeout);
+
     ['btnToggleClouds', 'btnToggleLandmarks', 'btnToggleObstacles'].forEach(id => {
         const b = document.getElementById(id); if(b) b.classList.add('vp-loading-pulse');
     });
-    vpProfileTimeout = setTimeout(async () => {
+
+    vpProfileFastTimeout = setTimeout(async () => {
         if (!routeWaypoints || routeWaypoints.length < 2) return;
         const cacheKey = routeWaypoints.map(p => `${(p.lat || 0).toFixed(4)},${((p.lng || p.lon) || 0).toFixed(4)}`).join('|');
+        
         if (window._lastVpRouteKey !== cacheKey) {
             vpAltWaypoints = []; vpSegmentAlts = []; vpHighResData = null; vpZoomLevel = 100;
             const zd = document.getElementById('vpZoomDisplay'); if (zd) zd.textContent = '0%';
             window._lastVpRouteKey = cacheKey;
         }
+
         const page5 = document.getElementById('notePage5');
         if (page5) page5.style.display = '';
         const status = document.getElementById('verticalProfileStatus');
-        if (status) status.textContent = 'Lade Höhendaten...';
+        if (status) status.textContent = 'Lade Terrain & Orte...';
+
         try {
             vpElevationData = await fetchRouteElevation(routeWaypoints);
-            if (status) status.textContent = 'Lade Wetterlage...';
+            
+            if (window._lastLandmarkRouteKey !== cacheKey) {
+                const lmStr = localStorage.getItem('ga_lms_' + cacheKey);
+                if (lmStr) {
+                    try { vpLandmarks = JSON.parse(lmStr); } catch(e) { vpLandmarks = []; }
+                } else {
+                    vpLandmarks = await fetchProfileLandmarks(vpElevationData);
+                    try { localStorage.setItem('ga_lms_' + cacheKey, JSON.stringify(vpLandmarks)); } catch(e) {}
+                }
+            }
+            
+            if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+            if (typeof renderMapProfile === 'function' && document.getElementById('mapTableOverlay').classList.contains('active')) renderMapProfile();
+            
+        } catch(e) {
+            console.error('Fast Profile Error:', e);
+        }
+    }, 500);
+
+    vpProfileSlowTimeout = setTimeout(async () => {
+        if (!routeWaypoints || routeWaypoints.length < 2) return;
+        const cacheKey = window._lastVpRouteKey;
+        const status = document.getElementById('verticalProfileStatus');
+        if (status) status.textContent = 'Lade Wetter & Hindernisse...';
+
+        try {
+            if (!vpElevationData) return; 
+
             vpWeatherData = await fetchRouteWeather(routeWaypoints, vpElevationData);
 
             if (window._lastLandmarkRouteKey !== cacheKey) {
-                window._lastLandmarkRouteKey = cacheKey;
-                const lmStr = localStorage.getItem('ga_lms_' + cacheKey);
+                window._lastLandmarkRouteKey = cacheKey; 
                 const obStr = localStorage.getItem('ga_obs_' + cacheKey);
-
-                if (lmStr && obStr) {
-                    try { vpLandmarks = JSON.parse(lmStr); vpObstacles = JSON.parse(obStr); } catch(e) {}
+                if (obStr) {
+                    try { vpObstacles = JSON.parse(obStr); } catch(e) { vpObstacles = []; }
                 } else {
-                    vpLandmarks = []; vpObstacles = [];
-                    const [lms, obs] = await Promise.all([fetchProfileLandmarks(vpElevationData), fetchProfileObstacles(vpElevationData)]);
-                    vpLandmarks = lms; vpObstacles = obs;
-                    try {
-                        localStorage.setItem('ga_lms_' + cacheKey, JSON.stringify(lms));
-                        localStorage.setItem('ga_obs_' + cacheKey, JSON.stringify(obs));
-                    } catch(e) {}
+                    vpObstacles = await fetchProfileObstacles(vpElevationData);
+                    try { localStorage.setItem('ga_obs_' + cacheKey, JSON.stringify(vpObstacles)); } catch(e) {}
                 }
             }
-            if (status) status.textContent = vpElevationData.length + ' Höhenpunkte & Wetter geladen';
-        } catch (e) {
-            console.error('Vertical Profile Error:', e);
-            if (status) status.textContent = 'Limit API/Fehler';
+            if (status) status.textContent = vpElevationData.length + ' Punkte & API-Daten geladen';
+        } catch(e) {
+            console.error('Slow Profile Error:', e);
+            if (status) status.textContent = 'API Limit erreicht';
         } finally {
-            // Fertig geladen -> Pulsieren stoppen
             ['btnToggleClouds', 'btnToggleLandmarks', 'btnToggleObstacles'].forEach(id => {
                 const b = document.getElementById(id); if(b) b.classList.remove('vp-loading-pulse');
             });
             if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
             if (typeof renderMapProfile === 'function' && document.getElementById('mapTableOverlay').classList.contains('active')) renderMapProfile();
         }
-    }, 3000);
+    }, 2800);
 }
 
 async function fetchRouteElevation(routePts) {
