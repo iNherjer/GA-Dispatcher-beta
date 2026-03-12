@@ -394,6 +394,7 @@ let map, polyline, markers = [], currentStartICAO, currentDestICAO, currentMissi
 let currentDepFreq = "";
 let currentDestFreq = "";
 let globalAirports = null, runwayCache = {}, freqCache = {};
+window.drumCache = {};
 
 /* =========================================================
    PWA UPDATE TRIGGER & SOFT AUTO SYNC EVENTS
@@ -566,6 +567,7 @@ window.onload = () => {
     const savedTheme = localStorage.getItem('ga_theme') || 'retro';
     setTheme(savedTheme);
     applySavedPanelTheme();
+    setTimeout(() => { loadGlobalAirports(); }, 2000);
 
     const lastDest = localStorage.getItem('last_icao_dest');
     if (lastDest) document.getElementById('startLoc').value = lastDest;
@@ -643,6 +645,14 @@ function saveAiToggle() { const t = document.getElementById('aiToggle'); if (t) 
 /* =========================================================
    3. PERSISTENZ (SPEICHERN, LADEN & RESET)
    ========================================================= */
+let saveMissionTimeout = null;
+window.debouncedSaveMissionState = function() {
+    if (saveMissionTimeout) clearTimeout(saveMissionTimeout);
+    saveMissionTimeout = setTimeout(() => {
+        saveMissionState();
+    }, 800);
+};
+
 function saveMissionState() {
     if (document.getElementById("briefingBox").style.display !== "block") return;
 
@@ -846,26 +856,74 @@ function resetApp() {
 function setDrumCounter(elementId, valueStr) {
     const container = document.getElementById(elementId);
     if (!container) return;
+
     if (!document.body.classList.contains('theme-retro')) {
-        container.innerHTML = `<span class="theme-color-text" style="font-weight:bold;">${valueStr}</span>`;
-        updateDynamicColors(); return;
+        if (container.dataset.lastVal !== valueStr.toString()) {
+            let span = container.querySelector('span');
+            if (!span) {
+                container.innerHTML = `<span class="theme-color-text" style="font-weight:bold;">${valueStr}</span>`;
+                updateDynamicColors(); // Nur einmalig beim Erstellen formatieren!
+            } else {
+                span.textContent = valueStr;
+            }
+            container.dataset.lastVal = valueStr.toString();
+        }
+        return;
     }
+
     let numericValue = valueStr.toString().replace(/[^0-9]/g, '');
     if (numericValue === "") numericValue = "0";
-    const digits = numericValue.split(''), digitHeight = 22;
-    let windowEl = container.querySelector('.drum-window');
-    if (!windowEl) { container.innerHTML = '<div class="drum-window"></div>'; windowEl = container.querySelector('.drum-window'); }
-    const existingStrips = windowEl.querySelectorAll('.drum-strip'), neededStrips = digits.length;
-    if (existingStrips.length < neededStrips) {
-        for (let i = 0; i < (neededStrips - existingStrips.length); i++) {
-            const strip = document.createElement('div'); strip.className = 'drum-strip';
-            strip.innerHTML = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => `<div class="drum-digit">${d}</div>`).join('');
-            windowEl.appendChild(strip);
+    const digits = numericValue.split('');
+    const digitHeight = 22;
+
+    let cache = window.drumCache[elementId];
+    
+    // Wenn Element nicht im Cache ist oder der Container geleert wurde: Neu aufbauen
+    if (!cache || !cache.windowEl || !container.contains(cache.windowEl)) {
+        container.innerHTML = '<div class="drum-window"></div>';
+        cache = {
+            windowEl: container.querySelector('.drum-window'),
+            strips: []
+        };
+        window.drumCache[elementId] = cache;
+    }
+
+    const neededStrips = digits.length;
+
+    // Fehlende Streifen hinzufügen
+    while (cache.strips.length < neededStrips) {
+        const strip = document.createElement('div');
+        strip.className = 'drum-strip';
+        strip.innerHTML = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => `<div class="drum-digit">${d}</div>`).join('');
+        cache.windowEl.appendChild(strip);
+        cache.strips.push(strip);
+    }
+
+    // Überschüssige Streifen entfernen
+    while (cache.strips.length > neededStrips) {
+        const strip = cache.strips.pop();
+        cache.windowEl.removeChild(strip);
+    }
+
+    // Werte (CSS Transform) aktualisieren
+    digits.forEach((digit, index) => {
+        const translateY = -(parseInt(digit) * digitHeight);
+        const transformStr = `translateY(${translateY}px)`;
+        if (cache.strips[index].style.transform !== transformStr) {
+            cache.strips[index].style.transform = transformStr;
         }
-    } else if (existingStrips.length > neededStrips) { for (let i = neededStrips; i < existingStrips.length; i++) { windowEl.removeChild(existingStrips[i]); } }
-    const finalStrips = windowEl.querySelectorAll('.drum-strip');
-    digits.forEach((digit, index) => { const translateY = -(parseInt(digit) * digitHeight); finalStrips[index].style.transform = `translateY(${translateY}px)`; });
+    });
 }
+let vpRenderPending = false;
+window.throttledRenderProfiles = function() {
+    if (vpRenderPending) return;
+    vpRenderPending = true;
+    requestAnimationFrame(() => {
+        if (typeof renderMapProfile === 'function') renderMapProfile();
+        if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+        vpRenderPending = false;
+    });
+};
 
 function handleSliderChange(type, val) {
     let drumVal = val;
@@ -882,8 +940,7 @@ function handleSliderChange(type, val) {
         if (mInp && mInp.innerText != val) mInp.innerText = val;
 
         // Direkter Render-Aufruf! KEIN 3-Sekunden triggerVerticalProfileUpdate() mehr!
-        if (typeof renderVerticalProfile === 'function') renderVerticalProfile('verticalProfileCanvas');
-        if (typeof renderMapProfile === 'function') renderMapProfile();
+        if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
         // Lufträume nur prüfen, wenn wir nicht gerade aktiv ziehen
         if (!window.vpUIInteractionActive && typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
     }
@@ -908,8 +965,7 @@ function handleRateChange(val) {
         if (altRadioDisplay) altRadioDisplay.textContent = val;
     }
     // Re-render profiles
-    if (typeof renderMapProfile === 'function') renderMapProfile();
-    if (typeof renderVerticalProfile === 'function') renderVerticalProfile('verticalProfileCanvas');
+    if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
     if (!window.vpUIInteractionActive && typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
 }
 
@@ -918,7 +974,7 @@ function recalculatePerformance() {
     const tas = parseInt(document.getElementById("tasSlider").value), gph = parseInt(document.getElementById("gphSlider").value), dist = currentMissionData.dist;
     setDrumCounter('timeDrum', Math.round((dist / tas) * 60)); setDrumCounter('fuelDrum', Math.ceil((dist / tas * gph) + (0.75 * gph)));
     if (gpsState.visible && gpsState.mode === 'FPL') renderGPS();
-    setTimeout(() => saveMissionState(), 500);
+    window.debouncedSaveMissionState();
 }
 
 function refreshAllDrums() {
@@ -1200,7 +1256,7 @@ function getDestinationPoint(lat, lon, distNM, bearing) {
    ========================================================= */
 async function loadGlobalAirports() {
     if (globalAirports) return;
-    try { const res = await fetch('https://raw.githubusercontent.com/mwgg/Airports/master/airports.json'); globalAirports = await res.json(); } catch (e) { globalAirports = {}; }
+    try { const res = await fetch('./airports.json'); globalAirports = await res.json(); } catch (e) { globalAirports = {}; }
 }
 
 async function getAirportData(icao) {
@@ -1815,9 +1871,8 @@ function toggleAirspaceHighlight(idx) {
 function getAirspaceDisplayName(a) {
     const style = getAirspaceStyle(a);
     let name = a.name || 'Unbekannt';
-    // Entferne überflüssige Begriffe wie "TMA", "CTR" und freistehende Klassen-Buchstaben (wie "C" oder "D") aus dem Roh-Namen
+    // Entferne überflüssige Begriffe, ABER behalte die Klassen-Buchstaben (wie C oder D) bei!
     name = name.replace(/\b(TMA|CTR|CTA|TMZ|RMZ|FIS)\b/ig, '');
-    name = name.replace(/\b[A-G]\b/g, '');
     return `${name.trim()} [${style.category}]`;
 }
 
@@ -1841,7 +1896,6 @@ function getAirspaceFreqInfo(a) {
             return `<span style="color:#9966ff; font-weight:bold; font-size:10px;">📻 ${primary.name || 'XPDR'}: ${primary.value}</span>`;
         }
     }
-
     // For RMZ (type 6 or 28) and FIS (type 33): show freq
     if ([6, 28, 33].includes(t)) {
         const primary = a.frequencies.find(f => f.primary) || a.frequencies[0];
@@ -1857,16 +1911,24 @@ function getAirspaceStyle(a) {
     const t = a.type;
     const classLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
     const cls = (a.icaoClass !== undefined && classLetters[a.icaoClass]) ? '-' + classLetters[a.icaoClass] : '';
+    
     if (t === 1) return { color: '#ff3333', icon: '⛔', mapColor: '#ff3333', category: 'ED-R / Restricted' };
     if (t === 2) return { color: '#ff6600', icon: '⛔', mapColor: '#ff6600', category: 'Danger' };
     if (t === 3) return { color: '#cc0000', icon: '🚫', mapColor: '#cc0000', category: 'Prohibited' };
+    
+    // CTRs (Kontrollzonen am Boden) bleiben gelb
     if (t === 4) return { color: '#f2c12e', icon: '⚠️', mapColor: '#f2c12e', category: `CTR${cls}` };
+    
+    // Class C und D (die keine CTR sind) als eigenständige Lufträume hervorheben (Blautöne)
+    if (a.icaoClass === 2) return { color: '#0055ff', icon: '⚠️', mapColor: '#0055ff', category: 'Class C' };
+    if (a.icaoClass === 3) return { color: '#1a73e8', icon: '⚠️', mapColor: '#1a73e8', category: 'Class D' };
+
     if (t === 7) return { color: '#4da6ff', icon: '⚠️', mapColor: '#4da6ff', category: `TMA${cls}` };
     if (t === 26) return { color: '#4da6ff', icon: '⚠️', mapColor: '#4da6ff', category: `CTA${cls}` };
     if (t === 5 || t === 27) return { color: '#9966ff', icon: '📡', mapColor: '#9966ff', category: 'TMZ' };
     if (t === 6 || t === 28) return { color: '#66cccc', icon: '📡', mapColor: '#66cccc', category: 'RMZ' };
-    if (t === 0 && a.icaoClass === 3) return { color: '#f2c12e', icon: '⚠️', mapColor: '#dda820', category: 'CTR-D (HX)' };
     if (t === 33) return { color: '#888', icon: '🌐', mapColor: '#888', category: 'FIS' };
+    
     return { color: '#aaa', icon: '📋', mapColor: '#aaa', category: `Type ${t}` };
 }
 
@@ -1974,8 +2036,8 @@ async function fetchRouteAirspaces(routePts) {
         for (const as of airspaces) {
             if (addedIds.has(as._id)) continue;
             if (!relevantTypes.has(as.type)) continue;
-            // Type 0: only include CTR sectors (icaoClass 3)
-            if (as.type === 0 && as.icaoClass !== 3) continue;
+            // Type 0: Class C (2) und Class D (3) explizit zulassen
+            if (as.type === 0 && as.icaoClass !== 2 && as.icaoClass !== 3) continue;
 
             let hits = false;
             if (as.geometry && as.geometry.type === 'Polygon') {
@@ -1999,7 +2061,8 @@ async function fetchRouteAirspaces(routePts) {
         // Keep type 4, but inherit frequencies from the duplicate if type 4 has none
         const byName = new Map();
         for (const as of intersecting) {
-            const key = as.name || as._id;
+            // ICAO Klasse in den Key aufnehmen, damit Class D nicht von gleichnamigen CTRs überschrieben wird
+            const key = (as.name || as._id) + '_' + (as.icaoClass || as.type);
             if (!byName.has(key)) {
                 byName.set(key, as);
             } else {
@@ -2372,7 +2435,7 @@ async function generateMission() {
         else if (dataSource === "Gemini 2.5 Flash Lite") document.getElementById('mkM').classList.add('on');
         else document.getElementById('mkI').classList.add('on');
 
-        setTimeout(() => saveMissionState(), 1000);
+        window.debouncedSaveMissionState();
         refreshGPSAfterDispatch();
         // Position im Profil auf Start zurücksetzen
         vpUpdatePosition(0);
@@ -2438,21 +2501,36 @@ function resetMainRoute() {
 
 function renderMainRoute() {
     if (!map) initMapBase();
-    routeMarkers.forEach(m => map.removeLayer(m)); if (polyline) map.removeLayer(polyline); if (window.hitBoxPolyline) map.removeLayer(window.hitBoxPolyline); routeMarkers = [];
-    if (routeWaypoints.length === 0) return;
+    routeMarkers.forEach(m => map.removeLayer(m));
+    routeMarkers = [];
 
-    polyline = L.polyline(routeWaypoints, { color: '#ff4444', weight: 8, dashArray: '10,10', interactive: false }).addTo(map);
-    window.hitBoxPolyline = L.polyline(routeWaypoints, { color: 'transparent', weight: 45, opacity: 0, className: 'interactive-route' }).addTo(map);
+    if (routeWaypoints.length === 0) {
+        if (polyline) { map.removeLayer(polyline); polyline = null; }
+        if (window.hitBoxPolyline) { map.removeLayer(window.hitBoxPolyline); window.hitBoxPolyline = null; }
+        return;
+    }
 
-    window.hitBoxPolyline.on('click', function (e) {
-        let bestIndex = 1, minDiff = Infinity;
-        for (let i = 0; i < routeWaypoints.length - 1; i++) {
-            let p1 = L.latLng(routeWaypoints[i].lat, routeWaypoints[i].lng || routeWaypoints[i].lon), p2 = L.latLng(routeWaypoints[i + 1].lat, routeWaypoints[i + 1].lng || routeWaypoints[i + 1].lon);
-            let d1 = map.distance(p1, e.latlng), d2 = map.distance(e.latlng, p2), d = map.distance(p1, p2), diff = d1 + d2 - d;
-            if (diff < minDiff) { minDiff = diff; bestIndex = i + 1; }
-        }
-        routeWaypoints.splice(bestIndex, 0, e.latlng); renderMainRoute();
-    });
+    if (!polyline) {
+        polyline = L.polyline(routeWaypoints, { color: '#ff4444', weight: 8, dashArray: '10,10', interactive: false }).addTo(map);
+    } else {
+        polyline.setLatLngs(routeWaypoints);
+    }
+
+    if (!window.hitBoxPolyline) {
+        window.hitBoxPolyline = L.polyline(routeWaypoints, { color: 'transparent', weight: 45, opacity: 0, className: 'interactive-route' }).addTo(map);
+        window.hitBoxPolyline.on('click', function (e) {
+            let bestIndex = 1, minDiff = Infinity;
+            for (let i = 0; i < routeWaypoints.length - 1; i++) {
+                let p1 = L.latLng(routeWaypoints[i].lat, routeWaypoints[i].lng || routeWaypoints[i].lon);
+                let p2 = L.latLng(routeWaypoints[i + 1].lat, routeWaypoints[i + 1].lng || routeWaypoints[i + 1].lon);
+                let d1 = map.distance(p1, e.latlng), d2 = map.distance(e.latlng, p2), d = map.distance(p1, p2), diff = d1 + d2 - d;
+                if (diff < minDiff) { minDiff = diff; bestIndex = i + 1; }
+            }
+            routeWaypoints.splice(bestIndex, 0, e.latlng); renderMainRoute();
+        });
+    } else {
+        window.hitBoxPolyline.setLatLngs(routeWaypoints);
+    }
 
     routeWaypoints.forEach((latlng, index) => {
         let isStart = (index === 0), isDest = (index === routeWaypoints.length - 1 && routeWaypoints.length > 1);
@@ -2643,7 +2721,7 @@ function updateRoutePerformance() {
     // Trigger Vertical Profile Update
     triggerVerticalProfileUpdate();
 
-    setTimeout(() => saveMissionState(), 500);
+    window.debouncedSaveMissionState();
     if (gpsState.visible && gpsState.mode === 'FPL') renderGPS();
 }
 
@@ -2817,8 +2895,11 @@ function updateMiniMap() {
         }
 
         if (routeWaypoints && routeWaypoints.length > 0) {
-            if (miniRoutePolyline) miniMap.removeLayer(miniRoutePolyline);
-            miniRoutePolyline = L.polyline(routeWaypoints, { color: '#d93829', weight: 4 }).addTo(miniMap);
+            if (!miniRoutePolyline) {
+                miniRoutePolyline = L.polyline(routeWaypoints, { color: '#d93829', weight: 4 }).addTo(miniMap);
+            } else {
+                miniRoutePolyline.setLatLngs(routeWaypoints);
+            }
             miniMapMarkers.forEach(m => miniMap.removeLayer(m)); miniMapMarkers = [];
 
             const startMarker = L.circleMarker(routeWaypoints[0], { radius: 5, color: '#111', weight: 2, fillColor: '#44ff44', fillOpacity: 1 }).addTo(miniMap);
@@ -4009,52 +4090,117 @@ async function fetchProfileLandmarks(elevData) {
     return landmarks.sort((a,b) => b.pop - a.pop);
 }
 
-async function fetchProfileObstacles(elevData) {
+async function fetchProfileObstacles(elevData, signal) {
     if (!elevData || elevData.length < 2) return [];
-    const totalDist = elevData[elevData.length - 1].distNM;
-    const searchNodes = [];
-    for (let d = 0; d <= totalDist; d += 5) {
-        let pt = elevData.find(p => p.distNM >= d) || elevData[elevData.length - 1];
-        searchNodes.push(`node["generator:source"="wind"](around:4000,${pt.lat.toFixed(4)},${pt.lon.toFixed(4)});node["man_made"~"mast|tower"]["height"](around:4000,${pt.lat.toFixed(4)},${pt.lon.toFixed(4)});`);
+
+    const bboxes = [];
+    let currentChunk = [];
+    let chunkStart = 0;
+    const CHUNK_NM = 25; // 25 NM Segmente
+
+    for (let i = 0; i < elevData.length; i++) {
+        currentChunk.push(elevData[i]);
+        if (elevData[i].distNM - chunkStart >= CHUNK_NM || i === elevData.length - 1) {
+            let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+            currentChunk.forEach(p => {
+                if (p.lat < minLat) minLat = p.lat;
+                if (p.lat > maxLat) maxLat = p.lat;
+                if (p.lon < minLon) minLon = p.lon;
+                if (p.lon > maxLon) maxLon = p.lon;
+            });
+            bboxes.push(`${(minLat - 0.035).toFixed(4)},${(minLon - 0.05).toFixed(4)},${(maxLat + 0.035).toFixed(4)},${(maxLon + 0.05).toFixed(4)}`);
+            currentChunk = [elevData[i]]; 
+            chunkStart = elevData[i].distNM;
+        }
     }
-    
+
+    const BATCH_SIZE = 4;
     let rawObstacles = [];
-    const chunks = [];
-    for (let i = 0; i < searchNodes.length; i += 40) {
-        chunks.push(searchNodes.slice(i, i + 40).join(''));
-    }
+    let anySuccess = false;
 
-    for (const chunk of chunks) {
-        let query = `[out:json][timeout:15];(${chunk});out;`;
-        try {
-            let url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-            let res = await fetch(url);
-            if (!res.ok) {
-                url = `https://lz4.overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-                res = await fetch(url);
-            }
-            if (!res.ok) continue;
+    console.log(`[Overpass] Starte Hindernis-Suche. ${bboxes.length} Boxen total. Teile in Batches von ${BATCH_SIZE}.`);
 
-            let json = await res.json();
-            if(json.elements) {
-                json.elements.forEach(e => {
-                    if (!e.lat || !e.lon) return;
-                    let isWind = e.tags["generator:source"] === "wind";
-                    let hStr = e.tags.height;
-                    let hMeter = hStr ? parseFloat(hStr.replace(',', '.')) : (isWind ? 120 : 50);
-                    if (isNaN(hMeter) || hMeter < 30) return;
-                    let hFt = Math.round(hMeter * 3.28084);
-                    let bestD = Infinity, bestDistNM = 0, baseElevFt = 0;
-                    elevData.forEach(ep => {
-                        let d = calcNav(e.lat, e.lon, ep.lat, ep.lon).dist;
-                        if(d < bestD) { bestD = d; bestDistNM = ep.distNM; baseElevFt = ep.elevFt; }
-                    });
-                    if (bestD < 2.0) {
-                        rawObstacles.push({ type: isWind ? 'wind' : 'mast', hFt: hFt, distNM: bestDistNM, elevFt: baseElevFt });
+    for (let i = 0; i < bboxes.length; i += BATCH_SIZE) {
+        const batch = bboxes.slice(i, i + BATCH_SIZE);
+        let queryBody = batch.map(b => `node["generator:source"="wind"](${b});node["man_made"~"mast|tower"]["height"](${b});`).join('');
+        let query = `[out:json][timeout:25];(${queryBody});out qt;`;
+
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(bboxes.length / BATCH_SIZE);
+        console.log(`[Overpass] Fetching Batch ${batchNum} / ${totalBatches}...`);
+
+        let retries = 2;
+        let batchSuccess = false;
+
+        while (retries > 0 && !batchSuccess) {
+            try {
+                if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+                // 1. Versuch: Hauptserver
+                let res = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`, { signal });
+                
+                // 2. Versuch: Wenn Hauptserver zickt (inkl. 429), sofort auf Fallback lz4 wechseln
+                if (!res.ok) {
+                    console.warn(`[Overpass] Hauptserver Fehler (Status: ${res.status}) bei Batch ${batchNum}. Versuche lz4 Fallback...`);
+                    res = await fetch(`https://lz4.overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`, { signal });
+                }
+
+                // 3. Auswertung
+                if (res.status === 429) {
+                    console.warn(`[Overpass] Beide Server blocken (429 Rate Limit) bei Batch ${batchNum}. Warte 2.5s...`);
+                    await new Promise(r => setTimeout(r, 2500));
+                    retries--;
+                    continue;
+                }
+
+                if (res.ok) {
+                    batchSuccess = true;
+                    let json = await res.json();
+                    console.log(`[Overpass] Batch ${batchNum} erfolgreich. ${json.elements ? json.elements.length : 0} Rohelemente.`);
+                    
+                    if (json.elements) {
+                        json.elements.forEach(e => {
+                            if (!e.lat || !e.lon) return;
+                            let isWind = e.tags && e.tags["generator:source"] === "wind";
+                            let hStr = e.tags && e.tags.height ? e.tags.height : null;
+                            let hMeter = hStr ? parseFloat(hStr.replace(',', '.')) : (isWind ? 120 : 50);
+                            if (isNaN(hMeter) || hMeter < 30) return;
+                            
+                            let hFt = Math.round(hMeter * 3.28084);
+                            let bestD = Infinity, bestDistNM = 0, baseElevFt = 0;
+                            elevData.forEach(ep => {
+                                let d = calcNav(e.lat, e.lon, ep.lat, ep.lon).dist;
+                                if (d < bestD) { bestD = d; bestDistNM = ep.distNM; baseElevFt = ep.elevFt; }
+                            });
+                            if (bestD < 2.0) rawObstacles.push({ type: isWind ? 'wind' : 'mast', hFt: hFt, distNM: bestDistNM, elevFt: baseElevFt });
+                        });
                     }
-                });
+                } else {
+                    console.warn(`[Overpass] Beide Server down für Batch ${batchNum}. Status: ${res.status}. Noch ${retries-1} Versuche.`);
+                    retries--;
+                    if (retries > 0) await new Promise(r => setTimeout(r, 2000));
+                }
+            } catch(e) {
+                if (e.name === 'AbortError') {
+                    console.log(`[Overpass] Abfrage abgebrochen (Route geändert).`);
+                    return null; 
+                }
+                console.warn(`[Overpass] Netzwerkfehler: ${e.message}. Noch ${retries-1} Versuche.`);
+                retries--;
+                if (retries > 0) await new Promise(r => setTimeout(r, 2000));
             }
-        } catch(e) { console.warn("Obstacles Chunk Error:", e.message); }
+        }
+
+        // Strikter Cache-Schutz: Wenn dieser Batch komplett gescheitert ist, sofort abbrechen!
+        if (!batchSuccess) {
+            console.error(`[Overpass] Batch ${batchNum} endgültig gescheitert. Breche ab, um unvollständigen Cache zu verhindern.`);
+            return null; // Gibt null zurück -> Profil rendert ohne, aber speichert nichts im Cache!
+        }
+
+        // Atempause für den Server zwischen erfolgreichen Batches (verhindert 429 im nächsten Loop)
+        if (i + BATCH_SIZE < bboxes.length) {
+            await new Promise(r => setTimeout(r, 1200)); // Pause auf 1200ms erhöht
+        }
     }
 
     let buckets = {};
@@ -4063,6 +4209,7 @@ async function fetchProfileObstacles(elevData) {
         if (!buckets[bIdx]) buckets[bIdx] = [];
         buckets[bIdx].push(obs);
     });
+    
     let finalObs = [];
     for (let k in buckets) {
         let group = buckets[k];
@@ -4071,6 +4218,8 @@ async function fetchProfileObstacles(elevData) {
         rep.count = group.length;
         finalObs.push(rep);
     }
+    
+    console.log(`[Overpass] Suche komplett. ${finalObs.length} Hindernis-Gruppen nach Filterung auf der Route.`);
     return finalObs;
 }
 
@@ -4078,9 +4227,9 @@ function triggerVerticalProfileUpdate() {
     if (vpProfileFastTimeout) clearTimeout(vpProfileFastTimeout);
     if (vpProfileSlowTimeout) clearTimeout(vpProfileSlowTimeout);
 
-    ['btnToggleClouds', 'btnToggleLandmarks', 'btnToggleObstacles'].forEach(id => {
-        const b = document.getElementById(id); if(b) b.classList.add('vp-loading-pulse');
-    });
+    if (window.vpFetchController) window.vpFetchController.abort();
+    window.vpFetchController = new AbortController();
+    const currentSignal = window.vpFetchController.signal;
 
     vpProfileFastTimeout = setTimeout(async () => {
         if (!routeWaypoints || routeWaypoints.length < 2) return;
@@ -4092,29 +4241,31 @@ function triggerVerticalProfileUpdate() {
             window._lastVpRouteKey = cacheKey;
         }
 
-        const page5 = document.getElementById('notePage5');
-        if (page5) page5.style.display = '';
         const status = document.getElementById('verticalProfileStatus');
         if (status) status.textContent = 'Lade Terrain & Orte...';
 
         try {
-            vpElevationData = await fetchRouteElevation(routeWaypoints);
+            vpElevationData = await fetchRouteElevation(routeWaypoints, currentSignal);
             
-            if (window._lastLandmarkRouteKey !== cacheKey) {
+            if (window._lastLmRouteKey !== cacheKey) {
+                const btnLm = document.getElementById('btnToggleLandmarks');
+                if (btnLm) btnLm.classList.add('vp-loading-pulse');
+
                 const lmStr = localStorage.getItem('ga_lms_' + cacheKey);
                 if (lmStr) {
-                    try { vpLandmarks = JSON.parse(lmStr); } catch(e) { vpLandmarks = []; }
+                    try { vpLandmarks = JSON.parse(lmStr); window._lastLmRouteKey = cacheKey; } catch(e) { vpLandmarks = []; }
                 } else {
                     vpLandmarks = await fetchProfileLandmarks(vpElevationData);
-                    try { localStorage.setItem('ga_lms_' + cacheKey, JSON.stringify(vpLandmarks)); } catch(e) {}
+                    if (vpLandmarks !== null) {
+                        try { localStorage.setItem('ga_lms_' + cacheKey, JSON.stringify(vpLandmarks)); window._lastLmRouteKey = cacheKey; } catch(e) {}
+                    }
                 }
+                if (btnLm) btnLm.classList.remove('vp-loading-pulse');
             }
             
-            if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
-            if (typeof renderMapProfile === 'function' && document.getElementById('mapTableOverlay').classList.contains('active')) renderMapProfile();
-            
+            if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
         } catch(e) {
-            console.error('Fast Profile Error:', e);
+            if (e && e.name !== 'AbortError') console.error('Fast Profile Error:', e);
         }
     }, 500);
 
@@ -4127,33 +4278,39 @@ function triggerVerticalProfileUpdate() {
         try {
             if (!vpElevationData) return; 
 
-            vpWeatherData = await fetchRouteWeather(routeWaypoints, vpElevationData);
+            const btnCl = document.getElementById('btnToggleClouds');
+            if (btnCl) btnCl.classList.add('vp-loading-pulse');
+            vpWeatherData = await fetchRouteWeather(routeWaypoints, vpElevationData, currentSignal);
+            if (btnCl) btnCl.classList.remove('vp-loading-pulse');
 
-            if (window._lastLandmarkRouteKey !== cacheKey) {
-                window._lastLandmarkRouteKey = cacheKey; 
+            if (window._lastObsRouteKey !== cacheKey) {
+                const btnOb = document.getElementById('btnToggleObstacles');
+                if (btnOb) btnOb.classList.add('vp-loading-pulse');
+
                 const obStr = localStorage.getItem('ga_obs_' + cacheKey);
                 if (obStr) {
-                    try { vpObstacles = JSON.parse(obStr); } catch(e) { vpObstacles = []; }
+                    try { vpObstacles = JSON.parse(obStr); window._lastObsRouteKey = cacheKey; } catch(e) { vpObstacles = []; }
                 } else {
-                    vpObstacles = await fetchProfileObstacles(vpElevationData);
-                    try { localStorage.setItem('ga_obs_' + cacheKey, JSON.stringify(vpObstacles)); } catch(e) {}
+                    vpObstacles = await fetchProfileObstacles(vpElevationData, currentSignal);
+                    if (vpObstacles !== null) { 
+                        try { localStorage.setItem('ga_obs_' + cacheKey, JSON.stringify(vpObstacles)); window._lastObsRouteKey = cacheKey; } catch(e) {}
+                    }
                 }
+                if (btnOb) btnOb.classList.remove('vp-loading-pulse');
             }
             if (status) status.textContent = vpElevationData.length + ' Punkte & API-Daten geladen';
         } catch(e) {
-            console.error('Slow Profile Error:', e);
+            if (e && e.name !== 'AbortError') console.error('Slow Profile Error:', e);
             if (status) status.textContent = 'API Limit erreicht';
         } finally {
-            ['btnToggleClouds', 'btnToggleLandmarks', 'btnToggleObstacles'].forEach(id => {
-                const b = document.getElementById(id); if(b) b.classList.remove('vp-loading-pulse');
-            });
-            if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
-            if (typeof renderMapProfile === 'function' && document.getElementById('mapTableOverlay').classList.contains('active')) renderMapProfile();
+            const bC = document.getElementById('btnToggleClouds'); if(bC) bC.classList.remove('vp-loading-pulse');
+            const bO = document.getElementById('btnToggleObstacles'); if(bO) bO.classList.remove('vp-loading-pulse');
+            if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
         }
     }, 2800);
 }
 
-async function fetchRouteElevation(routePts) {
+async function fetchRouteElevation(routePts, signal) {
     if (!routePts || routePts.length < 2) return [];
 
     // Generate a unique cache key based on route coordinates
@@ -4205,27 +4362,32 @@ async function fetchRouteElevation(routePts) {
     const lats = samplePts.map(p => p.lat.toFixed(4)).join(',');
     const lons = samplePts.map(p => p.lon.toFixed(4)).join(',');
 
-    const res = await fetch('https://api.open-meteo.com/v1/elevation?latitude=' + lats + '&longitude=' + lons);
-    if (!res.ok) throw new Error('Elevation API error: ' + res.status);
-    const data = await res.json();
+    try {
+        const res = await fetch('https://api.open-meteo.com/v1/elevation?latitude=' + lats + '&longitude=' + lons, { signal });
+        if (!res.ok) throw new Error('Elevation API error: ' + res.status);
+        const data = await res.json();
 
-    if (!data.elevation || data.elevation.length !== samplePts.length) {
-        throw new Error('Invalid elevation response');
+        if (!data.elevation || data.elevation.length !== samplePts.length) {
+            throw new Error('Invalid elevation response');
+        }
+
+        const finalData = samplePts.map((p, i) => ({
+            distNM: p.distNM,
+            elevFt: Math.round(data.elevation[i] * 3.28084),
+            lat: p.lat,
+            lon: p.lon
+        }));
+
+        vpElevationCache[cacheKey] = finalData;
+        try { localStorage.setItem('ga_elev_cache_' + cacheKey, JSON.stringify(finalData)); } catch (e) { }
+        return finalData;
+    } catch (e) {
+        if (e && e.name === 'AbortError') return null;
+        throw e;
     }
-
-    const finalData = samplePts.map((p, i) => ({
-        distNM: p.distNM,
-        elevFt: Math.round(data.elevation[i] * 3.28084),
-        lat: p.lat,
-        lon: p.lon
-    }));
-
-    vpElevationCache[cacheKey] = finalData;
-    try { localStorage.setItem('ga_elev_cache_' + cacheKey, JSON.stringify(finalData)); } catch (e) { }
-    return finalData;
 }
 
-async function fetchRouteWeather(routePts, elevData) {
+async function fetchRouteWeather(routePts, elevData, signal) {
     if (!routePts || routePts.length < 2 || !elevData || elevData.length < 2) return null;
     window._weatherCache = window._weatherCache || {};
     // Koordinaten als Key (sobald sich die Route ändert, verfällt der Cache)
@@ -4250,18 +4412,22 @@ async function fetchRouteWeather(routePts, elevData) {
         const minLon = Number((bestPt.lon - 0.6).toFixed(4));
         const maxLon = Number((bestPt.lon + 0.6).toFixed(4));
         const url = `https://aviationweather.gov/api/data/metar?bbox=${minLat},${minLon},${maxLat},${maxLon}&format=json&t=${Date.now()}`;
-        const p = fetch(url).then(async r => {
+        const p = fetch(url, { signal }).then(async r => {
             if (r.status === 204) return [];
             if (!r.ok) throw new Error("HTTP " + r.status);
             return JSON.parse(await r.text());
         }).catch(async e => {
+            if (e && e.name === 'AbortError') return null;
             try {
                 const proxyUrl = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`;
-                const pr = await fetch(proxyUrl);
+                const pr = await fetch(proxyUrl, { signal });
                 if (pr.status === 204) return [];
                 if (!pr.ok) throw new Error("Proxy Error");
                 return JSON.parse(await pr.text());
-            } catch(px) { return []; }
+            } catch(px) { 
+                if (px && px.name === 'AbortError') return null;
+                return []; 
+            }
         }).then(metars => ({ targetDist, bestPt, metars, index: i }));
         fetchPromises.push(p);
     }
@@ -5894,7 +6060,7 @@ function initAltWaypoints() {
             renderMapProfile();
             if (typeof renderVerticalProfile === 'function') renderVerticalProfile('verticalProfileCanvas');
             if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList(); // Erst beim Loslassen berechnen!
-            if (needsSave) setTimeout(() => saveMissionState(), 200);
+            if (needsSave) window.debouncedSaveMissionState();
         }
     }
 
@@ -5912,7 +6078,7 @@ function initAltWaypoints() {
         const m = vpGetCanvasMetrics();
         if (!m) return;
         const { mx, my } = vpClientToCanvas(e.clientX, e.clientY, m);
-        if (vpHandleDoubleHit(mx, my, m)) setTimeout(() => saveMissionState(), 200);
+        if (vpHandleDoubleHit(mx, my, m)) window.debouncedSaveMissionState();
     });
 
     // === CLICK: no more single-click creation ===
@@ -5991,7 +6157,7 @@ function initAltWaypoints() {
         const now = Date.now();
         if (now - lastTapTime < 300) {
             e.preventDefault();
-            if (vpHandleDoubleHit(mx, my, m)) setTimeout(() => saveMissionState(), 200);
+            if (vpHandleDoubleHit(mx, my, m)) window.debouncedSaveMissionState();
             lastTapTime = 0;
             return;
         }
@@ -6637,24 +6803,42 @@ function vpToggleClouds() {
     localStorage.setItem('ga_show_clouds', vpShowClouds);
     const btn = document.getElementById('btnToggleClouds');
     if (btn) btn.classList.toggle('active', vpShowClouds);
-    if (typeof renderMapProfile === 'function') renderMapProfile();
-    if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+    
+    if (vpShowClouds && window._lastVpRouteKey) {
+        triggerVerticalProfileUpdate();
+    } else if (typeof window.throttledRenderProfiles === 'function') {
+        window.throttledRenderProfiles();
+    }
 }
+
 function vpToggleLandmarks() {
     vpShowLandmarks = !vpShowLandmarks;
     localStorage.setItem('ga_show_landmarks', vpShowLandmarks);
     const btn = document.getElementById('btnToggleLandmarks');
     if (btn) btn.classList.toggle('active', vpShowLandmarks);
-    if (typeof renderMapProfile === 'function') renderMapProfile();
-    if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+    
+    if (vpShowLandmarks && window._lastVpRouteKey) {
+        localStorage.removeItem('ga_lms_' + window._lastVpRouteKey);
+        window._lastLmRouteKey = null; // Zwingt zum erneuten Fetch
+        triggerVerticalProfileUpdate();
+    } else if (typeof window.throttledRenderProfiles === 'function') {
+        window.throttledRenderProfiles();
+    }
 }
+
 function vpToggleObstacles() {
     vpShowObstacles = !vpShowObstacles;
     localStorage.setItem('ga_show_obstacles', vpShowObstacles);
     const btn = document.getElementById('btnToggleObstacles');
     if (btn) btn.classList.toggle('active', vpShowObstacles);
-    if (typeof renderMapProfile === 'function') renderMapProfile();
-    if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+    
+    if (vpShowObstacles && window._lastVpRouteKey) {
+        localStorage.removeItem('ga_obs_' + window._lastVpRouteKey);
+        window._lastObsRouteKey = null; // Zwingt zum erneuten Fetch
+        triggerVerticalProfileUpdate();
+    } else if (typeof window.throttledRenderProfiles === 'function') {
+        window.throttledRenderProfiles();
+    }
 }
 
 // === PROMPT-EINGABE für ALT / V/S (V57) ===
