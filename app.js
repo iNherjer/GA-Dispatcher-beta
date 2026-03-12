@@ -1,4 +1,45 @@
 /* =========================================================
+   GLOBAL HELPERS
+   ========================================================= */
+if (!document.getElementById('vp-pulse-style')) {
+    const style = document.createElement('style');
+    style.id = 'vp-pulse-style';
+    style.innerHTML = `@keyframes vpPulse { 0% {opacity:1; transform:scale(1);} 50% {opacity:0.4; transform:scale(0.85);} 100% {opacity:1; transform:scale(1);} } .vp-loading-pulse { animation: vpPulse 1.2s infinite; pointer-events: none; }`;
+    document.head.appendChild(style);
+}
+
+window.formatAsLimit = function(lim) {
+    if (!lim) return '?';
+    if (lim.referenceDatum === 0 && lim.value === 0) return 'GND';
+    if (lim.unit === 6) return `FL ${lim.value}`;
+    let u = lim.unit === 1 ? 'FT' : 'M';
+    let r = lim.referenceDatum === 1 ? ' MSL' : (lim.referenceDatum === 0 ? ' AGL' : '');
+    return `${lim.value} ${u}${r}`;
+};
+
+// V77: Globale Flag – true, solange der Nutzer irgendeinen Slider/Knob berührt
+window.vpUIInteractionActive = false;
+document.addEventListener('DOMContentLoaded', () => {
+    // Erkennt, wenn der Nutzer an einem klassischen Slider zieht
+    document.querySelectorAll('input[type="range"]').forEach(slider => {
+        slider.addEventListener('mousedown', () => window.vpUIInteractionActive = true);
+        slider.addEventListener('touchstart', () => window.vpUIInteractionActive = true, {passive: true});
+        const onEnd = () => {
+            window.vpUIInteractionActive = false;
+            if (slider.id === 'altSlider' || slider.id === 'rateSlider') {
+                if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+                if (typeof vpDrawClouds === 'function' && document.getElementById('verticalProfileCanvas')) {
+                    renderMapProfile(); renderVerticalProfile('verticalProfileCanvas');
+                }
+            }
+        };
+        slider.addEventListener('mouseup', onEnd);
+        slider.addEventListener('touchend', onEnd);
+        slider.addEventListener('touchcancel', onEnd); // Verhindert Einfrieren beim Scrollen
+    });
+});
+
+/* =========================================================
    1. THEME TOGGLE & NOTIZEN TOGGLE
    ========================================================= */
 function changeThemeFromSlider(val) {
@@ -131,8 +172,14 @@ function cycleRadioOption(selectId) {
 }
 
 function toggleNotes(event) {
-    // Wenn wir auf einen Link oder Button klicken, nichts tun
-    if (event && (event.target.tagName === 'A' || event.target.tagName === 'BUTTON')) return;
+    // Wenn wir auf einen Link, Button oder ein Pin-Icon klicken, umblättern hart blockieren
+    if (event && event.target && (
+        event.target.tagName === 'A' ||
+        event.target.tagName === 'BUTTON' ||
+        event.target.classList.contains('briefing-save-pin') ||
+        event.target.classList.contains('briefing-export-pin') ||
+        event.target.classList.contains('briefing-pdf-pin')
+    )) return;
 
     const pages = ['notePage1', 'notePage2', 'notePage3', 'notePage4', 'notePage5'].map(id => document.getElementById(id)).filter(Boolean);
     if (pages.length < 2) return;
@@ -425,10 +472,11 @@ function initDragKnob(knobId, displayId, sliderId, min, max, type) {
     let currentRotation = 0;
 
     function onStart(e) {
+        window.vpUIInteractionActive = true;
         isDragging = true;
         startY = e.touches ? e.touches[0].clientY : e.clientY;
         startX = e.touches ? e.touches[0].clientX : e.clientX;
-        // ALT knob in rate mode: use rate value
+
         if (type === 'alt' && navcomAltMode === 'rate') {
             startVal = vpClimbRate || 500;
         } else {
@@ -436,6 +484,12 @@ function initDragKnob(knobId, displayId, sliderId, min, max, type) {
         }
         document.body.style.cursor = 'ns-resize';
         e.preventDefault();
+        // Listener NUR WÄHREND des Drags aktivieren
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('mouseup', onEnd);
+        document.addEventListener('touchend', onEnd);
+        document.addEventListener('touchcancel', onEnd);
     }
 
     function onMove(e) {
@@ -443,7 +497,6 @@ function initDragKnob(knobId, displayId, sliderId, min, max, type) {
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
 
-        // ALT knob in rate mode: different range and sensitivity
         if (type === 'alt' && navcomAltMode === 'rate') {
             let delta = Math.round((startY - clientY) + (clientX - startX));
             delta = Math.round(delta * 3);
@@ -465,7 +518,6 @@ function initDragKnob(knobId, displayId, sliderId, min, max, type) {
         if (newVal < min) newVal = min;
         if (newVal > max) newVal = max;
 
-        // Snap to slider step
         const step = parseInt(slider.step) || 1;
         if (step > 1) newVal = Math.round(newVal / step) * step;
 
@@ -485,27 +537,32 @@ function initDragKnob(knobId, displayId, sliderId, min, max, type) {
     }
 
     function onEnd() {
+        if (!isDragging) return;
+        window.vpUIInteractionActive = false;
         isDragging = false;
         document.body.style.cursor = 'default';
         knob.style.transition = 'transform 0.3s ease';
         knob.style.transform = `rotate(0deg)`;
         setTimeout(() => knob.style.transition = '', 300);
+
+        if (type === 'alt' || (type === 'alt' && typeof navcomAltMode !== 'undefined' && navcomAltMode === 'rate')) {
+            if (typeof renderVerticalProfile === 'function') renderVerticalProfile('verticalProfileCanvas');
+            if (typeof renderMapProfile === 'function') renderMapProfile();
+            if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+        }
+        // Listener nach dem Drag wieder entfernen, um Konflikte zu vermeiden
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('mouseup', onEnd);
+        document.removeEventListener('touchend', onEnd);
+        document.removeEventListener('touchcancel', onEnd);
     }
 
     knob.addEventListener('mousedown', onStart);
     knob.addEventListener('touchstart', onStart, { passive: false });
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('touchmove', onMove, { passive: false });
-    document.addEventListener('mouseup', onEnd);
-    document.addEventListener('touchend', onEnd);
 }
 
 window.onload = () => {
-    // iOS 10+ ignoriert user-scalable=no im Viewport-Tag.
-    // Pinch-to-Zoom auf dem gesamten Dokument per JS sperren (passive:false erforderlich).
-    document.addEventListener('touchstart', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
-    document.addEventListener('touchmove',  e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
-
     const savedTheme = localStorage.getItem('ga_theme') || 'retro';
     setTheme(savedTheme);
     applySavedPanelTheme();
@@ -823,8 +880,12 @@ function handleSliderChange(type, val) {
         syncToNavCom('altRadioDisplay', val);
         const mInp = document.getElementById('altMapInput');
         if (mInp && mInp.innerText != val) mInp.innerText = val;
-        triggerVerticalProfileUpdate();
-        if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+
+        // Direkter Render-Aufruf! KEIN 3-Sekunden triggerVerticalProfileUpdate() mehr!
+        if (typeof renderVerticalProfile === 'function') renderVerticalProfile('verticalProfileCanvas');
+        if (typeof renderMapProfile === 'function') renderMapProfile();
+        // Lufträume nur prüfen, wenn wir nicht gerade aktiv ziehen
+        if (!window.vpUIInteractionActive && typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
     }
 }
 
@@ -849,7 +910,7 @@ function handleRateChange(val) {
     // Re-render profiles
     if (typeof renderMapProfile === 'function') renderMapProfile();
     if (typeof renderVerticalProfile === 'function') renderVerticalProfile('verticalProfileCanvas');
-    if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+    if (!window.vpUIInteractionActive && typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
 }
 
 function recalculatePerformance() {
@@ -1673,36 +1734,41 @@ let vpPulsePhase = 0; // 0..1 for pulse animation
 
 function vpStartHighlightPulse() {
     vpStopHighlightPulse();
-    vpPulsePhase = 0;
-    function animate() {
-        vpPulsePhase = (vpPulsePhase + 0.02) % 1;
+    vpPulsePhase = 0.25; // Startet direkt mit voller Leuchtkraft
+
+    function toggleBlink() {
+        vpPulsePhase = (vpPulsePhase === 0.25) ? 0 : 0.25; // Wechselt zwischen 0 und 0.25 (an/aus)
         if (typeof renderMapProfile === 'function') renderMapProfile();
-        vpPulseAnimFrame = requestAnimationFrame(animate);
+        if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
     }
-    vpPulseAnimFrame = requestAnimationFrame(animate);
+
+    toggleBlink(); // Sofortiges erstes Rendern
+    vpPulseAnimFrame = setInterval(toggleBlink, 700); // Alle 700ms entspannt umschalten statt 60x pro Sekunde
 }
 
 function vpStopHighlightPulse() {
     if (vpPulseAnimFrame) {
-        cancelAnimationFrame(vpPulseAnimFrame);
+        clearInterval(vpPulseAnimFrame);
         vpPulseAnimFrame = null;
     }
+    vpPulsePhase = 0;
 }
 
 function clearAirspaceMapLayers() {
-    if (!map) return;
-    airspaceMapLayers.forEach(l => map.removeLayer(l));
-    airspaceMapLayers = [];
+    if (map) {
+        airspaceMapLayers.forEach(l => map.removeLayer(l));
+        airspaceMapLayers = [];
+    }
     highlightedAirspaceIdx = -1;
     vpHighlightPulseIdx = -1;
     vpStopHighlightPulse();
-    // Remove active styling from all rows
     document.querySelectorAll('.as-row.as-active').forEach(el => el.classList.remove('as-active'));
     if (typeof renderMapProfile === 'function') renderMapProfile();
+    if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
 }
 
 function toggleAirspaceHighlight(idx) {
-    if (!map || !activeAirspaces[idx]) return;
+    if (!activeAirspaces[idx]) return;
 
     // If same airspace is already highlighted, toggle it off
     if (highlightedAirspaceIdx === idx) {
@@ -1710,55 +1776,49 @@ function toggleAirspaceHighlight(idx) {
         return;
     }
 
-    // Clear previous
-    airspaceMapLayers.forEach(l => map.removeLayer(l));
-    airspaceMapLayers = [];
+    if (map) {
+        airspaceMapLayers.forEach(l => map.removeLayer(l));
+        airspaceMapLayers = [];
+    }
     document.querySelectorAll('.as-row.as-active').forEach(el => el.classList.remove('as-active'));
 
     const airspace = activeAirspaces[idx];
     highlightedAirspaceIdx = idx;
 
-    const coords = airspace.geometry.coordinates;
-    let polys = [];
-    if (airspace.geometry.type === 'Polygon') {
-        polys = [coords[0].map(c => [c[1], c[0]])];
-    } else if (airspace.geometry.type === 'MultiPolygon') {
-        polys = coords.map(pc => pc[0].map(c => [c[1], c[0]]));
+    if (map) {
+        const coords = airspace.geometry.coordinates;
+        let polys = [];
+        if (airspace.geometry.type === 'Polygon') {
+            polys = [coords[0].map(c => [c[1], c[0]])];
+        } else if (airspace.geometry.type === 'MultiPolygon') {
+            polys = coords.map(pc => pc[0].map(c => [c[1], c[0]]));
+        }
+        const info = getAirspaceStyle(airspace);
+        polys.forEach(ring => {
+            const layer = L.polygon(ring, {
+                color: info.mapColor || '#ff4444', weight: 3, fillColor: info.mapColor || '#ff4444',
+                fillOpacity: 0.25, dashArray: '6,4', className: 'airspace-highlight-pulse'
+            }).addTo(map);
+            const displayName = getAirspaceDisplayName(airspace);
+            layer.bindTooltip(`<b>${info.icon} ${displayName}</b>`, { sticky: true, className: 'airspace-tooltip' });
+            airspaceMapLayers.push(layer);
+        });
     }
 
-    const info = getAirspaceStyle(airspace);
-    polys.forEach(ring => {
-        const layer = L.polygon(ring, {
-            color: info.mapColor || '#ff4444',
-            weight: 3,
-            fillColor: info.mapColor || '#ff4444',
-            fillOpacity: 0.25,
-            dashArray: '6,4',
-            className: 'airspace-highlight-pulse'
-        }).addTo(map);
-
-        const displayName = getAirspaceDisplayName(airspace);
-        layer.bindTooltip(`<b>${info.icon} ${displayName}</b>`, { sticky: true, className: 'airspace-tooltip' });
-        airspaceMapLayers.push(layer);
-    });
-
-    // Mark the row as active
     const row = document.querySelector(`.as-row[data-as-idx="${idx}"]`);
     if (row) row.classList.add('as-active');
 
-    // Start pulsing animation in the vertical profile canvas
     vpHighlightPulseIdx = idx;
     vpStartHighlightPulse();
-
-    // Re-render profile to show highlighted airspace
-    if (typeof renderMapProfile === 'function') renderMapProfile();
 }
 
 function getAirspaceDisplayName(a) {
-    const t = a.type;
-    const name = a.name || 'Unbekannt';
-    if (t === 33) return `FIS ${name}`;
-    return name;
+    const style = getAirspaceStyle(a);
+    let name = a.name || 'Unbekannt';
+    // Entferne überflüssige Begriffe wie "TMA", "CTR" und freistehende Klassen-Buchstaben (wie "C" oder "D") aus dem Roh-Namen
+    name = name.replace(/\b(TMA|CTR|CTA|TMZ|RMZ|FIS)\b/ig, '');
+    name = name.replace(/\b[A-G]\b/g, '');
+    return `${name.trim()} [${style.category}]`;
 }
 
 function getAirspaceFreqInfo(a) {
@@ -3888,48 +3948,181 @@ let vpHighResData = null; // Higher resolution elevation data for zoom
 let vpElevationCache = {}; // Cache to prevent API rate limits (HTTP 429)
 let vpClimbRate = 500; // ft/min climb rate (configurable)
 let vpDescentRate = 500; // ft/min descent rate (configurable)
+let vpLandmarks = [];
+let vpObstacles = [];
+
+async function fetchProfileLandmarks(elevData) {
+    if (!elevData || elevData.length < 2) return [];
+    let minL = 90, maxL = -90, minLo = 180, maxLo = -180;
+    elevData.forEach(p => {
+        if(p.lat < minL) minL = p.lat; if(p.lat > maxL) maxL = p.lat;
+        if(p.lon < minLo) minLo = p.lon; if(p.lon > maxLo) maxLo = p.lon;
+    });
+    minL -= 0.1; maxL += 0.1; minLo -= 0.15; maxLo += 0.15;
+    let landmarks = [];
+    // 1. Flugplätze (Höchste Priorität)
+    await loadGlobalAirports();
+    for(let k in globalAirports) {
+        let a = globalAirports[k];
+        if (a.lat > minL && a.lat < maxL && a.lon > minLo && a.lon < maxLo) {
+            let bestD = Infinity, bestDistNM = 0;
+            elevData.forEach(ep => {
+                let d = calcNav(a.lat, a.lon, ep.lat, ep.lon).dist;
+                if(d < bestD) { bestD = d; bestDistNM = ep.distNM; }
+            });
+            if (bestD < 3.5) landmarks.push({ name: a.icao, type: 'apt', pop: 100000000, distNM: bestDistNM });
+        }
+    }
+    // 2. Städte & Dörfer via Overpass (mit Fallback & 429 Schutz)
+    try {
+        let query = `[out:json][timeout:8];(node["place"="city"](${minL.toFixed(4)},${minLo.toFixed(4)},${maxL.toFixed(4)},${maxLo.toFixed(4)});node["place"="town"](${minL.toFixed(4)},${minLo.toFixed(4)},${maxL.toFixed(4)},${maxLo.toFixed(4)}););out;`;
+        let url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+        let res = await fetch(url);
+
+        // Fallback, falls der Hauptserver uns wegen 429 blockt
+        if (!res.ok) {
+            url = `https://lz4.overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+            res = await fetch(url);
+        }
+
+        if (!res.ok) throw new Error("Overpass HTTP " + res.status);
+
+        let json = await res.json();
+        if(json.elements) {
+            json.elements.forEach(e => {
+                if (!e.lat || !e.lon) return;
+                let pop = parseInt(e.tags.population) || (e.tags.place === 'city' ? 50000 : 10000);
+                let bestD = Infinity, bestDistNM = 0;
+                elevData.forEach(ep => {
+                    let d = calcNav(e.lat, e.lon, ep.lat, ep.lon).dist;
+                    if(d < bestD) { bestD = d; bestDistNM = ep.distNM; }
+                });
+                if (bestD < 3.5) landmarks.push({ name: e.tags.name, type: e.tags.place, pop: pop, distNM: bestDistNM });
+            });
+        }
+    } catch(e) { console.warn("Landmark Fetch Error:", e.message); }
+    console.log("🏙️ Landmarks geladen:", landmarks.length, "Stück.");
+    // Sortieren: Groß nach Klein. Größere Städte werden zuerst gezeichnet und blockieren den Platz für kleine.
+    return landmarks.sort((a,b) => b.pop - a.pop);
+}
+
+async function fetchProfileObstacles(elevData) {
+    if (!elevData || elevData.length < 2) return [];
+    let minL = 90, maxL = -90, minLo = 180, maxLo = -180;
+    elevData.forEach(p => {
+        if(p.lat < minL) minL = p.lat; if(p.lat > maxL) maxL = p.lat;
+        if(p.lon < minLo) minLo = p.lon; if(p.lon > maxLo) maxLo = p.lon;
+    });
+    // Etwas engerer Suchradius als bei Städten, um Datenmenge zu schonen
+    minL -= 0.06; maxL += 0.06; minLo -= 0.1; maxLo += 0.1;
+    let rawObstacles = [];
+    try {
+        let query = `[out:json][timeout:10];(node["generator:source"="wind"](${minL.toFixed(4)},${minLo.toFixed(4)},${maxL.toFixed(4)},${maxLo.toFixed(4)});node["man_made"~"mast|tower"]["height"](${minL.toFixed(4)},${minLo.toFixed(4)},${maxL.toFixed(4)},${maxLo.toFixed(4)}););out;`;
+        let url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+        let res = await fetch(url);
+
+        if (!res.ok) {
+            url = `https://lz4.overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+            res = await fetch(url);
+        }
+        if (!res.ok) throw new Error("Overpass HTTP " + res.status);
+
+        let json = await res.json();
+        if(json.elements) {
+            json.elements.forEach(e => {
+                if (!e.lat || !e.lon) return;
+
+                // Höhe extrahieren (Meter -> Feet). Default Windrad: 120m (400ft). Default Mast: 50m (160ft)
+                let isWind = e.tags["generator:source"] === "wind";
+                let hStr = e.tags.height;
+                let hMeter = hStr ? parseFloat(hStr.replace(',', '.')) : (isWind ? 120 : 50);
+                if (isNaN(hMeter) || hMeter < 30) return; // Unter 30m ignorieren wir
+                let hFt = Math.round(hMeter * 3.28084);
+                let bestD = Infinity, bestDistNM = 0, baseElevFt = 0;
+                elevData.forEach(ep => {
+                    let d = calcNav(e.lat, e.lon, ep.lat, ep.lon).dist;
+                    if(d < bestD) { bestD = d; bestDistNM = ep.distNM; baseElevFt = ep.elevFt; }
+                });
+
+                // Nur Hindernisse näher als 2 NM zur direkten Fluglinie
+                if (bestD < 2.0) {
+                    rawObstacles.push({ type: isWind ? 'wind' : 'mast', hFt: hFt, distNM: bestDistNM, elevFt: baseElevFt });
+                }
+            });
+        }
+    } catch(e) { console.warn("Obstacles Fetch Error:", e.message); }
+    // Clustering: Gruppiere in 0.5 NM "Eimer" (Windparks zusammenfassen)
+    let buckets = {};
+    rawObstacles.forEach(obs => {
+        let bIdx = Math.floor(obs.distNM / 0.5);
+        if (!buckets[bIdx]) buckets[bIdx] = [];
+        buckets[bIdx].push(obs);
+    });
+    let finalObs = [];
+    for (let k in buckets) {
+        let group = buckets[k];
+        group.sort((a,b) => b.hFt - a.hFt); // Das höchste Hindernis der Gruppe gewinnt
+        let rep = group[0];
+        rep.count = group.length; // Merken, wie viele es hier gibt (für Windparks)
+        finalObs.push(rep);
+    }
+    console.log("🗼 Obstacles geladen & geclustert:", finalObs.length, "Stück.");
+    return finalObs;
+}
 
 function triggerVerticalProfileUpdate() {
     if (vpProfileTimeout) clearTimeout(vpProfileTimeout);
+    // SOFORT pulsieren, um dem User zu zeigen, dass Änderungen registriert wurden
+    ['btnToggleClouds', 'btnToggleLandmarks', 'btnToggleObstacles'].forEach(id => {
+        const b = document.getElementById(id); if(b) b.classList.add('vp-loading-pulse');
+    });
     vpProfileTimeout = setTimeout(async () => {
         if (!routeWaypoints || routeWaypoints.length < 2) return;
-
         const cacheKey = routeWaypoints.map(p => `${(p.lat || 0).toFixed(4)},${((p.lng || p.lon) || 0).toFixed(4)}`).join('|');
         if (window._lastVpRouteKey !== cacheKey) {
-            vpAltWaypoints = []; vpSegmentAlts = [];
-            vpHighResData = null;
-            vpZoomLevel = 100;
-            const zd = document.getElementById('vpZoomDisplay');
-            if (zd) zd.textContent = '0%';
+            vpAltWaypoints = []; vpSegmentAlts = []; vpHighResData = null; vpZoomLevel = 100;
+            const zd = document.getElementById('vpZoomDisplay'); if (zd) zd.textContent = '0%';
             window._lastVpRouteKey = cacheKey;
         }
-
         const page5 = document.getElementById('notePage5');
         if (page5) page5.style.display = '';
         const status = document.getElementById('verticalProfileStatus');
         if (status) status.textContent = 'Lade Höhendaten...';
-
         try {
             vpElevationData = await fetchRouteElevation(routeWaypoints);
             if (status) status.textContent = 'Lade Wetterlage...';
             vpWeatherData = await fetchRouteWeather(routeWaypoints, vpElevationData);
-            renderVerticalProfile('verticalProfileCanvas');
+
+            if (window._lastLandmarkRouteKey !== cacheKey) {
+                window._lastLandmarkRouteKey = cacheKey;
+                const lmStr = localStorage.getItem('ga_lms_' + cacheKey);
+                const obStr = localStorage.getItem('ga_obs_' + cacheKey);
+
+                if (lmStr && obStr) {
+                    try { vpLandmarks = JSON.parse(lmStr); vpObstacles = JSON.parse(obStr); } catch(e) {}
+                } else {
+                    vpLandmarks = []; vpObstacles = [];
+                    const [lms, obs] = await Promise.all([fetchProfileLandmarks(vpElevationData), fetchProfileObstacles(vpElevationData)]);
+                    vpLandmarks = lms; vpObstacles = obs;
+                    try {
+                        localStorage.setItem('ga_lms_' + cacheKey, JSON.stringify(lms));
+                        localStorage.setItem('ga_obs_' + cacheKey, JSON.stringify(obs));
+                    } catch(e) {}
+                }
+            }
             if (status) status.textContent = vpElevationData.length + ' Höhenpunkte & Wetter geladen';
         } catch (e) {
             console.error('Vertical Profile Error:', e);
             if (status) status.textContent = 'Limit API/Fehler';
-
-            // If we have nothing, render a flat baseline so the canvas still draws and airspaces update
-            if (!vpElevationData || vpElevationData.length === 0) {
-                const totalDist = routeWaypoints.reduce((acc, wp, i) => i === 0 ? 0 : acc + calcNav(routeWaypoints[i - 1].lat, routeWaypoints[i - 1].lng || routeWaypoints[i - 1].lon, wp.lat, wp.lng || wp.lon).dist, 0);
-                vpElevationData = [
-                    { distNM: 0, elevFt: 0, lat: routeWaypoints[0].lat, lon: routeWaypoints[0].lng || routeWaypoints[0].lon },
-                    { distNM: Math.max(1, totalDist), elevFt: 0, lat: routeWaypoints[routeWaypoints.length - 1].lat, lon: routeWaypoints[routeWaypoints.length - 1].lng || routeWaypoints[routeWaypoints.length - 1].lon }
-                ];
-            }
-            renderVerticalProfile('verticalProfileCanvas');
+        } finally {
+            // Fertig geladen -> Pulsieren stoppen
+            ['btnToggleClouds', 'btnToggleLandmarks', 'btnToggleObstacles'].forEach(id => {
+                const b = document.getElementById(id); if(b) b.classList.remove('vp-loading-pulse');
+            });
+            if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+            if (typeof renderMapProfile === 'function' && document.getElementById('mapTableOverlay').classList.contains('active')) renderMapProfile();
         }
-    }, 1200);
+    }, 3000);
 }
 
 async function fetchRouteElevation(routePts) {
@@ -4006,6 +4199,12 @@ async function fetchRouteElevation(routePts) {
 
 async function fetchRouteWeather(routePts, elevData) {
     if (!routePts || routePts.length < 2 || !elevData || elevData.length < 2) return null;
+    window._weatherCache = window._weatherCache || {};
+    // Koordinaten als Key (sobald sich die Route ändert, verfällt der Cache)
+    const weatherKey = routePts.map(p => `${(p.lat || 0).toFixed(2)},${((p.lng || p.lon) || 0).toFixed(2)}`).join('|');
+    if (window._weatherCache[weatherKey] && (Date.now() - window._weatherCache[weatherKey].time) < 15 * 60000) {
+        return window._weatherCache[weatherKey].data;
+    }
     const totalDist = elevData[elevData.length - 1].distNM;
     const numZones = 10;
     const zones = [];
@@ -4082,7 +4281,11 @@ async function fetchRouteWeather(routePts, elevData) {
             }
         }
     }
-    return zones.length > 0 ? zones : null;
+    if (zones.length > 0) {
+        window._weatherCache[weatherKey] = { time: Date.now(), data: zones };
+        return zones;
+    }
+    return null;
 }
 // Globale Debug-Funktion für die Entwicklerkonsole
 window.debugCloudProfile = function() {
@@ -4094,6 +4297,129 @@ window.debugCloudProfile = function() {
     triggerVerticalProfileUpdate();
     console.log("Update angetriggert. Bitte das Profil-Canvas öffnen und die Logs beobachten.");
 };
+function vpDrawLandmarks(ctx, xOf, yOf, elevData, totalDist, isDarkTheme, zoomFactor) {
+    if (!vpLandmarks || vpLandmarks.length === 0) return;
+    const getElevY = (dNM) => {
+        if (!elevData || elevData.length < 2) return yOf(0);
+        for(let i=0; i<elevData.length-1; i++) {
+            if (dNM >= elevData[i].distNM && dNM <= elevData[i+1].distNM) {
+                const f = (dNM - elevData[i].distNM) / (elevData[i+1].distNM - elevData[i].distNM);
+                return yOf(elevData[i].elevFt + f * (elevData[i+1].elevFt - elevData[i].elevFt));
+            }
+        }
+        return yOf(elevData[elevData.length-1].elevFt);
+    };
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    let occupiedX = [];
+    let countDrawn = 0;
+    const edgePad = Math.min(2.5, totalDist * 0.05); // Dynamischer Rand-Puffer
+    for (const lm of vpLandmarks) {
+        if (lm.distNM < edgePad || lm.distNM > totalDist - edgePad) continue;
+        const px = xOf(lm.distNM);
+        const icon = lm.type === 'apt' ? '🛫' : (lm.type === 'city' ? '🏢' : '🏘️');
+        const fontSize = (zoomFactor >= 1.5) ? 10 : 8;
+
+        ctx.font = `bold ${fontSize}px Arial`;
+        const textWidth = ctx.measureText(lm.name).width;
+        const reqWidth = Math.max(textWidth, 14) + 6;
+        const minX = px - reqWidth / 2;
+        const maxX = px + reqWidth / 2;
+        let collision = false;
+        for (const occ of occupiedX) {
+            if (minX < occ.maxX && maxX > occ.minX) { collision = true; break; }
+        }
+        if (!collision) {
+            occupiedX.push({ minX, maxX });
+            const py = getElevY(lm.distNM);
+            ctx.font = '11px Arial';
+            ctx.fillText(icon, px, py - 6);
+            ctx.font = `bold ${fontSize}px Arial`;
+            ctx.fillStyle = isDarkTheme ? 'rgba(190, 180, 160, 0.7)' : 'rgba(70, 60, 40, 0.7)';
+            ctx.fillText(lm.name, px, py + 10);
+            countDrawn++;
+        }
+    }
+    ctx.restore();
+    if(countDrawn === 0 && vpLandmarks.length > 0) console.log("⚠️ Landmarks wurden geladen, aber durch Kollision/Rand abgeschnitten!");
+}
+
+function vpDrawObstacles(ctx, xOf, yOf, totalDist, zoomFactor, elevData) {
+    if (!vpObstacles || vpObstacles.length === 0) return;
+    const edgePad = Math.min(1.0, totalDist * 0.02);
+    // Terrain-interpolierte Basis – gleiche Logik wie vpDrawClouds → Hindernis sitzt exakt auf der Geländelinie
+    const getElevY = (dNM) => {
+        if (!elevData || elevData.length < 2) return yOf(0);
+        for (let i = 0; i < elevData.length - 1; i++) {
+            if (dNM >= elevData[i].distNM && dNM <= elevData[i+1].distNM) {
+                const f = (dNM - elevData[i].distNM) / (elevData[i+1].distNM - elevData[i].distNM);
+                return yOf(elevData[i].elevFt + f * (elevData[i+1].elevFt - elevData[i].elevFt));
+            }
+        }
+        return yOf(elevData[elevData.length - 1].elevFt);
+    };
+    ctx.save();
+    for (const obs of vpObstacles) {
+        if (obs.distNM < edgePad || obs.distNM > totalDist - edgePad) continue;
+        const px = xOf(obs.distNM);
+        const pyBase = getElevY(obs.distNM);                        // Geländelinie an dieser Stelle
+        const heightPx = Math.abs(yOf(obs.hFt) - yOf(0));          // Turmhöhe in Pixeln (skalenunabhängig)
+        const pyTop = pyBase - heightPx;                             // Turmspitze
+        const towerHeightPx = Math.max(1, heightPx);
+
+        if (obs.type === 'wind') {
+            // Windrad: Nabe sitzt r Pixel über der Turmspitze, Rotorblätter gehen von der Nabe aus
+            const r = Math.max(4, Math.min(towerHeightPx * 0.35, 25));
+            const pyHub = pyTop + r;                                 // Nabe liegt r px unterhalb der Spitze
+
+            // Turm (Fundament → Nabe)
+            ctx.beginPath();
+            ctx.moveTo(px, pyBase);
+            ctx.lineTo(px, pyHub);
+            ctx.strokeStyle = 'rgba(80, 80, 80, 0.9)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // Rotorblätter (pseudo-zufälliger Snapshot-Winkel)
+            ctx.fillStyle = '#d93829';
+            const rotOffset = (obs.distNM * 137) % (Math.PI * 2);
+            for (let i = 0; i < 3; i++) {
+                const a = rotOffset + (i * 120 - 90) * Math.PI / 180;
+                ctx.beginPath();
+                ctx.moveTo(px, pyHub);
+                ctx.lineTo(px + Math.cos(a - 0.2) * r * 0.25, pyHub + Math.sin(a - 0.2) * r * 0.25);
+                ctx.lineTo(px + Math.cos(a) * r,               pyHub + Math.sin(a) * r);
+                ctx.lineTo(px + Math.cos(a + 0.2) * r * 0.25, pyHub + Math.sin(a + 0.2) * r * 0.25);
+                ctx.closePath();
+                ctx.fill();
+            }
+            // Nabe (weißer Mittelpunkt)
+            ctx.beginPath(); ctx.arc(px, pyHub, 1.5, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill();
+        } else {
+            // Klassischer Mast: Turm + roter Warnpunkt mit Snapshot-Alpha (simuliertes Blinken)
+            ctx.beginPath();
+            ctx.moveTo(px, pyBase);
+            ctx.lineTo(px, pyTop);
+            ctx.strokeStyle = 'rgba(80, 80, 80, 0.9)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            const alpha = 0.4 + ((obs.distNM * 88) % 100) / 100 * 0.6;
+            ctx.beginPath(); ctx.arc(px, pyTop, 2, 0, Math.PI * 2); ctx.fillStyle = `rgba(217, 56, 41, ${alpha})`; ctx.fill();
+        }
+
+        // Cluster-Label (z. B. ×5, ×12) bei Windparks
+        if (obs.count > 1) {
+            ctx.fillStyle = '#d93829';
+            ctx.font = 'bold 7px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText('×' + obs.count, px + Math.max(5, towerHeightPx * 0.2), pyTop + 4);
+        }
+    }
+    ctx.restore();
+}
+
 function vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, isDarkTheme, elevData) {
     if (!vpWeatherData || vpWeatherData.length === 0) return;
     const getElevY = (dNM) => {
@@ -4213,8 +4539,11 @@ function vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, isDarkTheme, elev
                     ctx.arc(px, py, pr, 0, Math.PI * 2);
                     ctx.fillStyle = `rgba(${cVal},${cVal},${cVal},${alpha})`;
 
-                    // Performance-Fix: Weiche Ränder deaktivieren, während gezogen wird!
-                    const isDragging = (typeof vpDraggingWP !== 'undefined' && vpDraggingWP >= 0) || (typeof vpDraggingSegment !== 'undefined' && !!vpDraggingSegment);
+                    // Performance-Fix: Weiche Ränder deaktivieren, während Graphen, Slider oder Drehknöpfe gezogen werden!
+                    const isDragging = (typeof vpDraggingWP !== 'undefined' && vpDraggingWP >= 0) ||
+                                       (typeof vpDraggingSegment !== 'undefined' && !!vpDraggingSegment) ||
+                                       (typeof vpResizeActive !== 'undefined' && vpResizeActive) ||
+                                       (window.vpUIInteractionActive === true);
                     if (!isDragging) {
                         ctx.shadowColor = `rgba(${cVal},${cVal},${cVal},${alpha})`;
                         ctx.shadowBlur = 4 + prRand * 8;
@@ -4332,6 +4661,7 @@ function renderVerticalProfile(canvasId) {
     ctx.fillRect(padLeft, padTop, plotW, plotH);
 
     // Airspace blocks
+    let occupiedASLabels = [];
     if (typeof activeAirspaces !== 'undefined' && activeAirspaces.length > 0) {
         for (const as of activeAirspaces) {
             // FIS Sektoren (Typ 33) ignorieren
@@ -4416,20 +4746,30 @@ function renderVerticalProfile(canvasId) {
             ctx.stroke();
             ctx.setLineDash([]);
 
-            const displayName = getAirspaceDisplayName(as);
-            ctx.fillStyle = vpHexToRgba(style.color, 0.7);
-            ctx.font = 'bold 8px Arial';
-            ctx.textAlign = 'center';
-            
-            // Estimate label Y
             let sumUpper = 0;
             relevantPts.forEach(p => sumUpper += (isUpperAgl ? p.elevFt + upperFt : upperFt));
             const avgUpper = sumUpper / relevantPts.length;
-            const labelY = yOf(Math.min(avgUpper, maxAlt));
 
-            ctx.fillText(displayName, (x1 + x2) / 2, labelY + 10);
-            ctx.font = '7px Arial';
-            ctx.fillText(lowerFt + '–' + upperFt + (isUpperAgl ? ' ft AGL' : ' ft'), (x1 + x2) / 2, labelY + 19);
+            // Verhindert, dass das Label oben aus dem Bild rutscht
+            let labelY = yOf(Math.min(avgUpper, maxAlt));
+            labelY = Math.max(padTop + 15, labelY);
+            const displayName = getAirspaceDisplayName(as);
+            ctx.font = 'bold 8px Arial';
+            const tw = ctx.measureText(displayName).width;
+            const tLeft = ((x1 + x2) / 2) - tw/2, tRight = tLeft + tw;
+
+            let collision = false;
+            for(let occ of occupiedASLabels) {
+                if (tLeft < occ.r && tRight > occ.l && labelY < occ.b && (labelY+20) > occ.t) { collision = true; break; }
+            }
+            if (!collision) {
+                occupiedASLabels.push({l: tLeft-5, r: tRight+5, t: labelY-5, b: labelY+20});
+                ctx.fillStyle = vpHexToRgba(style.color, 0.7);
+                ctx.textAlign = 'center';
+                ctx.fillText(displayName, (x1 + x2) / 2, labelY + 10);
+                ctx.font = '7px Arial';
+                ctx.fillText(formatAsLimit(as.lowerLimit) + ' – ' + formatAsLimit(as.upperLimit), (x1 + x2) / 2, labelY + 19);
+            }
         }
     }
     ctx.textAlign = 'left';
@@ -4470,7 +4810,9 @@ function renderVerticalProfile(canvasId) {
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    if (vpShowClouds) vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, false, vpElevationData);
+    if (vpShowLandmarks) vpDrawLandmarks(ctx, xOf, yOf, typeof elevData !== 'undefined' ? elevData : vpElevationData, totalDist, typeof zoomFactor !== 'undefined', typeof zoomFactor !== 'undefined' ? zoomFactor : 1.0);
+    if (vpShowClouds) vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, typeof zoomFactor !== 'undefined', typeof elevData !== 'undefined' ? elevData : vpElevationData);
+    if (vpShowObstacles) vpDrawObstacles(ctx, xOf, yOf, totalDist, typeof zoomFactor !== 'undefined' ? zoomFactor : 1.0, typeof elevData !== 'undefined' ? elevData : vpElevationData);
 
     // Flight profile
     if (fpResult && fpResult.profile) {
@@ -4828,6 +5170,7 @@ function renderMapProfile() {
     ctx.fillRect(padLeft, padTop, plotW, plotH);
 
     // Airspace blocks (dark theme) with pulse highlight support
+    let occupiedASLabels = [];
     if (typeof activeAirspaces !== 'undefined' && activeAirspaces.length > 0) {
         for (let asIdx = 0; asIdx < activeAirspaces.length; asIdx++) {
             const as = activeAirspaces[asIdx];
@@ -4917,23 +5260,34 @@ function renderMapProfile() {
             ctx.stroke();
             ctx.setLineDash([]);
 
-            // Airspace label (only if zoomed enough to show)
+            let sumUpper = 0;
+            relevantPts.forEach(p => sumUpper += (isUpperAgl ? p.elevFt + upperFt : upperFt));
+            const avgUpper = sumUpper / relevantPts.length;
+
+            let labelY = yOf(Math.min(avgUpper, maxAlt));
+            labelY = Math.max(padTop + 15, labelY); // Klemme an die Decke
             if (zoomFactor >= 1.5 || (x2 - x1) > 40 || isHighlighted) {
                 const displayName = getAirspaceDisplayName(as);
-                ctx.fillStyle = vpHexToRgba(style.color, isHighlighted ? 0.9 : 0.6);
                 ctx.font = isHighlighted ? 'bold 11px Arial' : 'bold 10px Arial';
-                ctx.textAlign = 'center';
+                const tw = ctx.measureText(displayName).width;
+                const tLeft = ((x1 + x2) / 2) - tw/2, tRight = tLeft + tw;
 
-                // Estimate label Y from average upper limit in this segment
-                let sumUpper = 0;
-                relevantPts.forEach(p => sumUpper += (isUpperAgl ? p.elevFt + upperFt : upperFt));
-                const avgUpper = sumUpper / relevantPts.length;
-                const labelY = yOf(Math.min(avgUpper, maxAlt));
+                let collision = false;
+                if (!isHighlighted) {
+                    for (let occ of occupiedASLabels) {
+                        if (tLeft < occ.r && tRight > occ.l && labelY < occ.b && (labelY+25) > occ.t) { collision = true; break; }
+                    }
+                }
 
-                ctx.fillText(displayName, (x1 + x2) / 2, labelY + 12);
-                if (zoomFactor >= 2 || isHighlighted) {
-                    ctx.font = '9px Arial';
-                    ctx.fillText(lowerFt + '–' + upperFt + (isUpperAgl ? ' ft AGL' : ' ft'), (x1 + x2) / 2, labelY + 23);
+                if (!collision) {
+                    if (!isHighlighted) occupiedASLabels.push({l: tLeft-5, r: tRight+5, t: labelY-5, b: labelY+25});
+                    ctx.fillStyle = vpHexToRgba(style.color, isHighlighted ? 0.9 : 0.6);
+                    ctx.textAlign = 'center';
+                    ctx.fillText(displayName, (x1 + x2) / 2, labelY + 12);
+                    if (zoomFactor >= 2 || isHighlighted) {
+                        ctx.font = '9px Arial';
+                        ctx.fillText(formatAsLimit(as.lowerLimit) + ' – ' + formatAsLimit(as.upperLimit), (x1 + x2) / 2, labelY + 23);
+                    }
                 }
             }
         }
@@ -4976,7 +5330,9 @@ function renderMapProfile() {
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    if (vpShowClouds) vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, true, elevData);
+    if (vpShowLandmarks) vpDrawLandmarks(ctx, xOf, yOf, typeof elevData !== 'undefined' ? elevData : vpElevationData, totalDist, typeof zoomFactor !== 'undefined', typeof zoomFactor !== 'undefined' ? zoomFactor : 1.0);
+    if (vpShowClouds) vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, typeof zoomFactor !== 'undefined', typeof elevData !== 'undefined' ? elevData : vpElevationData);
+    if (vpShowObstacles) vpDrawObstacles(ctx, xOf, yOf, totalDist, typeof zoomFactor !== 'undefined' ? zoomFactor : 1.0, typeof elevData !== 'undefined' ? elevData : vpElevationData);
 
     // Flight profile
     if (fpResult && fpResult.profile) {
@@ -5672,6 +6028,14 @@ function initAltWaypoints() {
             vpHandleDragEnd();
         }
     });
+
+    canvas.addEventListener('touchcancel', (e) => {
+        vpIsPanning = false;
+        vpWasDragging = false;
+        if (vpDraggingWP >= 0 || vpDraggingSegment || vpDraggingMagenta) {
+            vpHandleDragEnd();
+        }
+    });
 }
 
 // Override computeFlightProfile to use altitude waypoints + segment altitudes
@@ -6160,19 +6524,22 @@ async function checkCloudAfterIdle() {
     setTimeout(() => { idleCheckInProgress = false; }, 10000);
 }
 function resetSyncTimer() {
-    const now = Date.now();
-    const idleTime = now - syncLastActivityTime;
-    // IDLE CHECK: Wenn länger als 30 Sekunden keine Aktion stattfand
-    if (idleTime > 30000 && !idleCheckInProgress) {
-        const t = document.getElementById('syncToggle');
-        if (getSyncId() && t && t.checked) {
-            checkCloudAfterIdle();
+    try {
+        const now = Date.now();
+        const idleTime = now - syncLastActivityTime;
+        if (idleTime > 30000 && !idleCheckInProgress) {
+            const t = document.getElementById('syncToggle');
+            if (getSyncId() && t && t.checked) {
+                checkCloudAfterIdle();
+            }
         }
-    }
-    syncLastActivityTime = now;
-    if (syncIsSleeping) {
-        syncIsSleeping = false;
-        syncLastFetchTime = now;
+        syncLastActivityTime = now;
+        if (syncIsSleeping) {
+            syncIsSleeping = false;
+            syncLastFetchTime = now;
+        }
+    } catch(e) {
+        console.warn("Sync Timer Error intercepted", e);
     }
 }
 ['click', 'touchstart', 'scroll', 'keydown'].forEach(evt => {
@@ -6181,7 +6548,14 @@ function resetSyncTimer() {
 setTimeout(() => initAltWaypoints(), 2000);
 // === VERTICAL PROFILE CONTROLS (V49) ===
 let vpMaxAltOverride = 0; // 0 = Auto-Scaling
-let vpShowClouds = true;
+let vpShowClouds = localStorage.getItem('ga_show_clouds') !== 'false'; // Default: true
+let vpShowLandmarks = localStorage.getItem('ga_show_landmarks') !== 'false';
+let vpShowObstacles = localStorage.getItem('ga_show_obstacles') !== 'false';
+document.addEventListener('DOMContentLoaded', () => {
+    const bc = document.getElementById('btnToggleClouds'); if(bc) bc.classList.toggle('active', vpShowClouds);
+    const bl = document.getElementById('btnToggleLandmarks'); if(bl) bl.classList.toggle('active', vpShowLandmarks);
+    const bo = document.getElementById('btnToggleObstacles'); if(bo) bo.classList.toggle('active', vpShowObstacles);
+});
 function vpChangeAlt(delta) {
     let val = parseInt(document.getElementById('altMapInput').innerText) || 4500;
     val = Math.max(1500, Math.min(13500, val + delta));
@@ -6190,13 +6564,10 @@ function vpChangeAlt(delta) {
 function syncAltFromInput(val) {
     val = parseInt(val) || 4500;
     const inp = document.getElementById('altMapInput');
-    inp.innerText = val;
+    if (inp) inp.innerText = val;
     const mainSlider = document.getElementById('altSlider');
     if (mainSlider) mainSlider.value = val;
-    handleSliderChange('alt', val);
-    if (typeof renderMapProfile === 'function') renderMapProfile();
-    if (typeof renderVerticalProfile === 'function') renderVerticalProfile('verticalProfileCanvas');
-    if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+    handleSliderChange('alt', val); // handleSliderChange übernimmt jetzt den direkten Render
 }
 function vpChangeRate(delta) {
     let val = parseInt(document.getElementById('rateMapInput').innerText) || 500;
@@ -6235,9 +6606,26 @@ function vpResetYAxis() {
 }
 function vpToggleClouds() {
     vpShowClouds = !vpShowClouds;
+    localStorage.setItem('ga_show_clouds', vpShowClouds);
     const btn = document.getElementById('btnToggleClouds');
     if (btn) btn.classList.toggle('active', vpShowClouds);
-    renderMapProfile();
+    if (typeof renderMapProfile === 'function') renderMapProfile();
+    if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+}
+function vpToggleLandmarks() {
+    vpShowLandmarks = !vpShowLandmarks;
+    localStorage.setItem('ga_show_landmarks', vpShowLandmarks);
+    const btn = document.getElementById('btnToggleLandmarks');
+    if (btn) btn.classList.toggle('active', vpShowLandmarks);
+    if (typeof renderMapProfile === 'function') renderMapProfile();
+    if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+}
+function vpToggleObstacles() {
+    vpShowObstacles = !vpShowObstacles;
+    localStorage.setItem('ga_show_obstacles', vpShowObstacles);
+    const btn = document.getElementById('btnToggleObstacles');
+    if (btn) btn.classList.toggle('active', vpShowObstacles);
+    if (typeof renderMapProfile === 'function') renderMapProfile();
     if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
 }
 
@@ -6275,5 +6663,642 @@ window.forceAppUpdate = function() {
         } else {
             window.location.reload(true);
         }
+    }
+};
+
+// =========================================================
+// V80: MISSION EXPORT / IMPORT / PDF-BRIEFING
+// =========================================================
+window.exportMission = function() {
+    const data = localStorage.getItem('ga_active_mission');
+    if (!data) { alert("Kein aktiver Flug zum Exportieren."); return; }
+    const code = btoa(encodeURIComponent(data));
+    navigator.clipboard.writeText(code).then(() => {
+        alert("🔗 Flug-Code kopiert!\n\nDu kannst ihn nun im Chat teilen oder über 'Code laden' (Pinnwand) auf einem anderen Gerät importieren.");
+    }).catch(() => alert("Fehler beim Kopieren."));
+};
+
+window.importMission = function() {
+    const code = prompt("Füge hier den kopierten Flug-Code ein:");
+    if (!code) return;
+    try {
+        const decoded = decodeURIComponent(atob(code));
+        const state = JSON.parse(decoded);
+        localStorage.setItem('ga_active_mission', JSON.stringify(state));
+        restoreMissionState(state);
+        alert("✅ Flug erfolgreich geladen!");
+    } catch(e) {
+        alert("❌ Ungültiger oder beschädigter Code.");
+    }
+};
+
+// ==========================================
+// V86: PDF BRIEFING PACK EXPORT (VECTOR)
+// ==========================================
+function loadTileImage(url) {
+    return new Promise(resolve => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        // Cache-Buster erzwingt frische CORS-Header für Safari
+        img.src = url + (url.includes('?') ? '&' : '?') + 'safari_cb=' + Date.now();
+    });
+}
+
+function gatherBriefingData() {
+    const tas = parseInt(document.getElementById('tasSlider').value) || 115;
+    const gph = parseInt(document.getElementById('gphSlider').value) || 9;
+    const dist = currentMissionData.dist;
+    const totalMinutes = Math.round((dist / tas) * 60);
+    const hrs = Math.floor(totalMinutes / 60), mins = totalMinutes % 60;
+    return {
+        title: document.getElementById('mTitle').innerText,
+        story: document.getElementById('mStory').innerText,
+        payload: document.getElementById('mPay').innerText,
+        cargo: document.getElementById('mWeight').innerText,
+        distance: document.getElementById('mDistNote').innerText,
+        heading: document.getElementById('mHeadingNote').innerText,
+        ete: document.getElementById('mETENote').innerText,
+        aircraft: selectedAC,
+        tas: tas,
+        gph: gph,
+        depICAO: document.getElementById('mDepICAO').innerText,
+        depName: document.getElementById('mDepName').innerText,
+        depCoords: document.getElementById('mDepCoords').innerText,
+        depRwy: document.getElementById('mDepRwy').innerText,
+        destICAO: currentMissionData?.poiName ? 'POI' : document.getElementById('mDestICAO').innerText,
+        destName: document.getElementById('mDestName').innerText,
+        destCoords: document.getElementById('mDestCoords').innerText,
+        destRwy: document.getElementById('mDestRwy').innerText,
+        depDesc: document.getElementById('wikiDepDescText')?.innerText || '',
+        destDesc: document.getElementById('wikiDestDescText')?.innerText || '',
+        depRwyText: document.getElementById('wikiDepRwyText')?.innerText || '',
+        destRwyText: document.getElementById('wikiDestRwyText')?.innerText || '',
+        depFreq: document.getElementById('wikiDepFreqText')?.innerText || '',
+        destFreq: document.getElementById('wikiDestFreqText')?.innerText || '',
+        isPOI: document.getElementById('destRwyContainer')?.style.display === 'none',
+        date: new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+        time: new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }),
+        totalDist: Math.round(dist),
+        totalTime: totalMinutes,
+        totalTimeStr: hrs > 0 ? `${hrs}h ${mins}m` : `${mins} Min`,
+        totalFuel: Math.ceil((dist / tas * gph) + (0.75 * gph)),
+        reserveFuel: Math.ceil(0.75 * gph)
+    };
+}
+
+function computeLegs() {
+    const legs = [];
+    const tas = parseInt(document.getElementById('tasSlider').value) || 115;
+    const gph = parseInt(document.getElementById('gphSlider').value) || 9;
+
+    for (let i = 0; i < routeWaypoints.length - 1; i++) {
+        const p1 = routeWaypoints[i], p2 = routeWaypoints[i + 1];
+        const nav = calcNav(p1.lat, p1.lng || p1.lon, p2.lat, p2.lng || p2.lon);
+
+        let n1 = (i === 0) ? currentSName : (routeWaypoints[i].name || `WP ${i}`);
+        let n2 = (i === routeWaypoints.length - 2) ? currentDName : (routeWaypoints[i + 1].name || `WP ${i + 1}`);
+
+        n1 = n1.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '');
+        n2 = n2.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '');
+
+        let f1 = "";
+        let m1 = n1.match(/\(([^)]+)\)/);
+        if (m1) { f1 = m1[1]; n1 = n1.replace(/\s*\([^)]+\)/, ''); }
+        else if (i === 0 && currentDepFreq) { f1 = currentDepFreq; }
+
+        let f2 = "";
+        let m2 = n2.match(/\(([^)]+)\)/);
+        if (m2) { f2 = m2[1]; n2 = n2.replace(/\s*\([^)]+\)/, ''); }
+        else if (i === routeWaypoints.length - 2 && currentDestFreq) { f2 = currentDestFreq; }
+
+        let c1 = n1.match(/\[([^\]]+)\]/); if (c1) n1 = `[${c1[1]}]`;
+        let c2 = n2.match(/\[([^\]]+)\]/); if (c2) n2 = `[${c2[1]}]`;
+
+        const time = Math.round((nav.dist / tas) * 60);
+        const fuel = (nav.dist / tas * gph).toFixed(1);
+        legs.push({ from: n1.trim(), to: n2.trim(), f1: f1, f2: f2, heading: nav.brng, dist: nav.dist, time: time, fuel: fuel });
+    }
+    return legs;
+}
+
+function extractImageUrl(element) {
+    if (!element) return null;
+    const bg = element.style.backgroundImage;
+    if (!bg || bg === 'url("")' || bg === '' || bg === 'url()') return null;
+    return bg.replace(/^url\(['"]?/, '').replace(/['"]?\)$/, '');
+}
+
+async function getImageAsBase64(url) {
+    try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    } catch (e) { return null; }
+}
+
+function stripEmojis(text) {
+    return text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, '').trim();
+}
+
+async function captureMapForPDF() {
+    if (routeWaypoints.length < 2) return null;
+
+    const W = 900, H = 600;
+    const bounds = L.latLngBounds(routeWaypoints);
+
+    let zoom = 1;
+    for (let z = 14; z >= 1; z--) {
+        const nw = bounds.getNorthWest(), se = bounds.getSouthEast();
+        const p1 = latLngToPixel(nw.lat, nw.lng || nw.lon, z);
+        const p2 = latLngToPixel(se.lat, se.lng || se.lon, z);
+        const routeW = Math.abs(p2.x - p1.x), routeH = Math.abs(p2.y - p1.y);
+        if (routeW < W - 20 && routeH < H - 20) { zoom = z; break; }
+    }
+
+    const center = bounds.getCenter();
+    const centerPx = latLngToPixel(center.lat, center.lng, zoom);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = W * 2; canvas.height = H * 2;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(2, 2);
+    ctx.fillStyle = '#e8e0d0';
+    ctx.fillRect(0, 0, W, H);
+
+    const tileSize = 256;
+    const subdomains = ['a', 'b', 'c'];
+    const tilePromises = [];
+
+    const startTileX = Math.floor((centerPx.x - W / 2) / tileSize);
+    const startTileY = Math.floor((centerPx.y - H / 2) / tileSize);
+    const endTileX = Math.ceil((centerPx.x + W / 2) / tileSize);
+    const endTileY = Math.ceil((centerPx.y + H / 2) / tileSize);
+
+    for (let tx = startTileX; tx <= endTileX; tx++) {
+        for (let ty = startTileY; ty <= endTileY; ty++) {
+            const s = subdomains[(tx + ty) % 3];
+            const topoUrl = `https://${s}.tile.opentopomap.org/${zoom}/${tx}/${ty}.png`;
+            const drawX = (tx * tileSize) - (centerPx.x - W / 2);
+            const drawY = (ty * tileSize) - (centerPx.y - H / 2);
+            tilePromises.push(loadTileImage(topoUrl).then(img => {
+                if (img) { ctx.globalAlpha = 0.5; ctx.drawImage(img, drawX, drawY, tileSize, tileSize); ctx.globalAlpha = 1.0; }
+            }));
+        }
+    }
+
+    const aeroZoom = Math.min(zoom, 12);
+    const scale = Math.pow(2, zoom - aeroZoom);
+    const aeroCenterPx = latLngToPixel(center.lat, center.lng, aeroZoom);
+    const aeroTileSize = tileSize * scale;
+    const aStartX = Math.floor((aeroCenterPx.x - (W / 2) / scale) / tileSize);
+    const aStartY = Math.floor((aeroCenterPx.y - (H / 2) / scale) / tileSize);
+    const aEndX = Math.ceil((aeroCenterPx.x + (W / 2) / scale) / tileSize);
+    const aEndY = Math.ceil((aeroCenterPx.y + (H / 2) / scale) / tileSize);
+
+    for (let tx = aStartX; tx <= aEndX; tx++) {
+        for (let ty = aStartY; ty <= aEndY; ty++) {
+            const aeroUrl = `https://nwy-tiles-api.prod.newaydata.com/tiles/${aeroZoom}/${tx}/${ty}.png?path=latest/aero/latest`;
+            const drawX = (tx * aeroTileSize) - (aeroCenterPx.x * scale - W / 2);
+            const drawY = (ty * aeroTileSize) - (aeroCenterPx.y * scale - H / 2);
+            tilePromises.push(loadTileImage(aeroUrl).then(img => {
+                if (img) { ctx.globalAlpha = 0.65; ctx.drawImage(img, drawX, drawY, aeroTileSize, aeroTileSize); ctx.globalAlpha = 1.0; }
+            }));
+        }
+    }
+
+    await Promise.all(tilePromises);
+
+    ctx.strokeStyle = '#ff4444'; ctx.lineWidth = 5; ctx.setLineDash([10, 8]);
+    ctx.beginPath();
+    routeWaypoints.forEach((wp, i) => {
+        const px = latLngToPixel(wp.lat, wp.lng || wp.lon, zoom);
+        const x = px.x - (centerPx.x - W / 2), y = px.y - (centerPx.y - H / 2);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke(); ctx.setLineDash([]);
+
+    routeWaypoints.forEach((wp, i) => {
+        const px = latLngToPixel(wp.lat, wp.lng || wp.lon, zoom);
+        const x = px.x - (centerPx.x - W / 2), y = px.y - (centerPx.y - H / 2);
+        const isStart = (i === 0), isDest = (i === routeWaypoints.length - 1);
+        const r = (isStart || isDest) ? 9 : 7;
+        const fill = isStart ? '#44ff44' : isDest ? '#ff4444' : '#fdfd86';
+
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = '#111'; ctx.lineWidth = 2; ctx.stroke();
+
+        let label = isStart ? currentSName : isDest ? currentDName : (wp.name || `WP${i}`);
+        if (isStart && currentDepFreq) { label += ` (${currentDepFreq.split(',')[0].trim()})`; }
+        else if (isDest && currentDestFreq) { label += ` (${currentDestFreq.split(',')[0].trim()})`; }
+        if (!isStart && !isDest) {
+            label = label.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '');
+            const idM = label.match(/\[([^\]]+)\]/);
+            if (idM) { const frM = label.match(/\(([^)]+)\)/); label = frM ? `${idM[1]} (${frM[1]})` : idM[1]; }
+        }
+        ctx.font = 'bold 11px Helvetica, Arial, sans-serif'; ctx.fillStyle = '#111';
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.strokeText(label, x + 12, y + 4); ctx.fillText(label, x + 12, y + 4);
+    });
+
+    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+    return { data: imgData, width: canvas.width, height: canvas.height };
+}
+
+async function renderTileCanvas(centerLat, centerLng, zoom, W, H) {
+    const centerPx = latLngToPixel(centerLat, centerLng, zoom);
+    const canvas = document.createElement('canvas');
+    canvas.width = W * 2; canvas.height = H * 2;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(2, 2);
+    ctx.fillStyle = '#e8e0d0'; ctx.fillRect(0, 0, W, H);
+
+    const tileSize = 256; const subdomains = ['a', 'b', 'c']; const tilePromises = [];
+    const startTileX = Math.floor((centerPx.x - W / 2) / tileSize);
+    const startTileY = Math.floor((centerPx.y - H / 2) / tileSize);
+    const endTileX = Math.ceil((centerPx.x + W / 2) / tileSize);
+    const endTileY = Math.ceil((centerPx.y + H / 2) / tileSize);
+
+    for (let tx = startTileX; tx <= endTileX; tx++) {
+        for (let ty = startTileY; ty <= endTileY; ty++) {
+            const s = subdomains[(tx + ty) % 3];
+            const topoUrl = `https://${s}.tile.opentopomap.org/${zoom}/${tx}/${ty}.png`;
+            const drawX = (tx * tileSize) - (centerPx.x - W / 2);
+            const drawY = (ty * tileSize) - (centerPx.y - H / 2);
+            tilePromises.push(loadTileImage(topoUrl).then(img => {
+                if (img) { ctx.globalAlpha = 0.5; ctx.drawImage(img, drawX, drawY, tileSize, tileSize); ctx.globalAlpha = 1.0; }
+            }));
+        }
+    }
+
+    const aeroZoom = Math.min(zoom, 12);
+    const scale = Math.pow(2, zoom - aeroZoom);
+    const aeroCenterPx = latLngToPixel(centerLat, centerLng, aeroZoom);
+    const aeroTileSize = tileSize * scale;
+    const aStartX = Math.floor((aeroCenterPx.x - (W / 2) / scale) / tileSize);
+    const aStartY = Math.floor((aeroCenterPx.y - (H / 2) / scale) / tileSize);
+    const aEndX = Math.ceil((aeroCenterPx.x + (W / 2) / scale) / tileSize);
+    const aEndY = Math.ceil((aeroCenterPx.y + (H / 2) / scale) / tileSize);
+
+    for (let tx = aStartX; tx <= aEndX; tx++) {
+        for (let ty = aStartY; ty <= aEndY; ty++) {
+            const aeroUrl = `https://nwy-tiles-api.prod.newaydata.com/tiles/${aeroZoom}/${tx}/${ty}.png?path=latest/aero/latest`;
+            const drawX = (tx * aeroTileSize) - (aeroCenterPx.x * scale - W / 2);
+            const drawY = (ty * aeroTileSize) - (aeroCenterPx.y * scale - H / 2);
+            tilePromises.push(loadTileImage(aeroUrl).then(img => {
+                if (img) { ctx.globalAlpha = 0.65; ctx.drawImage(img, drawX, drawY, aeroTileSize, aeroTileSize); ctx.globalAlpha = 1.0; }
+            }));
+        }
+    }
+
+    await Promise.all(tilePromises);
+
+    const apx = latLngToPixel(centerLat, centerLng, zoom);
+    const cx = apx.x - (centerPx.x - W / 2), cy = apx.y - (centerPx.y - H / 2);
+    ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+    ctx.fillStyle = '#ff4444'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+
+    return canvas.toDataURL('image/jpeg', 0.92);
+}
+
+function latLngToPixel(lat, lng, zoom) {
+    const x = ((lng + 180) / 360) * Math.pow(2, zoom) * 256;
+    const latRad = lat * Math.PI / 180;
+    const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * Math.pow(2, zoom) * 256;
+    return { x, y };
+}
+
+function drawNotebookBackground(doc, pageNum, totalPages) {
+    const W = 210, H = 297;
+    doc.setFillColor(253, 245, 230); doc.rect(0, 0, W, H, 'F');
+    doc.setDrawColor(180, 200, 215); doc.setLineWidth(0.15);
+    for (let y = 21; y < H - 10; y += 7) doc.line(12, y, W - 12, y);
+    doc.setDrawColor(210, 70, 70); doc.setLineWidth(0.35); doc.line(28, 0, 28, H);
+    doc.setDrawColor(180, 175, 160); doc.setLineWidth(0.3);
+    [55, H / 2, H - 55].forEach(y => doc.circle(9, y, 3.5));
+    doc.setFont('Helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(120, 115, 100);
+    doc.text(`Seite ${pageNum} / ${totalPages}`, W - 15, H - 12, { align: 'right' });
+    doc.setFontSize(7); doc.setTextColor(170, 165, 150);
+    doc.text('GA Dispatcher \u2013 Briefing Pack', W / 2, H - 6, { align: 'center' });
+}
+
+function pdfWrappedText(doc, text, x, y, maxWidth, lineHeight) {
+    const lines = doc.splitTextToSize(text, maxWidth);
+    lines.forEach((line, i) => doc.text(line, x, y + (i * lineHeight)));
+    return y + (lines.length * lineHeight);
+}
+
+function drawMissionBriefingPage(doc, data, mapImage) {
+    let y = 30;
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(11, 31, 101);
+    const cleanTitle = stripEmojis(data.title);
+    const titleLines = doc.splitTextToSize(cleanTitle, 155);
+    titleLines.forEach((line, i) => doc.text(line, 32, y + (i * 8)));
+    y += titleLines.length * 8 + 3;
+
+    doc.setDrawColor(11, 31, 101); doc.setLineWidth(0.5); doc.line(32, y, 190, y); y += 10;
+
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(80, 80, 80);
+    const routeStr = data.isPOI ? `${data.depICAO} > ${data.destName} (Rundflug)` : `${data.depICAO} (${data.depName}) > ${data.destICAO} (${data.destName})`;
+    const routeLines = doc.splitTextToSize(routeStr, 155);
+    routeLines.forEach((line, i) => doc.text(line, 32, y + (i * 6)));
+    y += routeLines.length * 6 + 6;
+
+    doc.setFont('Helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(40, 40, 40);
+    y = pdfWrappedText(doc, stripEmojis(data.story), 32, y, 155, 5.5); y += 8;
+
+    doc.setDrawColor(100, 100, 100); doc.setLineWidth(0.3); doc.setLineDashPattern([2, 2], 0); doc.line(32, y, 190, y); doc.setLineDashPattern([], 0); y += 10;
+
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(217, 56, 41); doc.text('PAYLOAD:', 32, y);
+    doc.setTextColor(40, 40, 40); doc.setFont('Helvetica', 'normal'); doc.text(data.payload, 62, y); y += 7;
+
+    doc.setFont('Helvetica', 'bold'); doc.setTextColor(217, 56, 41); doc.text('FRACHT:', 32, y);
+    doc.setTextColor(40, 40, 40); doc.setFont('Helvetica', 'normal'); doc.text(data.cargo, 62, y); y += 14;
+
+    doc.setDrawColor(180, 175, 160); doc.setFillColor(248, 243, 228); doc.setLineWidth(0.3);
+    doc.roundedRect(32, y - 4, 158, 50, 2, 2, 'FD'); y += 4;
+    
+    const col1 = 38, col2 = 110;
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(217, 56, 41); doc.text('STRECKE:', col1, y);
+    doc.setTextColor(40, 40, 40); doc.text(data.distance, col1 + 35, y);
+    doc.setTextColor(217, 56, 41); doc.text('KURS:', col2, y);
+    doc.setTextColor(40, 40, 40); doc.text(data.heading, col2 + 25, y); y += 8;
+    doc.setTextColor(217, 56, 41); doc.text('ETE CA:', col1, y);
+    doc.setTextColor(40, 40, 40); doc.text(data.totalTimeStr, col1 + 35, y);
+    doc.setTextColor(217, 56, 41); doc.text('FUEL:', col2, y);
+    doc.setTextColor(40, 40, 40); doc.text(`${data.totalFuel} Gal`, col2 + 25, y); y += 8;
+    doc.setTextColor(217, 56, 41); doc.text('AIRCRAFT:', col1, y);
+    doc.setTextColor(40, 40, 40); doc.text(data.aircraft, col1 + 35, y);
+    doc.setTextColor(217, 56, 41); doc.text('TAS:', col2, y);
+    doc.setTextColor(40, 40, 40); doc.text(`${data.tas} kts`, col2 + 25, y); y += 8;
+    doc.setTextColor(217, 56, 41); doc.text('GPH:', col1, y);
+    doc.setTextColor(40, 40, 40); doc.text(`${data.gph} gal/h`, col1 + 35, y);
+    doc.setTextColor(217, 56, 41); doc.text('DATUM:', col2, y);
+    doc.setTextColor(40, 40, 40); doc.text(`${data.date} ${data.time}`, col2 + 25, y); y += 24;
+
+    if (mapImage) {
+        doc.setFont('Helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(11, 31, 101); doc.text('ROUTE MAP', 32, y); y += 4;
+        const maxW = 158; const maxH = Math.min(100, 280 - y); const ratio = mapImage.width / mapImage.height;
+        let imgW, imgH; if (ratio > maxW / maxH) { imgW = maxW; imgH = maxW / ratio; } else { imgH = maxH; imgW = maxH * ratio; }
+        const imgX = 32 + (maxW - imgW) / 2;
+        doc.setFillColor(230, 225, 210); doc.rect(imgX - 2, y - 2, imgW + 4, imgH + 4, 'F');
+        doc.setDrawColor(160, 155, 140); doc.setLineWidth(0.5); doc.rect(imgX - 2, y - 2, imgW + 4, imgH + 4, 'S');
+        doc.addImage(mapImage.data, 'JPEG', imgX, y, imgW, imgH);
+    }
+}
+
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : null;
+}
+
+function drawRouteNavigationPage(doc, data, legs) {
+    let y = 30;
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(11, 31, 101); doc.text('ROUTE & NAVIGATION', 32, y); y += 4;
+    doc.setDrawColor(11, 31, 101); doc.setLineWidth(0.5); doc.line(32, y, 190, y); y += 10;
+
+    doc.setFont('Helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(80, 80, 80);
+    const wpNames = [data.depICAO || currentStartICAO];
+    for (let i = 1; i < routeWaypoints.length - 1; i++) wpNames.push(`WP${i}`);
+    if (routeWaypoints.length > 1) wpNames.push(data.isPOI ? 'POI' : (data.destICAO || currentDestICAO));
+    doc.text(wpNames.join(' -> '), 32, y); y += 8;
+
+    const tableX = 32, colWidths = [10, 42, 16, 16, 16, 16, 16];
+    const tableW = colWidths.reduce((a, b) => a + b, 0), rowH = 10;
+
+    doc.setFillColor(220, 215, 200); doc.rect(tableX, y, tableW, 7, 'F');
+    doc.setDrawColor(160, 155, 140); doc.rect(tableX, y, tableW, 7, 'S');
+
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(40, 40, 40);
+    doc.text('LEG', tableX + 2, y + 5); doc.text('ROUTE', tableX + colWidths[0] + 2, y + 5); doc.text('FREQ', tableX + colWidths[0] + colWidths[1] + 2, y + 5);
+    doc.text('HDG', tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, y + 5); doc.text('DIST', tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 2, y + 5);
+    doc.text('TIME', tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + 2, y + 5); doc.text('FUEL', tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + colWidths[5] + 2, y + 5);
+    y += 7;
+
+    doc.setFont('Helvetica', 'normal');
+    let totalTime = 0, totalFuel = 0;
+    legs.forEach((leg, i) => {
+        totalTime += leg.time; totalFuel += parseFloat(leg.fuel);
+        if (i % 2 === 0) { doc.setFillColor(250, 246, 235); doc.rect(tableX, y, tableW, rowH, 'F'); }
+        doc.setDrawColor(200, 195, 180); doc.rect(tableX, y, tableW, rowH, 'S');
+
+        doc.setTextColor(40, 40, 40); doc.setFontSize(8); doc.text(`${i + 1}`, tableX + 3, y + 6);
+        doc.text(`${leg.from}`, tableX + colWidths[0] + 2, y + 4); doc.text(`-> ${leg.to}`, tableX + colWidths[0] + 2, y + 8.5);
+
+        doc.setFontSize(7); doc.setTextColor(11, 31, 101);
+        if (leg.f1) doc.text(leg.f1, tableX + colWidths[0] + colWidths[1] + 2, y + 4);
+        if (leg.f2) doc.text(leg.f2, tableX + colWidths[0] + colWidths[1] + 2, y + 8.5);
+
+        doc.setFontSize(8); doc.setTextColor(40, 40, 40);
+        doc.text(`${leg.heading}\u00B0`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + 2, y + 6);
+        doc.text(`${leg.dist} NM`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 2, y + 6);
+        doc.text(`${leg.time} m`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + 2, y + 6);
+        doc.text(`${leg.fuel} G`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + colWidths[5] + 2, y + 6);
+        y += rowH;
+    });
+
+    doc.setFillColor(210, 205, 190); doc.rect(tableX, y, tableW, 7, 'F');
+    doc.setDrawColor(160, 155, 140); doc.rect(tableX, y, tableW, 7, 'S');
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(11, 31, 101);
+    doc.text('TOTAL', tableX + colWidths[0] + 2, y + 5);
+    doc.text(`${data.totalDist} NM`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 2, y + 5);
+    doc.text(`${totalTime} m`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + 2, y + 5);
+    doc.text(`${totalFuel.toFixed(1)} G`, tableX + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + colWidths[5] + 2, y + 5);
+    y += 13;
+
+    doc.setDrawColor(100, 100, 100); doc.setLineWidth(0.3); doc.setLineDashPattern([2, 2], 0); doc.line(32, y, 190, y); doc.setLineDashPattern([], 0); y += 6;
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(11, 31, 101); doc.text('PERFORMANCE', 32, y); y += 8;
+
+    doc.setFontSize(9); const pc = [34, 66, 98, 130, 162];
+    const items = [ ['AC', data.aircraft], ['TAS', `${data.tas} kts`], ['GPH', `${data.gph} gal/h`], ['ETE', data.totalTimeStr], ['FUEL', `${data.totalFuel} Gal`] ];
+    items.forEach((item, i) => {
+        doc.setFont('Helvetica', 'bold'); doc.setTextColor(217, 56, 41); doc.text(item[0], pc[i], y);
+        doc.setFont('Helvetica', 'normal'); doc.setTextColor(40, 40, 40); doc.text(item[1], pc[i], y + 5);
+    });
+
+    const vpCanvas = document.getElementById('verticalProfileCanvas');
+    if (vpCanvas && vpCanvas.width > 0 && vpCanvas.height > 0) {
+        try {
+            const vpDataUrl = vpCanvas.toDataURL('image/png', 1.0);
+            const vpW = 158; const vpH = (vpCanvas.height / vpCanvas.width) * vpW; y += 12;
+            doc.addImage(vpDataUrl, 'PNG', 32, y, vpW, vpH);
+            doc.setDrawColor(200, 200, 200); doc.setLineWidth(0.3); doc.rect(32, y, vpW, vpH); y += vpH;
+        } catch (e) { }
+    }
+    y += 14;
+
+    doc.setDrawColor(100, 100, 100); doc.setLineWidth(0.3); doc.setLineDashPattern([2, 2], 0); doc.line(32, y, 190, y); doc.setLineDashPattern([], 0); y += 6;
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(11, 31, 101); doc.text('AIRSPACE WARNINGS', 32, y); y += 8;
+
+    let finalAirspaces = activeAirspaces || [];
+    if (finalAirspaces.length === 0) {
+        doc.setFont('Helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(40, 140, 40); doc.text('Route frei - keine Konflikte erkannt.', 34, y);
+    } else {
+        for (let i = 0; i < finalAirspaces.length; i++) {
+            if (y > 278) { doc.setFont('Helvetica', 'italic'); doc.setFontSize(7); doc.setTextColor(120, 120, 120); doc.text(`... und ${finalAirspaces.length - i} weitere`, 38, y); break; }
+            const a = finalAirspaces[i]; const style = getAirspaceStyle(a); const displayName = getAirspaceDisplayName(a);
+            const rgb = hexToRgb(style.color);
+            if (rgb) { doc.setFillColor(rgb.r, rgb.g, rgb.b); doc.circle(35, y - 1.2, 1.2, 'F'); }
+            doc.setFont('Helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(40, 40, 40);
+            const catTag = `[${style.category}]`; doc.text(catTag, 38, y);
+            doc.setFont('Helvetica', 'normal'); doc.text(displayName, 38 + doc.getTextWidth(catTag) + 1, y);
+            if (a.lowerLimit && a.upperLimit) {
+                const fmtLmt = (lim) => {
+                    if (!lim) return '?'; if (lim.referenceDatum === 0 && lim.value === 0) return 'GND';
+                    if (lim.unit === 6) return `FL ${lim.value}`;
+                    return `${lim.value} ${lim.unit === 1 ? 'FT' : 'M'}${lim.referenceDatum === 1 ? ' MSL' : (lim.referenceDatum === 0 ? ' AGL' : '')}`;
+                };
+                doc.setFontSize(7); doc.setTextColor(100, 100, 100); doc.text(`${fmtLmt(a.lowerLimit)} - ${fmtLmt(a.upperLimit)}`, 190, y, { align: 'right' });
+            }
+            if (a.frequencies && a.frequencies.length > 0) {
+                const primary = a.frequencies.find(f => f.primary) || a.frequencies[0];
+                if (primary && primary.value) { y += 3.5; doc.setFontSize(7); doc.setTextColor(11, 31, 101); doc.setFont('Helvetica', 'bold'); doc.text(`${primary.name || 'FREQ'}: ${primary.value}`, 38, y); }
+            }
+            y += 5;
+        }
+    }
+}
+
+function drawAirportInfoPage(doc, type, data, photo, detailMap, metarImg) {
+    let y = 30; const isDep = (type === 'dep'); const isPOI = (!isDep && data.isPOI);
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(11, 31, 101); doc.text(isPOI ? 'ZIELPUNKT INFO' : (isDep ? 'DEPARTURE AIRPORT' : 'DESTINATION AIRPORT'), 32, y); y += 4;
+    doc.setDrawColor(11, 31, 101); doc.setLineWidth(0.5); doc.line(32, y, 190, y); y += 14;
+
+    const photoYStart = y - 2;
+    if (photo) { try { doc.addImage(photo, 'JPEG', 152, photoYStart, 38, 28); doc.setDrawColor(200, 195, 180); doc.setLineWidth(0.4); doc.rect(151, photoYStart - 1, 40, 34); } catch (e) { } }
+
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor(11, 31, 101); doc.text(isDep ? data.depICAO : data.destICAO, 32, y); y += 7;
+    doc.setFont('Helvetica', 'normal'); doc.setFontSize(14); doc.setTextColor(60, 60, 60); doc.text(isDep ? data.depName : data.destName, 32, y); y += 7;
+    doc.setFont('Helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(100, 100, 100); doc.text(`Coords: ${isDep ? data.depCoords : data.destCoords}`, 32, y);
+    y = photo ? Math.max(y + 6, photoYStart + 36) : y + 6;
+    doc.setDrawColor(100, 100, 100); doc.setLineWidth(0.3); doc.setLineDashPattern([2, 2], 0); doc.line(32, y, 190, y); doc.setLineDashPattern([], 0); y += 8;
+
+    if (!isPOI) {
+        let blockY = y;
+        doc.setFont('Helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(217, 56, 41); doc.text('RUNWAYS', 32, blockY); doc.text('FREQUENZEN', 115, blockY);
+        let rwyY = blockY + 7, freqY = blockY + 7;
+        const rwy = isDep ? data.depRwy : data.destRwy, freq = isDep ? data.depFreq : data.destFreq;
+        doc.setFont('Helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(40, 40, 40);
+        if (rwy && rwy !== 'Sucht Pisten-Infos...' && rwy !== 'Keine Daten gefunden') { rwy.split(/\s*(?:\||\n|<br\s*\/?>)\s*/i).filter(r => r.trim()).forEach(r => { doc.text(stripEmojis(r.trim()), 34, rwyY); rwyY += 6; }); }
+        else { doc.setTextColor(120, 120, 120); doc.text('Keine Pistendaten verfuegbar.', 34, rwyY); rwyY += 6; }
+        doc.setTextColor(11, 31, 101);
+        if (freq && !freq.includes('Sucht Frequenz') && freq.trim() !== '') { stripEmojis(freq).split('\n').filter(l => l.trim()).forEach(line => { doc.text(line.trim(), 117, freqY); freqY += 6; }); }
+        else { doc.setTextColor(120, 120, 120); doc.text('Keine Frequenzdaten verfuegbar.', 117, freqY); freqY += 6; }
+        y = Math.max(rwyY, freqY) + 4;
+        doc.setDrawColor(100, 100, 100); doc.setLineDashPattern([2, 2], 0); doc.line(32, y, 190, y); doc.setLineDashPattern([], 0); y += 8;
+    }
+
+    doc.setFont('Helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(11, 31, 101); doc.text(isPOI ? 'INFO' : 'AIRPORT INFO', 32, y); y += 7;
+    doc.setFont('Helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(50, 50, 50);
+    const desc = isDep ? data.depDesc : data.destDesc;
+    if (desc && desc !== 'Warte auf Daten...') { const trimmedDesc = desc.length > 600 ? desc.substring(0, 600) + '...' : desc; y = pdfWrappedText(doc, trimmedDesc, 32, y, 155, 5.5); }
+    else { doc.text('Keine weiteren Informationen verfuegbar.', 32, y); y += 6; }
+
+    if (detailMap || metarImg) {
+        y = Math.max(y + 6, 170); doc.setDrawColor(100, 100, 100); doc.setLineDashPattern([2, 2], 0); doc.line(32, y, 190, y); doc.setLineDashPattern([], 0); y += 6;
+        const hasMetar = metarImg && metarImg.data && !isPOI; const mapAvailW = hasMetar ? 95 : 155; const maxH = Math.min(100, 280 - y);
+        if (detailMap) {
+            doc.setFont('Helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(11, 31, 101); doc.text(isPOI ? 'KARTE' : `PLATZKARTE`, 32, y); const mapLabelY = y; y += 5;
+            const mapRatio = 700 / 360; let mapW, mapH; if (mapAvailW / maxH < mapRatio) { mapW = mapAvailW; mapH = mapW / mapRatio; } else { mapH = maxH; mapW = mapH * mapRatio; }
+            doc.setFillColor(230, 225, 210); doc.rect(31, y - 1, mapW + 2, mapH + 2, 'F'); doc.setDrawColor(160, 155, 140); doc.setLineWidth(0.4); doc.rect(31, y - 1, mapW + 2, mapH + 2, 'S'); doc.addImage(detailMap, 'JPEG', 32, y, mapW, mapH);
+            if (hasMetar) {
+                const metarX = 32 + mapAvailW + 4; const metarAvailW = 190 - metarX;
+                doc.setFont('Helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(11, 31, 101); doc.text('METAR', metarX, mapLabelY);
+                const metarRatio = metarImg.ratio || 1.5; let metarW = metarAvailW; let metarH = metarW / metarRatio; if (metarH > mapH) { metarH = mapH; metarW = metarH * metarRatio; }
+                doc.setFillColor(240, 236, 224); doc.rect(metarX - 1, y - 1, metarW + 2, metarH + 2, 'F'); doc.setDrawColor(160, 155, 140); doc.setLineWidth(0.4); doc.rect(metarX - 1, y - 1, metarW + 2, metarH + 2, 'S');
+                try { doc.addImage(metarImg.data, 'PNG', metarX, y, metarW, metarH); } catch (e) { }
+            }
+        } else if (hasMetar) {
+            doc.setFont('Helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(11, 31, 101); doc.text('METAR', 32, y); y += 5;
+            const metarRatio = metarImg.ratio || 1.5; let metarW = 155; let metarH = metarW / metarRatio; if (metarH > maxH) { metarH = maxH; metarW = metarH * metarRatio; }
+            doc.setFillColor(240, 236, 224); doc.rect(31, y - 1, metarW + 2, metarH + 2, 'F'); doc.setDrawColor(160, 155, 140); doc.setLineWidth(0.4); doc.rect(31, y - 1, metarW + 2, metarH + 2, 'S');
+            try { doc.addImage(metarImg.data, 'PNG', 32, y, metarW, metarH); } catch (e) { }
+        }
+    }
+}
+
+async function captureMetarWidget(containerId) {
+    if (!window.html2canvas) return null;
+    try {
+        const container = document.getElementById(containerId);
+        if (!container || container.style.display === 'none' || !container.innerHTML.trim()) return null;
+        if (container.innerHTML.includes('Sucht lokales') || container.innerHTML.includes('Fehler')) return null;
+        const ratio = container.offsetWidth / container.offsetHeight;
+        // Metar-Widgets dürfen html2canvas nutzen, da sie nur lokales HTML ohne externe/vergiftete Bilder enthalten!
+        const canvas = await html2canvas(container, { backgroundColor: '#f0eada', scale: 2, useCORS: true, logging: false });
+        return { data: canvas.toDataURL('image/png'), ratio: ratio };
+    } catch (e) { return null; }
+}
+
+window.generateBriefingPDF = async function() {
+    if (!currentMissionData || document.getElementById("briefingBox").style.display !== "block") {
+        alert('Kein aktives Briefing vorhanden.'); return;
+    }
+    if (!window.jspdf) {
+        alert('PDF-Bibliothek nicht geladen. Bitte Seite neu laden.'); return;
+    }
+
+    const indicator = document.getElementById('searchIndicator');
+    if (indicator) indicator.innerText = '\uD83D\uDCC4 Erstelle Briefing Pack PDF...';
+
+    try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+        const data = gatherBriefingData();
+        const legs = computeLegs();
+        const isPOI = data.isPOI;
+        const totalPages = isPOI ? 3 : 4;
+
+        const mapImagePromise = captureMapForPDF();
+        const depLL = routeWaypoints[0];
+        const destLL = routeWaypoints[routeWaypoints.length - 1];
+        const detailZoom = 12;
+        const depDetailPromise = renderTileCanvas(depLL.lat, depLL.lng || depLL.lon, detailZoom, 700, 360);
+        const destDetailPromise = renderTileCanvas(destLL.lat, destLL.lng || destLL.lon, detailZoom, 700, 360);
+
+        const depPhotoUrl = extractImageUrl(document.getElementById('wikiDepImage'));
+        const destPhotoUrl = extractImageUrl(document.getElementById('wikiDestImage'));
+        const depMetarPromise = captureMetarWidget('metarContainerDep');
+        const destMetarPromise = isPOI ? Promise.resolve(null) : captureMetarWidget('metarContainerDest');
+
+        const [depPhoto, destPhoto, depDetail, destDetail, depMetar, destMetar] = await Promise.all([
+            depPhotoUrl ? getImageAsBase64(depPhotoUrl) : Promise.resolve(null),
+            destPhotoUrl ? getImageAsBase64(destPhotoUrl) : Promise.resolve(null),
+            depDetailPromise,
+            destDetailPromise,
+            depMetarPromise,
+            destMetarPromise
+        ]);
+
+        const mapImage = await mapImagePromise;
+
+        doc.setProperties({ title: `Briefing Pack - ${data.depICAO} to ${isPOI ? 'POI' : data.destICAO}` });
+
+        drawNotebookBackground(doc, 1, totalPages); drawMissionBriefingPage(doc, data, mapImage);
+        doc.addPage();
+        drawNotebookBackground(doc, 2, totalPages); drawRouteNavigationPage(doc, data, legs);
+        doc.addPage();
+        drawNotebookBackground(doc, 3, totalPages); drawAirportInfoPage(doc, 'dep', data, depPhoto, depDetail, depMetar);
+        
+        if (!isPOI) {
+            doc.addPage();
+            drawNotebookBackground(doc, 4, totalPages); drawAirportInfoPage(doc, 'dest', data, destPhoto, destDetail, destMetar);
+        }
+
+        const filename = `Briefing_${data.depICAO}_${isPOI ? 'Rundflug' : data.destICAO}_${data.date.replace(/\./g, '')}.pdf`;
+        doc.save(filename);
+
+        if (indicator) indicator.innerText = '\uD83D\uDCC4 Briefing Pack PDF erstellt!';
+        setTimeout(() => { if (indicator) indicator.innerText = 'System bereit.'; }, 4000);
+    } catch (e) {
+        console.error('PDF generation failed:', e);
+        if (indicator) indicator.innerText = '\u274C PDF-Erstellung fehlgeschlagen.';
+        alert('PDF konnte nicht erstellt werden: ' + e.message);
     }
 };
