@@ -549,7 +549,7 @@ window.onload = () => {
 
     initDragKnob('tasDragKnob', 'tasRadioDisplay', 'tasSlider', 80, 260, 'tas');
     initDragKnob('gphDragKnob', 'gphRadioDisplay', 'gphSlider', 5, 35, 'gph');
-    initDragKnob('altDragKnob', 'altRadioDisplay', 'altSlider', 1500, 9500, 'alt');
+    initDragKnob('altDragKnob', 'altRadioDisplay', 'altSlider', 1500, 13500, 'alt');
     syncToNavCom('altRadioDisplay', document.getElementById('altSlider') ? document.getElementById('altSlider').value : '4500');
 
     if (aiToggleBtn && aiToggleBtn.checked) {
@@ -821,6 +821,8 @@ function handleSliderChange(type, val) {
     syncToNavCom(type + 'Radio', val);
     if (type === 'alt') {
         syncToNavCom('altRadioDisplay', val);
+        const mInp = document.getElementById('altMapInput');
+        if (mInp && mInp.innerText != val) mInp.innerText = val;
         triggerVerticalProfileUpdate();
         if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
     }
@@ -836,9 +838,9 @@ function handleRateChange(val) {
     if (rateMapDisplay) rateMapDisplay.textContent = val;
     // Sync sliders
     const rateSlider = document.getElementById('rateSlider');
-    const rateSliderMap = document.getElementById('rateSliderMap');
+    const rateMapInp = document.getElementById('rateMapInput');
     if (rateSlider) rateSlider.value = val;
-    if (rateSliderMap) rateSliderMap.value = val;
+    if (rateMapInp && rateMapInp.innerText != val) rateMapInp.innerText = val;
     // Sync NAVCOM if in rate mode
     if (typeof navcomAltMode !== 'undefined' && navcomAltMode === 'rate') {
         const altRadioDisplay = document.getElementById('altRadioDisplay');
@@ -2587,23 +2589,17 @@ function updateRoutePerformance() {
 
 function initMapBase() {
     if (map) return;
-
+    const radarActive = localStorage.getItem('ga_radar_active') === 'true';
     const topoMap = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: 'OpenTopoMap' });
     const topoLightMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' });
     const satMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' });
     const darkMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: 'CartoDB' });
     const lightMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: 'CartoDB' });
-
     const aeroOverlay = L.tileLayer('https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', {
-        attribution: 'AeroData / Navigraph',
-        opacity: 0.65,
-        maxNativeZoom: 12
+        attribution: 'AeroData / Navigraph', opacity: 0.65, maxNativeZoom: 12
     });
-
     topoMap.setOpacity(0.5);
-
     map = L.map('map', { layers: [topoMap, aeroOverlay], attributionControl: false }).setView([51.1657, 10.4515], 6);
-
     const baseMaps = {
         "⛰️ Topografie (Mit Text)": topoMap,
         "🗺️ Terrain (Ohne Text)": topoLightMap,
@@ -2611,40 +2607,44 @@ function initMapBase() {
         "🌑 Dark Mode (Clean)": darkMap,
         "📝 Blank Mode (Weiß)": lightMap
     };
-
+    const radarOverlay = L.layerGroup();
+    fetch('https://api.rainviewer.com/public/weather-maps.json')
+        .then(res => res.json())
+        .then(data => {
+            if (data && data.radar && data.radar.past && data.radar.past.length > 0) {
+                const latestRadar = data.radar.past[data.radar.past.length - 1].path;
+                L.tileLayer(`https://tilecache.rainviewer.com${latestRadar}/256/{z}/{x}/{y}/2/1_1.png`, {
+                    opacity: 0.65, transparent: true, maxNativeZoom: 7, attribution: 'Radar © RainViewer'
+                }).addTo(radarOverlay); if (radarActive) radarOverlay.addTo(map);
+            }
+        }).catch(e => console.warn('RainViewer Fetch Fehler:', e));
     const overlayMaps = {
-        "🛩️ VFR Lufträume (Overlay)": aeroOverlay
+        "🛩️ VFR Lufträume (Overlay)": aeroOverlay,
+        "🌧️ Wetterradar (Niederschlag)": radarOverlay
     };
-
     L.control.layers(baseMaps, overlayMaps).addTo(map);
-
     map.on('overlayadd', function (e) {
-        if (e.name === "🛩️ VFR Lufträume (Overlay)") {
-            topoMap.setOpacity(0.5);
-        }
+        if (e.name === "🛩️ VFR Lufträume (Overlay)") topoMap.setOpacity(0.5);
+        if (e.name === "🌧️ Wetterradar (Niederschlag)") localStorage.setItem('ga_radar_active', 'true');
     });
-
     map.on('overlayremove', function (e) {
-        if (e.name === "🛩️ VFR Lufträume (Overlay)") {
-            topoMap.setOpacity(1.0);
-        }
+        if (e.name === "🛩️ VFR Lufträume (Overlay)") topoMap.setOpacity(1.0);
+        if (e.name === "🌧️ Wetterradar (Niederschlag)") localStorage.setItem('ga_radar_active', 'false');
     });
-
     let fetchTimeout = null;
     map.on('moveend', function () {
         if (snapMode) {
-            clearTimeout(fetchTimeout); // Löscht alte, noch nicht ausgeführte Anfragen
-            fetchTimeout = setTimeout(fetchOpenAIPData, 600); // Wartet 0,6 Sekunden Stillstand ab
+            clearTimeout(fetchTimeout);
+            fetchTimeout = setTimeout(fetchOpenAIPData, 600);
         }
     });
-
+    // Fehlenden Vollbild-Button wiederherstellen
     const fsControl = L.control({ position: 'topleft' });
     fsControl.onAdd = function () {
         const btn = L.DomUtil.create('button', 'leaflet-bar leaflet-control');
         btn.innerHTML = '⛶'; btn.title = 'Vollbildmodus'; btn.style.width = '30px'; btn.style.height = '30px';
         btn.style.lineHeight = '30px'; btn.style.backgroundColor = '#fff'; btn.style.border = '1px solid #ccc';
         btn.style.cursor = 'pointer'; btn.style.fontSize = '18px'; btn.style.fontWeight = 'bold'; btn.style.textAlign = 'center'; btn.style.padding = '0';
-
         btn.onclick = function (e) {
             e.preventDefault(); document.body.classList.toggle('map-is-fullscreen');
             if (document.body.classList.contains('map-is-fullscreen')) { btn.innerHTML = '✖'; } else { btn.innerHTML = '⛶'; }
@@ -3881,6 +3881,7 @@ async function fetchOpenAIPData() {
    VERTICAL PROFILE (Höhenprofil) ENGINE
    ========================================================= */
 let vpElevationData = null;
+let vpWeatherData = null;
 let vpProfileTimeout = null;
 let vpZoomLevel = 100; // 100 = full route, 10 = 10% view
 let vpHighResData = null; // Higher resolution elevation data for zoom
@@ -3910,8 +3911,10 @@ function triggerVerticalProfileUpdate() {
 
         try {
             vpElevationData = await fetchRouteElevation(routeWaypoints);
+            if (status) status.textContent = 'Lade Wetterlage...';
+            vpWeatherData = await fetchRouteWeather(routeWaypoints, vpElevationData);
             renderVerticalProfile('verticalProfileCanvas');
-            if (status) status.textContent = vpElevationData.length + ' Höhenpunkte geladen';
+            if (status) status.textContent = vpElevationData.length + ' Höhenpunkte & Wetter geladen';
         } catch (e) {
             console.error('Vertical Profile Error:', e);
             if (status) status.textContent = 'Limit API/Fehler';
@@ -4001,6 +4004,238 @@ async function fetchRouteElevation(routePts) {
     return finalData;
 }
 
+async function fetchRouteWeather(routePts, elevData) {
+    if (!routePts || routePts.length < 2 || !elevData || elevData.length < 2) return null;
+    const totalDist = elevData[elevData.length - 1].distNM;
+    const numZones = 10;
+    const zones = [];
+    const fetchPromises = [];
+    for (let i = 0; i < numZones; i++) {
+        const targetDist = (i / (numZones - 1)) * totalDist;
+        let bestPt = elevData[0];
+        let minDiff = Infinity;
+        for (const pt of elevData) {
+            const diff = Math.abs(pt.distNM - targetDist);
+            if (diff < minDiff) { minDiff = diff; bestPt = pt; }
+        }
+        const minLat = Number((bestPt.lat - 0.4).toFixed(4));
+        const maxLat = Number((bestPt.lat + 0.4).toFixed(4));
+        const minLon = Number((bestPt.lon - 0.6).toFixed(4));
+        const maxLon = Number((bestPt.lon + 0.6).toFixed(4));
+        const url = `https://aviationweather.gov/api/data/metar?bbox=${minLat},${minLon},${maxLat},${maxLon}&format=json&t=${Date.now()}`;
+        const p = fetch(url).then(async r => {
+            if (r.status === 204) return [];
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return JSON.parse(await r.text());
+        }).catch(async e => {
+            try {
+                const proxyUrl = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`;
+                const pr = await fetch(proxyUrl);
+                if (pr.status === 204) return [];
+                if (!pr.ok) throw new Error("Proxy Error");
+                return JSON.parse(await pr.text());
+            } catch(px) { return []; }
+        }).then(metars => ({ targetDist, bestPt, metars, index: i }));
+        fetchPromises.push(p);
+    }
+    const results = await Promise.all(fetchPromises);
+    for (let i = 0; i < results.length; i++) {
+        const res = results[i];
+        if (!res.metars || res.metars.length === 0) continue;
+        let closestMetar = null, minMetarDist = Infinity;
+        res.metars.forEach(m => {
+            const d = calcNav(res.bestPt.lat, res.bestPt.lon, m.lat, m.lon).dist;
+            if (d < minMetarDist) { minMetarDist = d; closestMetar = m; }
+        });
+        if (closestMetar && minMetarDist < 45) {
+            const clouds = [];
+            const raw = closestMetar.rawOb || "";
+            const stnElevFt = closestMetar.elev ? closestMetar.elev * 3.28084 : 0;
+            const cloudRegex = /(FEW|SCT|BKN|OVC|VV)(\d{3})/g;
+            let match, lowestBase = Infinity;
+            while((match = cloudRegex.exec(raw)) !== null) {
+                const type = match[1];
+                const agl = parseInt(match[2], 10) * 100;
+                const msl = Math.round(agl + stnElevFt);
+                if (msl < lowestBase) lowestBase = msl;
+                clouds.push({ type, baseAgl: agl, baseMsl: msl });
+            }
+            const hasRain = /\b(-|\+)?(RA|DZ|SH|SHRA)\b/i.test(raw);
+            const hasSnow = /\b(-|\+)?(SN|SG|PL|SHSN)\b/i.test(raw);
+            const hasTS = /\b(-|\+)?(TS|TSRA|CB)\b/i.test(raw);
+            if(clouds.length > 0 || hasRain || hasSnow || hasTS) {
+                const visuals = { puffs: [], drops: [], flashes: [] };
+                if (clouds.length > 0) {
+                    for(let c=0; c<25; c++) visuals.puffs.push({ x: Math.random(), y: Math.random(), r: Math.random(), op: Math.random() });
+                }
+                if (hasRain || hasSnow) {
+                    for(let d=0; d<45; d++) visuals.drops.push({ x: Math.random(), y: Math.random(), spd: Math.random() });
+                }
+                if (hasTS) {
+                    for(let f=0; f<2; f++) visuals.flashes.push({ x: Math.random(), pts: [Math.random(), Math.random(), Math.random(), Math.random()] });
+                }
+                zones.push({
+                    distNM: res.bestPt.distNM, icao: closestMetar.icaoId, clouds: clouds,
+                    lowestBase: lowestBase !== Infinity ? lowestBase : 5000,
+                    weather: { hasRain, hasSnow, hasTS }, visuals: visuals
+                });
+            }
+        }
+    }
+    return zones.length > 0 ? zones : null;
+}
+// Globale Debug-Funktion für die Entwicklerkonsole
+window.debugCloudProfile = function() {
+    console.log("=== MANUELLER CLOUD DEBUG START ===");
+    if (!routeWaypoints || routeWaypoints.length < 2) {
+        console.warn("Bitte erst einen Flugauftrag generieren (Route fehlt).");
+        return;
+    }
+    triggerVerticalProfileUpdate();
+    console.log("Update angetriggert. Bitte das Profil-Canvas öffnen und die Logs beobachten.");
+};
+function vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, isDarkTheme, elevData) {
+    if (!vpWeatherData || vpWeatherData.length === 0) return;
+    const getElevY = (dNM) => {
+        if (!elevData || elevData.length < 2) return yOf(0);
+        for(let i=0; i<elevData.length-1; i++) {
+            if (dNM >= elevData[i].distNM && dNM <= elevData[i+1].distNM) {
+                const f = (dNM - elevData[i].distNM) / (elevData[i+1].distNM - elevData[i].distNM);
+                return yOf(elevData[i].elevFt + f * (elevData[i+1].elevFt - elevData[i].elevFt));
+            }
+        }
+        return yOf(elevData[elevData.length-1].elevFt);
+    };
+    // Stabiler, deterministischer Pseudo-Zufallsgenerator gegen Flackern
+    const prng = (s) => { let x = Math.sin(s) * 10000; return x - Math.floor(x); };
+    ctx.save();
+    for (let i = 0; i < vpWeatherData.length; i++) {
+        const zone = vpWeatherData[i];
+        const prevDist = (i > 0) ? (zone.distNM + vpWeatherData[i-1].distNM)/2 : Math.max(0, zone.distNM - totalDist*0.05);
+        const nextDist = (i < vpWeatherData.length - 1) ? (zone.distNM + vpWeatherData[i+1].distNM)/2 : Math.min(totalDist, zone.distNM + totalDist*0.05);
+        const startX = xOf(prevDist), endX = xOf(nextDist), width = endX - startX, midX = startX + width/2;
+        // 1. REGEN & SCHNEE
+        if (zone.weather && (zone.weather.hasRain || zone.weather.hasSnow) && zone.lowestBase) {
+            const baseY = yOf(zone.lowestBase);
+            ctx.beginPath();
+            for(let d=0; d<35; d++) {
+                const pxRand = prng(i * 200 + d + 0.1), pyRand = prng(i * 200 + d + 0.2), spdRand = prng(i * 200 + d + 0.3);
+                const dropX = startX + pxRand * width, dNM = prevDist + pxRand * (nextDist - prevDist);
+                const groundY = getElevY(dNM);
+                if (baseY < groundY) {
+                    if (zone.weather.hasSnow) {
+                        const sy = baseY + pyRand * (groundY - baseY);
+                        ctx.moveTo(dropX, sy); ctx.arc(dropX, sy, 0.8 + spdRand, 0, Math.PI*2);
+                    } else {
+                        const ry1 = baseY + pyRand * (groundY - baseY);
+                        const ry2 = Math.min(groundY, ry1 + 6 + spdRand * 4);
+                        ctx.moveTo(dropX, ry1); ctx.lineTo(dropX - 1 - spdRand*2, ry2);
+                    }
+                }
+            }
+            ctx.fillStyle = zone.weather.hasSnow ? 'rgba(255,255,255,0.8)' : 'rgba(80, 150, 255, 0.6)';
+            ctx.strokeStyle = zone.weather.hasSnow ? 'rgba(255,255,255,0.8)' : 'rgba(80, 150, 255, 0.5)';
+            ctx.lineWidth = 1.5;
+            if (zone.weather.hasSnow) ctx.fill(); else ctx.stroke();
+        }
+        // 2. BLITZE
+        if (zone.weather && zone.weather.hasTS && zone.lowestBase) {
+            const baseY = yOf(zone.lowestBase);
+            ctx.beginPath();
+            for(let f=0; f<2; f++) {
+                const fxRand = prng(i * 300 + f + 0.1);
+                const fx = startX + width * 0.2 + fxRand * width * 0.6;
+                const groundY = getElevY(prevDist + fxRand * (nextDist - prevDist));
+                if (baseY < groundY) {
+                    const stepY = (groundY - baseY) / 4;
+                    ctx.moveTo(fx, baseY);
+                    ctx.lineTo(fx + (prng(i*300+f+0.2)-0.5)*15, baseY + stepY);
+                    ctx.lineTo(fx + (prng(i*300+f+0.3)-0.5)*15, baseY + stepY*2);
+                    ctx.lineTo(fx + (prng(i*300+f+0.4)-0.5)*15, baseY + stepY*3);
+                    ctx.lineTo(fx + (prng(i*300+f+0.5)-0.5)*15, groundY);
+                }
+            }
+            ctx.strokeStyle = 'rgba(255, 230, 100, 0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
+        }
+        // 3. WOLKEN (PUFFS) – Zoom-adaptiv, isolierte Zellen für FEW/SCT
+        if (zone.clouds && zone.clouds.length > 0) {
+            zone.clouds.forEach((c, cIdx) => {
+                const baseY = yOf(c.baseMsl);
+                let thicknessFt = 600, baseColor = isDarkTheme ? 210 : 255;
+                let coverage = 1.0, radiusMult = 1.0, numCells = 4;
+                // Logik für isolierte Grüppchen (mehr Zellen = kleinere Wölkchen)
+                if (c.type === 'FEW') { thicknessFt = 800; coverage = 0.22; radiusMult = 0.35; numCells = 16; }
+                else if (c.type === 'SCT') { thicknessFt = 1500; baseColor -= 15; coverage = 0.45; radiusMult = 0.6; numCells = 10; }
+                else if (c.type === 'BKN') { thicknessFt = 3000; baseColor -= 40; coverage = 0.80; radiusMult = 0.9; numCells = 6; }
+                else if (c.type === 'OVC' || c.type === 'VV') { thicknessFt = 5000; baseColor -= 70; coverage = 1.0; }
+                if (zone.weather && zone.weather.hasTS) { thicknessFt = Math.max(thicknessFt, 12000); baseColor -= 60; coverage = 1.0; radiusMult = 1.1; numCells = 4; }
+                const topY = yOf(c.baseMsl + thicknessFt), layerHeight = baseY - topY;
+                if (baseY < padTop - 20 || topY > padTop + plotH + 20) return;
+                // Zoom-abhängige Skalierung: Beim Rauszoomen wird 'width' klein -> Wolken werden winzig!
+                const maxRadiusY = Math.abs(yOf(1000) - yOf(0));
+                const maxRadiusX = width * (2.5 / numCells);
+                const maxR = Math.max(2, Math.min(maxRadiusY, maxRadiusX)) * radiusMult;
+
+                const seedBase = i * 100 + cIdx * 10;
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(startX - 2000, 0, width + 4000, baseY);
+                ctx.clip();
+                const numPuffs = c.type === 'FEW' ? 40 : 60;
+                for (let p = 0; p < numPuffs; p++) {
+                    const pxRand = prng(seedBase + p + 0.1);
+
+                    const cellIndex = Math.floor(pxRand * numCells);
+                    const cellActive = prng(seedBase + cellIndex * 77) < coverage;
+                    if (!cellActive) continue;
+                    let localPx = pxRand;
+                    // Bei FEW/SCT zwingen wir die Puffs in die Mitte der Zelle (0.2 bis 0.8), um Gaps zu garantieren!
+                    if (c.type === 'FEW' || c.type === 'SCT') {
+                        const cellStart = cellIndex / numCells;
+                        const puffInCell = prng(seedBase + p + 0.5);
+                        localPx = cellStart + (0.2 + puffInCell * 0.6) / numCells;
+                    }
+                    const pyRand = prng(seedBase + p + 0.2);
+                    const prRand = prng(seedBase + p + 0.3);
+                    const opRand = prng(seedBase + p + 0.4);
+                    // OVC überlappt stark, FEW/SCT bleiben strikt in ihrer Zone
+                    const px = (c.type === 'FEW' || c.type === 'SCT')
+                        ? startX + localPx * width
+                        : startX + (localPx * 1.2 - 0.1) * width;
+                    const py = baseY - pyRand * layerHeight;
+                    const pr = 2 + prRand * maxR;
+
+                    const cVal = Math.floor(baseColor - opRand * 30);
+                    const alpha = (c.type === 'FEW') ? (0.15 + opRand * 0.2) : ((c.type === 'SCT') ? (0.3 + opRand * 0.3) : (0.5 + opRand * 0.4));
+
+                    ctx.beginPath();
+                    ctx.arc(px, py, pr, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${cVal},${cVal},${cVal},${alpha})`;
+
+                    // Performance-Fix: Weiche Ränder deaktivieren, während gezogen wird!
+                    const isDragging = (typeof vpDraggingWP !== 'undefined' && vpDraggingWP >= 0) || (typeof vpDraggingSegment !== 'undefined' && !!vpDraggingSegment);
+                    if (!isDragging) {
+                        ctx.shadowColor = `rgba(${cVal},${cVal},${cVal},${alpha})`;
+                        ctx.shadowBlur = 4 + prRand * 8;
+                    } else {
+                        ctx.shadowColor = 'transparent';
+                        ctx.shadowBlur = 0;
+                    }
+
+                    ctx.fill();
+                }
+                ctx.restore();
+
+                ctx.fillStyle = isDarkTheme ? '#ccc' : '#222';
+                ctx.font = 'bold 8px Arial'; ctx.textAlign = 'center';
+                ctx.fillText(c.type, midX, baseY + 12);
+            });
+        }
+    }
+    ctx.restore();
+}
+
 function computeFlightProfile(elevationData, cruiseAltFt, climbRateFpm, descentRateFpm, tasKts) {
     if (!elevationData || elevationData.length < 2) return null;
 
@@ -4067,7 +4302,16 @@ function renderVerticalProfile(canvasId) {
     const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
     const totalDist = vpElevationData[vpElevationData.length - 1].distNM;
     const maxTerrain = Math.max(...vpElevationData.map(p => p.elevFt));
-    const maxAlt = Math.max(cruiseAlt + 500, maxTerrain + 1500);
+    let maxCloudAlt = 0;
+    if (vpShowClouds && vpWeatherData) {
+        vpWeatherData.forEach(zone => {
+            if (zone.clouds) zone.clouds.forEach(c => {
+                if (c.baseMsl > maxCloudAlt) maxCloudAlt = c.baseMsl;
+            });
+        });
+    }
+    let autoMaxAlt = Math.max(cruiseAlt + 2500, maxTerrain + 1000);
+    const maxAlt = vpMaxAltOverride > 0 ? vpMaxAltOverride : autoMaxAlt;
     const minAlt = 0;
 
     const fpResult = computeFlightProfile(vpElevationData, cruiseAlt, vpClimbRate, vpDescentRate, tas);
@@ -4225,6 +4469,8 @@ function renderVerticalProfile(canvasId) {
     ctx.strokeStyle = '#3a5a20';
     ctx.lineWidth = 1.5;
     ctx.stroke();
+
+    if (vpShowClouds) vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, false, vpElevationData);
 
     // Flight profile
     if (fpResult && fpResult.profile) {
@@ -4552,7 +4798,16 @@ function renderMapProfile() {
     const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
     const totalDist = elevData[elevData.length - 1].distNM;
     const maxTerrain = Math.max(...elevData.map(p => p.elevFt));
-    const maxAlt = Math.max(cruiseAlt + 500, maxTerrain + 1500);
+    let maxCloudAlt = 0;
+    if (vpShowClouds && vpWeatherData) {
+        vpWeatherData.forEach(zone => {
+            if (zone.clouds) zone.clouds.forEach(c => {
+                if (c.baseMsl > maxCloudAlt) maxCloudAlt = c.baseMsl;
+            });
+        });
+    }
+    let autoMaxAlt = Math.max(cruiseAlt + 2500, maxTerrain + 1000);
+    const maxAlt = vpMaxAltOverride > 0 ? vpMaxAltOverride : autoMaxAlt;
     const minAlt = 0;
 
     const fpResult = computeFlightProfile(elevData, cruiseAlt, vpClimbRate, vpDescentRate, tas);
@@ -4720,6 +4975,8 @@ function renderMapProfile() {
     ctx.strokeStyle = '#4a7a30';
     ctx.lineWidth = 1.5;
     ctx.stroke();
+
+    if (vpShowClouds) vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, true, elevData);
 
     // Flight profile
     if (fpResult && fpResult.profile) {
@@ -5051,9 +5308,14 @@ function initAltWaypoints() {
         const zoomFactor = 100 / vpZoomLevel;
         const canvasWidth = Math.round(baseWidth * zoomFactor);
         const totalDist = elevData[elevData.length - 1].distNM;
-        const cruiseAlt = parseInt(document.getElementById('altSliderMap')?.value || document.getElementById('altSlider')?.value || 4500);
+
+        // FIX: Aus dem neuen Span-Feld lesen
+        const cruiseAlt = parseInt(document.getElementById('altMapInput')?.innerText || document.getElementById('altSlider')?.value || 4500);
         const maxTerrain = Math.max(...elevData.map(p => p.elevFt));
-        const maxAlt = Math.max(cruiseAlt + 500, maxTerrain + 1500);
+
+        // FIX: Exakt gleiche Skalierung wie beim Rendering (+ 2500)
+        let autoMaxAlt = Math.max(cruiseAlt + 2500, maxTerrain + 1000);
+        const maxAlt = vpMaxAltOverride > 0 ? vpMaxAltOverride : autoMaxAlt;
         const padLeft = 33, padRight = 16, padTop = 12, padBottom = 22;
         const plotW = canvasWidth - padLeft - padRight;
         const plotH = containerHeight - padTop - padBottom;
@@ -5192,7 +5454,6 @@ function initAltWaypoints() {
         if (!m) return;
         const deltaY = dragStartY - clientY;
         const altChange = (deltaY / m.plotH) * m.maxAlt;
-
         if (vpDraggingWP >= 0) {
             const scaleX = m.canvasWidth / m.rect.width;
             const deltaX = (clientX - dragStartX) * scaleX;
@@ -5210,54 +5471,45 @@ function initAltWaypoints() {
             if (seg.segIdx >= 0 && seg.segIdx < vpSegmentAlts.length) {
                 vpSegmentAlts[seg.segIdx] = newAlt;
                 renderMapProfile();
-                if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
             } else if (seg.segIdx === -1) {
-                const newGlobalAlt = Math.max(500, Math.round((seg.origCruiseAlt + altChange) / 500) * 500);
-                const altMap = document.getElementById('altSliderMap');
-                const altMain = document.getElementById('altSlider');
-                if (altMap && altMap.value != newGlobalAlt) {
-                    altMap.value = newGlobalAlt;
-                    if (typeof handleSliderChange === 'function') handleSliderChange('alt', newGlobalAlt);
-                } else if (altMain && altMain.value != newGlobalAlt) {
-                    altMain.value = newGlobalAlt;
-                    if (typeof handleSliderChange === 'function') handleSliderChange('alt', newGlobalAlt);
+                const newGlobalAlt = Math.max(1500, Math.min(13500, Math.round((seg.origCruiseAlt + altChange) / 500) * 500));
+                const altMap = document.getElementById('altMapInput');
+                if (altMap && altMap.innerText != newGlobalAlt) {
+                    altMap.innerText = newGlobalAlt;
+                    renderMapProfile();
                 }
             } else if (seg.segIdx === -2 || seg.segIdx === -3) {
-                if (vpAltWaypoints.length > 0) {
-                    vpAltWaypoints[0].altFt = newAlt;
-                    renderMapProfile();
-                    if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
-                }
+                if (vpAltWaypoints.length > 0) { vpAltWaypoints[0].altFt = newAlt; renderMapProfile(); }
             } else if (seg.segIdx === -4) {
-                if (vpAltWaypoints.length > 0) {
-                    vpAltWaypoints[vpAltWaypoints.length - 1].altFt = newAlt;
-                    renderMapProfile();
-                    if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
-                }
+                if (vpAltWaypoints.length > 0) { vpAltWaypoints[vpAltWaypoints.length - 1].altFt = newAlt; renderMapProfile(); }
             }
         } else if (vpDraggingMagenta) {
             const { mx } = vpClientToCanvas(clientX, clientY, m);
             let frac = (mx - m.padLeft) / m.plotW;
             frac = Math.max(0, Math.min(1, frac));
             vpUpdatePosition(frac);
-            const posSlider = document.getElementById('vpPosSlider');
-            if (posSlider) posSlider.value = Math.round(frac * 1000);
         }
     }
 
     function vpHandleDragEnd() {
         if (vpDraggingWP >= 0 || vpDraggingSegment || vpDraggingMagenta) {
-            const needsSave = vpDraggingWP >= 0 || !!vpDraggingSegment; // Magenta = nur Position, keine Höhendaten
-            if (vpDraggingWP >= 0) {
-                vpAltWaypoints.sort((a, b) => a.distNM - b.distNM);
+            const needsSave = vpDraggingWP >= 0 || !!vpDraggingSegment;
+
+            // Bei globaler Höhenänderung einmalig am Ende synchronisieren
+            if (vpDraggingSegment && vpDraggingSegment.segIdx === -1) {
+                const finalAlt = parseInt(document.getElementById('altMapInput').innerText) || 4500;
+                syncAltFromInput(finalAlt);
             }
+            if (vpDraggingWP >= 0) vpAltWaypoints.sort((a, b) => a.distNM - b.distNM);
+
             vpDraggingWP = -1;
             vpDraggingSegment = null;
             vpDraggingMagenta = false;
             dragOrigWP = null;
+
             renderMapProfile();
             if (typeof renderVerticalProfile === 'function') renderVerticalProfile('verticalProfileCanvas');
-            if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+            if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList(); // Erst beim Loslassen berechnen!
             if (needsSave) setTimeout(() => saveMissionState(), 200);
         }
     }
@@ -5927,3 +6179,101 @@ function resetSyncTimer() {
     document.addEventListener(evt, resetSyncTimer, { passive: true, capture: true });
 });
 setTimeout(() => initAltWaypoints(), 2000);
+// === VERTICAL PROFILE CONTROLS (V49) ===
+let vpMaxAltOverride = 0; // 0 = Auto-Scaling
+let vpShowClouds = true;
+function vpChangeAlt(delta) {
+    let val = parseInt(document.getElementById('altMapInput').innerText) || 4500;
+    val = Math.max(1500, Math.min(13500, val + delta));
+    syncAltFromInput(val);
+}
+function syncAltFromInput(val) {
+    val = parseInt(val) || 4500;
+    const inp = document.getElementById('altMapInput');
+    inp.innerText = val;
+    const mainSlider = document.getElementById('altSlider');
+    if (mainSlider) mainSlider.value = val;
+    handleSliderChange('alt', val);
+    if (typeof renderMapProfile === 'function') renderMapProfile();
+    if (typeof renderVerticalProfile === 'function') renderVerticalProfile('verticalProfileCanvas');
+    if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+}
+function vpChangeRate(delta) {
+    let val = parseInt(document.getElementById('rateMapInput').innerText) || 500;
+    val = Math.max(200, Math.min(1500, val + delta));
+    syncRateFromInput(val);
+}
+function syncRateFromInput(val) {
+    val = parseInt(val) || 500;
+    const inp = document.getElementById('rateMapInput');
+    inp.innerText = val;
+    handleRateChange(val);
+}
+function vpChangeYAxis(delta) {
+    if (vpMaxAltOverride === 0) {
+        const elevData = (typeof vpZoomLevel !== 'undefined' && vpZoomLevel < 100 && vpHighResData) ? vpHighResData : vpElevationData;
+        if (!elevData) return;
+        const cruiseAlt = parseInt(document.getElementById('altMapInput')?.innerText || 4500);
+        const maxTerrain = Math.max(...elevData.map(p => p.elevFt));
+        let maxCloudAlt = 0;
+        if (vpShowClouds && vpWeatherData) {
+            vpWeatherData.forEach(zone => { if (zone.clouds) zone.clouds.forEach(c => { if (c.baseMsl > maxCloudAlt) maxCloudAlt = c.baseMsl; }); });
+        }
+        vpMaxAltOverride = Math.max(cruiseAlt + 2500, maxTerrain + 1000);
+        vpMaxAltOverride = Math.ceil(vpMaxAltOverride / 1000) * 1000;
+    }
+    vpMaxAltOverride = Math.max(3000, vpMaxAltOverride + delta);
+    document.getElementById('yAxisDisplay').textContent = (vpMaxAltOverride / 1000) + 'k';
+    renderMapProfile();
+    if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+}
+function vpResetYAxis() {
+    vpMaxAltOverride = 0;
+    document.getElementById('yAxisDisplay').textContent = 'AUTO';
+    renderMapProfile();
+    if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+}
+function vpToggleClouds() {
+    vpShowClouds = !vpShowClouds;
+    const btn = document.getElementById('btnToggleClouds');
+    if (btn) btn.classList.toggle('active', vpShowClouds);
+    renderMapProfile();
+    if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+}
+
+// === PROMPT-EINGABE für ALT / V/S (V57) ===
+window.promptForAlt = function() {
+    const current = document.getElementById('altMapInput').innerText;
+    const res = prompt("Gewünschte Flughöhe (ALT) eingeben:", current);
+    if (res !== null && !isNaN(parseInt(res))) {
+        let val = parseInt(res);
+        val = Math.max(1500, Math.min(13500, val));
+        syncAltFromInput(val);
+    }
+};
+window.promptForRate = function() {
+    const current = document.getElementById('rateMapInput').innerText;
+    const res = prompt("Gewünschte Steig-/Sinkrate (V/S) in ft/min eingeben:", current);
+    if (res !== null && !isNaN(parseInt(res))) {
+        let val = parseInt(res);
+        val = Math.max(200, Math.min(1500, val));
+        syncRateFromInput(val);
+    }
+};
+
+// === FORCE UPDATE (V53) ===
+window.forceAppUpdate = function() {
+    if (confirm("Möchtest du ein Update erzwingen? Der Zwischenspeicher wird geleert und die App neu geladen.")) {
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                for(let registration of registrations) { registration.unregister(); }
+                caches.keys().then(function(names) {
+                    for (let name of names) caches.delete(name);
+                    window.location.reload(true);
+                });
+            });
+        } else {
+            window.location.reload(true);
+        }
+    }
+};

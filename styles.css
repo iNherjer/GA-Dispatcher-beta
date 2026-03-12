@@ -106,9 +106,9 @@ h1 {
     text-align: center;
     margin-bottom: 15px;
     font-style: italic;
-    height: 15px;
+    min-height: 18px;
+    line-height: 1.4;
     opacity: 1.0;
-    /* Verhindert horizontales Layout-Zucken bei langen Texten! */
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1901,6 +1901,38 @@ body.theme-retro .api-fuel-meter .api-scale {
 .vp-zoom-btn:active {
     background: #222;
 }
+
+.vp-ctrl-btn {
+    background: #333; color: #fff; border: 1px solid #555; width: 22px; height: 22px;
+    font-size: 14px; font-weight: bold; cursor: pointer; border-radius: 3px;
+    line-height: 1; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+    user-select: none; flex-shrink: 0;
+}
+.vp-ctrl-btn:active { background: #111; }
+.vp-ctrl-val {
+    color: #4da6ff; font-family: monospace; font-size: 14px; font-weight: bold;
+    cursor: pointer; padding: 0 4px; min-width: 3ch; text-align: center;
+    user-select: none; transition: color 0.1s;
+}
+.vp-ctrl-val:active { color: #fff; }
+.vp-ctrl-input {
+    background: rgba(0, 0, 0, 0.3); color: #fff; font-family: monospace; font-size: 12px;
+    border: 1px solid #444; width: 58px; text-align: center; margin: 0 2px;
+    -moz-appearance: textfield; padding: 4px 2px; border-radius: 3px; box-sizing: border-box;
+}
+.vp-ctrl-input:focus { border: 1px solid #4da6ff; outline: none; background: #111; color: #fff; }
+.vp-ctrl-input::-webkit-outer-spin-button, .vp-ctrl-input::-webkit-inner-spin-button {
+    -webkit-appearance: none; margin: 0;
+}
+.vp-ctrl-label {
+    color: #fff; font-size: 11px; font-family: monospace; min-width: 32px; text-align: center;
+    cursor: pointer; user-select: none;
+}
+.vp-toggle-cloud {
+    background: transparent; border: none; font-size: 16px; cursor: pointer;
+    filter: grayscale(100%); opacity: 0.4; transition: 0.2s; margin-left: 4px; flex-shrink: 0;
+}
+.vp-toggle-cloud.active { filter: none; opacity: 1; text-shadow: 0 0 5px rgba(255,255,255,0.5); }
 
 .map-profile-scroll {
     flex: 1;

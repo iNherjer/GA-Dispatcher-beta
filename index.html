@@ -96,7 +96,7 @@
                 <label class="slider-label">Cruise ALT (ft)</label>
                 <span id="altDrum" class="drum-readout-container theme-color-text" style="font-weight:bold;">4500</span>
             </div>
-            <input type="range" id="altSlider" min="1500" max="9500" value="4500" step="100" oninput="handleSliderChange('alt', this.value)">
+            <input type="range" id="altSlider" min="1500" max="13500" value="4500" step="100" oninput="handleSliderChange('alt', this.value)">
         </div>
 
         <div class="slider-container">
@@ -606,7 +606,7 @@
 </div>
 
 <div class="version-info">
-    GA Dispatcher <span id="swVersionDisplay" style="color: var(--blue); font-weight: bold;">(Lade Version...)</span><br>
+    GA Dispatcher <span id="swVersionDisplay" style="color: var(--blue); font-weight: bold; cursor: pointer; text-decoration: underline; padding: 2px 6px; border-radius: 4px; background: rgba(0,0,0,0.2);" onclick="forceAppUpdate()" title="Update erzwingen">(Lade Version...)</span><br>
     <a href="https://discord.gg/xzXQXey2N8" target="_blank" class="discord-link" title="Komm auf unseren Discord für Feedback & Ideen!">
         <svg viewBox="0 0 127.14 96.36" width="14" height="14" style="fill: currentColor; vertical-align: middle; margin-right: 4px; margin-bottom: 2px;">
             <path d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.31,60,73.31,53s5-12.74,11.43-12.74S96.2,46,96.12,53,91.08,65.69,84.69,65.69Z"/>
@@ -656,20 +656,27 @@
             </div>
             <div id="profileResizeHandle" class="profile-resize-handle" title="Ziehen zum Ändern der Profilhöhe"></div>
             <div id="mapProfileStrip" class="map-profile-strip">
-                <div class="map-profile-controls">
-                    <span style="color:#aaa; font-size:10px; font-family:monospace; margin-right:4px;">ALT</span>
-                    <input type="range" id="altSliderMap" min="1500" max="9500" value="4500" step="100" style="width:70px; height:4px;" oninput="syncAltFromMap(this.value)">
-                    <span id="altMapDisplay" style="color:#fff; font-size:11px; font-family:monospace; min-width:36px; margin:0 4px;">4500</span>
-                    <span style="color:#555; font-size:10px;">|</span>
-                    <span style="color:#aaa; font-size:10px; font-family:monospace; margin:0 4px;">V/S</span>
-                    <input type="range" id="rateSliderMap" min="200" max="1500" value="500" step="50" style="width:55px; height:4px;" oninput="handleRateChange(this.value)">
-                    <span id="rateMapDisplay" style="color:#fff; font-size:11px; font-family:monospace; min-width:28px;">500</span>
-                    <span style="color:#aaa; font-size:9px; font-family:monospace;">fpm</span>
-                    <span style="color:#555; font-size:10px;">|</span>
-                    <span style="color:#aaa; font-size:10px; font-family:monospace; margin:0 4px;">ZOOM</span>
-                    <button class="vp-zoom-btn" onclick="vpZoom(10)" title="Rauszoomen">−</button>
-                    <span id="vpZoomDisplay" style="color:#fff; font-size:11px; font-family:monospace; min-width:35px; text-align:center;">0%</span>
-                    <button class="vp-zoom-btn" onclick="vpZoom(-10)" title="Reinzoomen">+</button>
+                <div class="map-profile-controls" style="gap: 4px; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; padding-bottom: 2px; scrollbar-width: none;">
+                    <span style="color:#aaa; font-size:10px; font-family:monospace; margin-left:4px;">ZOOM</span>
+                    <button class="vp-ctrl-btn" onclick="vpZoom(10)">−</button>
+                    <span id="vpZoomDisplay" class="vp-ctrl-label" style="min-width:24px;">0%</span>
+                    <button class="vp-ctrl-btn" onclick="vpZoom(-10)">+</button>
+                    <span style="color:#555; font-size:10px; margin: 0 1px;">|</span>
+                    <span style="color:#aaa; font-size:10px; font-family:monospace;">MAX FT</span>
+                    <button class="vp-ctrl-btn" onclick="vpChangeYAxis(-1000)">−</button>
+                    <span id="yAxisDisplay" class="vp-ctrl-label" onclick="vpResetYAxis()" title="Klick = Auto Skalierung">AUTO</span>
+                    <button class="vp-ctrl-btn" onclick="vpChangeYAxis(1000)">+</button>
+                    <span style="color:#555; font-size:10px; margin: 0 1px;">|</span>
+                    <span style="color:#aaa; font-size:10px; font-family:monospace; margin-right:2px;">ALT</span>
+                    <button class="vp-ctrl-btn" onclick="vpChangeAlt(-500)">−</button>
+                    <span id="altMapInput" class="vp-ctrl-val" onclick="promptForAlt()" title="Klicken für manuelle Eingabe">4500</span>
+                    <button class="vp-ctrl-btn" onclick="vpChangeAlt(500)">+</button>
+                    <span style="color:#555; font-size:10px; margin: 0 1px;">|</span>
+                    <span style="color:#aaa; font-size:10px; font-family:monospace;">V/S</span>
+                    <button class="vp-ctrl-btn" onclick="vpChangeRate(-100)">−</button>
+                    <span id="rateMapInput" class="vp-ctrl-val" onclick="promptForRate()" title="Klicken für manuelle Eingabe">500</span>
+                    <button class="vp-ctrl-btn" onclick="vpChangeRate(100)">+</button>
+                    <button id="btnToggleClouds" class="vp-toggle-cloud active" onclick="vpToggleClouds()" title="Wolken an/aus" style="margin-left:auto;">⛅</button>
                 </div>
                 <div id="mapProfileScroll" class="map-profile-scroll" style="touch-action: none;">
                     <canvas id="mapProfileCanvas"></canvas>
