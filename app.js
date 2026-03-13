@@ -2090,6 +2090,8 @@ async function fetchRouteAirspaces(routePts) {
 }
 
 function renderAirspaceWarningsList() {
+    // Performance-Fix: Keine schweren DOM-Updates während User-Scroll/Drag!
+    if (window.vpIsFastRendering || window.vpUIInteractionActive) return;
     const listEl = document.getElementById('routeAirspacesList');
     if (!listEl) return;
 
@@ -4114,7 +4116,7 @@ async function fetchProfileObstacles(elevData, signal) {
         }
     }
 
-    const BATCH_SIZE = 4;
+    const BATCH_SIZE = 2; // Reduziert auf 2 Boxen (50 NM) für weniger Serverlast
     let rawObstacles = [];
     let anySuccess = false;
 
@@ -4129,7 +4131,7 @@ async function fetchProfileObstacles(elevData, signal) {
         const totalBatches = Math.ceil(bboxes.length / BATCH_SIZE);
         console.log(`[Overpass] Fetching Batch ${batchNum} / ${totalBatches}...`);
 
-        let retries = 2;
+        let retries = 3; // Erhöht auf 3 Versuche
         let batchSuccess = false;
 
         while (retries > 0 && !batchSuccess) {
@@ -4139,22 +4141,23 @@ async function fetchProfileObstacles(elevData, signal) {
                 // 1. Versuch: Hauptserver
                 let res = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`, { signal });
                 
-                // 2. Versuch: Wenn Hauptserver zickt (inkl. 429), sofort auf Fallback lz4 wechseln
+                // 2. Versuch: Wenn Hauptserver zickt, sofort auf Fallback lz4 wechseln
                 if (!res.ok) {
                     console.warn(`[Overpass] Hauptserver Fehler (Status: ${res.status}) bei Batch ${batchNum}. Versuche lz4 Fallback...`);
                     res = await fetch(`https://lz4.overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`, { signal });
                 }
 
-                // 3. Auswertung
+                // 3. Auswertung: Bei 429 drastisch längere Pause einlegen!
                 if (res.status === 429) {
-                    console.warn(`[Overpass] Beide Server blocken (429 Rate Limit) bei Batch ${batchNum}. Warte 2.5s...`);
-                    await new Promise(r => setTimeout(r, 2500));
+                    console.warn(`[Overpass] Beide Server blocken (429 Rate Limit) bei Batch ${batchNum}. Warte 5s (Cool-Down)...`);
+                    await new Promise(r => setTimeout(r, 5000)); // Längere Strafe absitzen
                     retries--;
                     continue;
                 }
 
                 if (res.ok) {
                     batchSuccess = true;
+                    anySuccess = true;
                     let json = await res.json();
                     console.log(`[Overpass] Batch ${batchNum} erfolgreich. ${json.elements ? json.elements.length : 0} Rohelemente.`);
                     
@@ -4172,13 +4175,35 @@ async function fetchProfileObstacles(elevData, signal) {
                                 let d = calcNav(e.lat, e.lon, ep.lat, ep.lon).dist;
                                 if (d < bestD) { bestD = d; bestDistNM = ep.distNM; baseElevFt = ep.elevFt; }
                             });
-                            if (bestD < 2.0) rawObstacles.push({ type: isWind ? 'wind' : 'mast', hFt: hFt, distNM: bestDistNM, elevFt: baseElevFt });
-                        });
+                        if (bestD < 2.0) rawObstacles.push({ type: isWind ? 'wind' : 'mast', hFt: hFt, distNM: bestDistNM, elevFt: baseElevFt });
+                    });
+                }
+
+                    // --- NEU: Inkrementelles Rendering der Batches ---
+                    let tempBuckets = {};
+                    rawObstacles.forEach(obs => {
+                        let bIdx = Math.floor(obs.distNM / 0.5);
+                        if (!tempBuckets[bIdx]) tempBuckets[bIdx] = [];
+                        tempBuckets[bIdx].push(obs);
+                    });
+                    let tempFinal = [];
+                    for (let k in tempBuckets) {
+                        tempBuckets[k].sort((a,b) => b.hFt - a.hFt);
+                        let rep = tempBuckets[k][0];
+                        rep.count = tempBuckets[k].length;
+                        tempFinal.push(rep);
                     }
+                    // Globales Array sofort updaten und neu zeichnen lassen
+                    vpObstacles = tempFinal;
+                    if (typeof window.throttledRenderProfiles === 'function') {
+                        window.throttledRenderProfiles();
+                    }
+                    // -------------------------------------------------
+
                 } else {
                     console.warn(`[Overpass] Beide Server down für Batch ${batchNum}. Status: ${res.status}. Noch ${retries-1} Versuche.`);
                     retries--;
-                    if (retries > 0) await new Promise(r => setTimeout(r, 2000));
+                    if (retries > 0) await new Promise(r => setTimeout(r, 3000));
                 }
             } catch(e) {
                 if (e.name === 'AbortError') {
@@ -4187,19 +4212,18 @@ async function fetchProfileObstacles(elevData, signal) {
                 }
                 console.warn(`[Overpass] Netzwerkfehler: ${e.message}. Noch ${retries-1} Versuche.`);
                 retries--;
-                if (retries > 0) await new Promise(r => setTimeout(r, 2000));
+                if (retries > 0) await new Promise(r => setTimeout(r, 3000));
             }
         }
 
-        // Strikter Cache-Schutz: Wenn dieser Batch komplett gescheitert ist, sofort abbrechen!
         if (!batchSuccess) {
             console.error(`[Overpass] Batch ${batchNum} endgültig gescheitert. Breche ab, um unvollständigen Cache zu verhindern.`);
-            return null; // Gibt null zurück -> Profil rendert ohne, aber speichert nichts im Cache!
+            return null;
         }
 
-        // Atempause für den Server zwischen erfolgreichen Batches (verhindert 429 im nächsten Loop)
+        // Atempause für den Server zwischen erfolgreichen Batches erhöht
         if (i + BATCH_SIZE < bboxes.length) {
-            await new Promise(r => setTimeout(r, 1200)); // Pause auf 1200ms erhöht
+            await new Promise(r => setTimeout(r, 1500)); 
         }
     }
 
@@ -4536,13 +4560,14 @@ function vpDrawLandmarks(ctx, xOf, yOf, elevData, totalDist, isDarkTheme, zoomFa
         }
     }
     ctx.restore();
+    window.vpLandmarkOccupiedX = occupiedX; // Speichert den belegten Platz für die Hindernisse
     if(countDrawn === 0 && vpLandmarks.length > 0) console.log("⚠️ Landmarks wurden geladen, aber durch Kollision/Rand abgeschnitten!");
 }
 
 function vpDrawObstacles(ctx, xOf, yOf, totalDist, zoomFactor, elevData) {
     if (!vpObstacles || vpObstacles.length === 0) return;
     const edgePad = Math.min(1.0, totalDist * 0.02);
-    // Terrain-interpolierte Basis – gleiche Logik wie vpDrawClouds → Hindernis sitzt exakt auf der Geländelinie
+    
     const getElevY = (dNM) => {
         if (!elevData || elevData.length < 2) return yOf(0);
         for (let i = 0; i < elevData.length - 1; i++) {
@@ -4553,30 +4578,36 @@ function vpDrawObstacles(ctx, xOf, yOf, totalDist, zoomFactor, elevData) {
         }
         return yOf(elevData[elevData.length - 1].elevFt);
     };
+    
     ctx.save();
+    
+    // 1. Alle Masten zeichnen und Label-Positionen sammeln
+    let rawLabels = [];
+    
     for (const obs of vpObstacles) {
         if (obs.distNM < edgePad || obs.distNM > totalDist - edgePad) continue;
         const px = xOf(obs.distNM);
-        const pyBase = getElevY(obs.distNM);                        // Geländelinie an dieser Stelle
-        const heightPx = Math.abs(yOf(obs.hFt) - yOf(0));          // Turmhöhe in Pixeln (skalenunabhängig)
-        const pyTop = pyBase - heightPx;                             // Turmspitze
+        const pyGround = getElevY(obs.distNM);
+        const heightPx = Math.abs(yOf(obs.hFt) - yOf(0));
+        const pyTop = pyGround - heightPx;
         const towerHeightPx = Math.max(1, heightPx);
+        const pyRoot = pyGround + 8; 
 
         if (obs.type === 'wind') {
-            // Windrad: Nabe sitzt r Pixel über der Turmspitze, Rotorblätter gehen von der Nabe aus
-            const r = Math.max(4, Math.min(towerHeightPx * 0.35, 25));
-            const pyHub = pyTop + r;                                 // Nabe liegt r px unterhalb der Spitze
+            // Strikt proportionale Skalierung: Rotorblätter sind exakt 45% der Masthöhe, egal bei welchem Zoom!
+            const r = Math.max(1, towerHeightPx * 0.45);
+            const pyHub = pyTop + r;                                   
 
-            // Turm (Fundament → Nabe)
             ctx.beginPath();
-            ctx.moveTo(px, pyBase);
+            ctx.moveTo(px, pyRoot);
             ctx.lineTo(px, pyHub);
-            ctx.strokeStyle = 'rgba(80, 80, 80, 0.9)';
+            ctx.strokeStyle = 'rgba(230, 230, 230, 0.9)';
             ctx.lineWidth = 1.5;
             ctx.stroke();
 
-            // Rotorblätter (pseudo-zufälliger Snapshot-Winkel)
-            ctx.fillStyle = '#d93829';
+            ctx.fillStyle = '#f5f5f5';
+            ctx.strokeStyle = 'rgba(150, 150, 150, 0.6)';
+            ctx.lineWidth = 0.5;
             const rotOffset = (obs.distNM * 137) % (Math.PI * 2);
             for (let i = 0; i < 3; i++) {
                 const a = rotOffset + (i * 120 - 90) * Math.PI / 180;
@@ -4587,13 +4618,12 @@ function vpDrawObstacles(ctx, xOf, yOf, totalDist, zoomFactor, elevData) {
                 ctx.lineTo(px + Math.cos(a + 0.2) * r * 0.25, pyHub + Math.sin(a + 0.2) * r * 0.25);
                 ctx.closePath();
                 ctx.fill();
+                ctx.stroke();
             }
-            // Nabe (weißer Mittelpunkt)
-            ctx.beginPath(); ctx.arc(px, pyHub, 1.5, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill();
+            ctx.beginPath(); ctx.arc(px, pyHub, 1.5, 0, Math.PI * 2); ctx.fillStyle = '#ccc'; ctx.fill();
         } else {
-            // Klassischer Mast: Turm + roter Warnpunkt mit Snapshot-Alpha (simuliertes Blinken)
             ctx.beginPath();
-            ctx.moveTo(px, pyBase);
+            ctx.moveTo(px, pyRoot);
             ctx.lineTo(px, pyTop);
             ctx.strokeStyle = 'rgba(80, 80, 80, 0.9)';
             ctx.lineWidth = 1.5;
@@ -4603,14 +4633,62 @@ function vpDrawObstacles(ctx, xOf, yOf, totalDist, zoomFactor, elevData) {
             ctx.beginPath(); ctx.arc(px, pyTop, 2, 0, Math.PI * 2); ctx.fillStyle = `rgba(217, 56, 41, ${alpha})`; ctx.fill();
         }
 
-        // Cluster-Label (z. B. ×5, ×12) bei Windparks
-        if (obs.count > 1) {
-            ctx.fillStyle = '#d93829';
-            ctx.font = 'bold 7px Arial';
-            ctx.textAlign = 'left';
-            ctx.fillText('×' + obs.count, px + Math.max(5, towerHeightPx * 0.2), pyTop + 4);
+        rawLabels.push({ x: px, yBase: pyRoot, count: obs.count || 1 });
+    }
+    
+    // 2. Labels abhängig vom Zoom/Pixelabstand clustern
+    rawLabels.sort((a, b) => a.x - b.x);
+    let clusters = [];
+    const MIN_LABEL_DIST = 22; 
+
+    for (const lbl of rawLabels) {
+        if (clusters.length === 0) {
+            clusters.push({ sumX: lbl.x, sumY: lbl.yBase, count: lbl.count, items: 1 });
+        } else {
+            let last = clusters[clusters.length - 1];
+            let avgX = last.sumX / last.items; 
+            
+            if (lbl.x - avgX < MIN_LABEL_DIST) {
+                last.sumX += lbl.x;
+                last.sumY += lbl.yBase;
+                last.count += lbl.count;
+                last.items += 1;
+            } else {
+                clusters.push({ sumX: lbl.x, sumY: lbl.yBase, count: lbl.count, items: 1 });
+            }
         }
     }
+
+    // 3. Cluster-Labels zeichnen (ohne Schatten, reine Schrift)
+    ctx.fillStyle = '#d93829';
+    ctx.font = 'bold 8px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+
+    for (const cl of clusters) {
+        if (cl.count <= 1) continue; 
+        
+        const px = cl.sumX / cl.items;
+        const pyBase = cl.sumY / cl.items;
+        
+        let collision = false;
+        const textWidth = 18; 
+        const minX = px - textWidth / 2;
+        const maxX = px + textWidth / 2;
+        
+        if (window.vpLandmarkOccupiedX) {
+            for (const occ of window.vpLandmarkOccupiedX) {
+                if (minX < occ.maxX + 4 && maxX > occ.minX - 4) {
+                    collision = true; break;
+                }
+            }
+        }
+        
+        if (!collision) {
+            ctx.fillText('×' + cl.count, px, pyBase + 2);
+        }
+    }
+    
     ctx.restore();
 }
 
@@ -4733,11 +4811,12 @@ function vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, isDarkTheme, elev
                     ctx.arc(px, py, pr, 0, Math.PI * 2);
                     ctx.fillStyle = `rgba(${cVal},${cVal},${cVal},${alpha})`;
 
-                    // Performance-Fix: Weiche Ränder deaktivieren, während Graphen, Slider oder Drehknöpfe gezogen werden!
+                    // Performance-Fix: Weiche Ränder deaktivieren, während UI-Interaktion ODER Fast-Render-Modus aktiv ist!
                     const isDragging = (typeof vpDraggingWP !== 'undefined' && vpDraggingWP >= 0) ||
                                        (typeof vpDraggingSegment !== 'undefined' && !!vpDraggingSegment) ||
                                        (typeof vpResizeActive !== 'undefined' && vpResizeActive) ||
-                                       (window.vpUIInteractionActive === true);
+                                       (window.vpUIInteractionActive === true) ||
+                                       (window.vpIsFastRendering === true);
                     if (!isDragging) {
                         ctx.shadowColor = `rgba(${cVal},${cVal},${cVal},${alpha})`;
                         ctx.shadowBlur = 4 + prRand * 8;
@@ -5232,17 +5311,39 @@ function syncAltFromMap(val) {
     if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
 }
 
-function vpZoom(delta) {
-    vpZoomLevel = Math.max(10, Math.min(100, vpZoomLevel + delta));
-    // Anzeige invertiert: 0 % = rausgezoomt (vpZoomLevel 100), 100 % = maximal rein (vpZoomLevel 10)
-    document.getElementById('vpZoomDisplay').textContent = Math.round((100 - vpZoomLevel) / 90 * 100) + '%';
+// Globale Fast-Render Steuerung
+window.vpIsFastRendering = false;
+let vpFastRenderTimeout = null;
+window.activateFastRender = function() {
+    window.vpIsFastRendering = true;
+    if (vpFastRenderTimeout) clearTimeout(vpFastRenderTimeout);
+    vpFastRenderTimeout = setTimeout(() => {
+        window.vpIsFastRendering = false;
+        if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
+    }, 350);
+};
 
-    // If zoomed in, fetch higher resolution data
+let vpHighResFetchTimeout = null;
+function vpZoom(delta) {
+    window.activateFastRender();
+    vpZoomLevel = Math.max(10, Math.min(100, vpZoomLevel + delta));
+    const zd = document.getElementById('vpZoomDisplay');
+    if (zd) zd.textContent = Math.round((100 - vpZoomLevel) / 90 * 100) + '%';
+
+    // Ruckelfrei mit 60 FPS rendern statt bei jedem Event
+    if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
+
+    // High-Res API Debounce
+    if (vpHighResFetchTimeout) clearTimeout(vpHighResFetchTimeout);
     if (vpZoomLevel < 100 && routeWaypoints && routeWaypoints.length >= 2) {
-        fetchHighResElevation().then(() => renderMapProfile());
-    } else {
+        vpHighResFetchTimeout = setTimeout(() => {
+            fetchHighResElevation().then(() => {
+                if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
+            });
+        }, 400); 
+    } else if (vpZoomLevel === 100) {
         vpHighResData = null;
-        renderMapProfile();
+        if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
     }
 }
 
@@ -6072,6 +6173,8 @@ function initAltWaypoints() {
     let vpIsPanning = false;
     let vpPanStartScrollLeft = 0;
     let vpPanStartX = 0;
+    let initialPinchDist = null;
+    let initialTwoFingerY = null;
 
     // === DOUBLE CLICK: remove/add waypoint ===
     canvas.addEventListener('dblclick', (e) => {
@@ -6144,6 +6247,16 @@ function initAltWaypoints() {
 
     // === TOUCH EVENTS ===
     canvas.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            initialPinchDist = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+            initialTwoFingerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+            return;
+        }
+
         const touch = e.touches[0];
         vpWasDragging = false;
         vpIsPanning = false;
@@ -6153,7 +6266,6 @@ function initAltWaypoints() {
         dragStartX = touch.clientX;
         dragStartY = touch.clientY;
 
-        // Double-tap detection (300ms window)
         const now = Date.now();
         if (now - lastTapTime < 300) {
             e.preventDefault();
@@ -6163,13 +6275,11 @@ function initAltWaypoints() {
         }
         lastTapTime = now;
 
-        // Priority 1: Magenta marker drag
         if (vpHitTestMagenta(mx, m)) {
             e.preventDefault();
             vpDraggingMagenta = true;
             return;
         }
-        // Priority 2: Waypoint drag
         const wpIdx = vpHitTestWaypoint(mx, my, m);
         if (wpIdx >= 0) {
             e.preventDefault();
@@ -6177,7 +6287,6 @@ function initAltWaypoints() {
             dragOrigWP = { ...vpAltWaypoints[wpIdx] };
             return;
         }
-        // Priority 3: Flight line segment drag
         const mouseDistNM = vpHitTestFlightLine(mx, my, m);
         if (mouseDistNM !== null) {
             e.preventDefault();
@@ -6186,7 +6295,6 @@ function initAltWaypoints() {
             vpDraggingSegment = { segIdx, origAlt: origSegAlt, origCruiseAlt: m.cruiseAlt };
             return;
         }
-        // Priority 4: Pan when zoomed in
         if (vpZoomLevel < 100) {
             e.preventDefault();
             vpIsPanning = true;
@@ -6197,6 +6305,32 @@ function initAltWaypoints() {
     }, { passive: false });
 
     canvas.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 2 && initialPinchDist !== null && initialTwoFingerY !== null) {
+            e.preventDefault();
+            
+            // X-Achse: Pinch-to-Zoom
+            const currentDist = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+            const distDiff = currentDist - initialPinchDist;
+            if (Math.abs(distDiff) > 10) {
+                let zoomDelta = distDiff > 0 ? -3 : 3; 
+                vpZoom(zoomDelta);
+                initialPinchDist = currentDist;
+            }
+
+            // Y-Achse: Zwei-Finger vertikaler Wisch
+            const currentTwoFingerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+            const yDiff = currentTwoFingerY - initialTwoFingerY;
+            if (Math.abs(yDiff) > 15) {
+                let yDelta = yDiff > 0 ? -1000 : 1000; 
+                vpChangeYAxis(yDelta);
+                initialTwoFingerY = currentTwoFingerY;
+            }
+            return;
+        }
+
         if (vpIsPanning) {
             e.preventDefault();
             const touch = e.touches[0];
@@ -6213,23 +6347,28 @@ function initAltWaypoints() {
     }, { passive: false });
 
     canvas.addEventListener('touchend', (e) => {
-        if (vpIsPanning) {
-            vpIsPanning = false;
-            return;
-        }
-        // Single tap without drag: Logic removed to prevent accidental creation
-        if (vpDraggingWP >= 0 || vpDraggingSegment || vpDraggingMagenta) {
-            vpHandleDragEnd();
-        }
+        if (e.touches.length < 2) { initialPinchDist = null; initialTwoFingerY = null; }
+        if (vpIsPanning) { vpIsPanning = false; return; }
+        if (vpDraggingWP >= 0 || vpDraggingSegment || vpDraggingMagenta) vpHandleDragEnd();
     });
 
     canvas.addEventListener('touchcancel', (e) => {
-        vpIsPanning = false;
-        vpWasDragging = false;
-        if (vpDraggingWP >= 0 || vpDraggingSegment || vpDraggingMagenta) {
-            vpHandleDragEnd();
-        }
+        initialPinchDist = null; initialTwoFingerY = null;
+        vpIsPanning = false; vpWasDragging = false;
+        if (vpDraggingWP >= 0 || vpDraggingSegment || vpDraggingMagenta) vpHandleDragEnd();
     });
+
+    // === MOUSE WHEEL ZOOM (Multi-Achsen) ===
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault(); 
+        if (e.ctrlKey) {
+            let yDelta = e.deltaY > 0 ? 1000 : -1000;
+            vpChangeYAxis(yDelta);
+        } else {
+            let zoomDelta = e.deltaY > 0 ? 5 : -5;
+            vpZoom(zoomDelta);
+        }
+    }, { passive: false });
 }
 
 // Override computeFlightProfile to use altitude waypoints + segment altitudes
@@ -6775,24 +6914,23 @@ function syncRateFromInput(val) {
     handleRateChange(val);
 }
 function vpChangeYAxis(delta) {
+    window.activateFastRender();
     if (vpMaxAltOverride === 0) {
         const elevData = (typeof vpZoomLevel !== 'undefined' && vpZoomLevel < 100 && vpHighResData) ? vpHighResData : vpElevationData;
         if (!elevData) return;
         const cruiseAlt = parseInt(document.getElementById('altMapInput')?.innerText || 4500);
         const maxTerrain = Math.max(...elevData.map(p => p.elevFt));
-        let maxCloudAlt = 0;
-        if (vpShowClouds && vpWeatherData) {
-            vpWeatherData.forEach(zone => { if (zone.clouds) zone.clouds.forEach(c => { if (c.baseMsl > maxCloudAlt) maxCloudAlt = c.baseMsl; }); });
-        }
         vpMaxAltOverride = Math.max(cruiseAlt + 2500, maxTerrain + 1000);
         vpMaxAltOverride = Math.ceil(vpMaxAltOverride / 1000) * 1000;
     }
     vpMaxAltOverride = Math.max(3000, vpMaxAltOverride + delta);
     document.getElementById('yAxisDisplay').textContent = (vpMaxAltOverride / 1000) + 'k';
-    renderMapProfile();
-    if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+    
+    // Performance-Rendering!
+    if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
 }
 function vpResetYAxis() {
+    window.activateFastRender();
     vpMaxAltOverride = 0;
     document.getElementById('yAxisDisplay').textContent = 'AUTO';
     renderMapProfile();
@@ -7514,3 +7652,30 @@ window.generateBriefingPDF = async function() {
         alert('PDF konnte nicht erstellt werden: ' + e.message);
     }
 };
+
+// === AUTO-RESIZE FÜR CANVAS & KARTE (z.B. bei Rotation in Landscape) ===
+let vpWindowResizeTimeout = null;
+window.addEventListener('resize', () => {
+    if (vpWindowResizeTimeout) clearTimeout(vpWindowResizeTimeout);
+    vpWindowResizeTimeout = setTimeout(() => {
+        // 1. Leaflet Karte an neue Dimensionen anpassen
+        if (typeof map !== 'undefined' && map) map.invalidateSize();
+        
+        // 2. Profile Canvas an neue Dimensionen anpassen (falls Kartentisch offen)
+        const mapTableOverlay = document.getElementById('mapTableOverlay');
+        if (mapTableOverlay && mapTableOverlay.classList.contains('active')) {
+            if (typeof window.throttledRenderProfiles === 'function') {
+                window.throttledRenderProfiles();
+            }
+        }
+    }, 200); // 200ms warten, bis das mobile Gerät die Drehung visuell abgeschlossen hat
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.innerWidth <= 767) {
+        const zd = document.getElementById('vpZoomDisplay');
+        if (zd && zd.parentElement) {
+            zd.parentElement.style.display = 'none';
+        }
+    }
+});
