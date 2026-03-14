@@ -679,9 +679,14 @@
                     <button id="btnToggleClouds" class="vp-toggle-cloud active" onclick="vpToggleClouds()" title="Wolken an/aus" style="margin-left:auto;">⛅</button>
                     <button id="btnToggleLandmarks" class="vp-toggle-cloud active" onclick="vpToggleLandmarks()" title="Städte an/aus" style="margin-left:4px;">🏙️</button>
                     <button id="btnToggleObstacles" class="vp-toggle-cloud active" onclick="vpToggleObstacles()" title="Hindernisse an/aus" style="margin-left:4px;">🗼</button>
+                    <button id="btnToggleLinear" class="vp-toggle-cloud active" onclick="vpToggleLinearFeatures()" title="Straßen & Flüsse an/aus" style="margin-left:4px;">🛣️</button>
+                    <button id="btnToggleAirspaces" class="vp-toggle-cloud active" onclick="vpToggleAirspaces()" title="Lufträume (Bg / Fg / Aus)" style="margin-left:4px; min-width:32px;">🛡️<span style="font-size:8px;vertical-align:sub;">BG</span></button>
                 </div>
-                <div id="mapProfileScroll" class="map-profile-scroll" style="touch-action: none;">
-                    <canvas id="mapProfileCanvas"></canvas>
+                <div id="mapProfileScroll" class="map-profile-scroll" style="touch-action: none; overflow-x: auto; overflow-y: hidden;">
+                    <div id="vpCanvasWrapper" style="height: 100%; position: relative; overflow: hidden;">
+                        <canvas id="mapProfileCanvasBg" style="position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none;"></canvas>
+                        <canvas id="mapProfileCanvas" style="position: absolute; left: 0; top: 0; z-index: 2; touch-action: none;"></canvas>
+                    </div>
                 </div>
             </div>
         </div>

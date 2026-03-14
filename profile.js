@@ -1,4 +1,7 @@
 /* === VERTICAL PROFILE & CANVAS ENGINE === */
+window.vpBgNeedsUpdate = true;
+window.vpAnimFrameId = null;
+window._vpLastScrollLeft = 0;
 /* =========================================================
    VERTICAL PROFILE (Höhenprofil) ENGINE
    ========================================================= */
@@ -28,6 +31,7 @@ let vpClimbRate = 500; // ft/min climb rate (configurable)
 let vpDescentRate = 500; // ft/min descent rate (configurable)
 let vpLandmarks = [];
 let vpObstacles = [];
+let vpLinearFeatures = [];
 
 async function fetchProfileLandmarks(elevData) {
     if (!elevData || elevData.length < 2) return [];
@@ -71,6 +75,8 @@ async function fetchProfileLandmarks(elevData) {
     return landmarks.sort((a,b) => b.pop - a.pop);
 }
 
+
+
 async function fetchProfileObstacles(elevData, signal) {
     if (!elevData || elevData.length < 2) return [];
 
@@ -95,16 +101,17 @@ async function fetchProfileObstacles(elevData, signal) {
         }
     }
 
-    const BATCH_SIZE = 2; // Reduziert auf 2 Boxen (50 NM) für weniger Serverlast
+    const BATCH_SIZE = 5; // 125 NM pro Batch - Reduziert API-Aufrufe auf 1-2 pro Flug!
     let rawObstacles = [];
     let anySuccess = false;
+    let rawLinearFeatures = [];
 
     console.log(`[Overpass] Starte Hindernis-Suche. ${bboxes.length} Boxen total. Teile in Batches von ${BATCH_SIZE}.`);
 
     for (let i = 0; i < bboxes.length; i += BATCH_SIZE) {
         const batch = bboxes.slice(i, i + BATCH_SIZE);
-        let queryBody = batch.map(b => `node["generator:source"="wind"](${b});node["man_made"~"mast|tower"]["height"](${b});`).join('');
-        let query = `[out:json][timeout:25];(${queryBody});out qt;`;
+        let queryBody = batch.map(b => `node["generator:source"="wind"](${b});node["man_made"~"mast|tower"]["height"](${b});way["highway"="motorway"](${b});way["waterway"="river"](${b});`).join('');
+        let query = `[out:json][timeout:25];(${queryBody});out geom qt;`;
 
         const batchNum = Math.floor(i / BATCH_SIZE) + 1;
         const totalBatches = Math.ceil(bboxes.length / BATCH_SIZE);
@@ -142,21 +149,56 @@ async function fetchProfileObstacles(elevData, signal) {
                     
                     if (json.elements) {
                         json.elements.forEach(e => {
-                            if (!e.lat || !e.lon) return;
-                            let isWind = e.tags && e.tags["generator:source"] === "wind";
-                            let hStr = e.tags && e.tags.height ? e.tags.height : null;
-                            let hMeter = hStr ? parseFloat(hStr.replace(',', '.')) : (isWind ? 120 : 50);
-                            if (isNaN(hMeter) || hMeter < 30) return;
+                            // A) KNOTEN (Hindernisse)
+                            if (e.type === 'node' && e.lat && e.lon) {
+                                let isWind = e.tags && e.tags["generator:source"] === "wind";
+                                let hStr = e.tags && e.tags.height ? e.tags.height : null;
+                                let hMeter = hStr ? parseFloat(hStr.replace(',', '.')) : (isWind ? 120 : 50);
+                                if (isNaN(hMeter) || hMeter < 30) return;
+                                
+                                let hFt = Math.round(hMeter * 3.28084);
+                                let bestD = Infinity, bestDistNM = 0, baseElevFt = 0;
+                                elevData.forEach(ep => {
+                                    let d = calcNav(e.lat, e.lon, ep.lat, ep.lon).dist;
+                                    if (d < bestD) { bestD = d; bestDistNM = ep.distNM; baseElevFt = ep.elevFt; }
+                                });
+                                if (bestD < 2.0) rawObstacles.push({ type: isWind ? 'wind' : 'mast', hFt: hFt, distNM: bestDistNM, elevFt: baseElevFt });
                             
-                            let hFt = Math.round(hMeter * 3.28084);
-                            let bestD = Infinity, bestDistNM = 0, baseElevFt = 0;
-                            elevData.forEach(ep => {
-                                let d = calcNav(e.lat, e.lon, ep.lat, ep.lon).dist;
-                                if (d < bestD) { bestD = d; bestDistNM = ep.distNM; baseElevFt = ep.elevFt; }
-                            });
-                        if (bestD < 2.0) rawObstacles.push({ type: isWind ? 'wind' : 'mast', hFt: hFt, distNM: bestDistNM, elevFt: baseElevFt });
-                    });
-                }
+                            // B) LINIEN (Flüsse & Autobahnen kreuzen Route)
+                            } else if (e.type === 'way' && e.geometry && e.tags) {
+                                let featType = e.tags.highway ? 'highway' : 'river';
+                                let name = e.tags.name || e.tags.ref || '';
+                                if (!name && featType === 'highway') return;
+
+                                if (typeof routeWaypoints !== 'undefined' && routeWaypoints.length >= 2) {
+                                    for (let i = 0; i < routeWaypoints.length - 1; i++) {
+                                        let rp0 = {lat: routeWaypoints[i].lat, lon: routeWaypoints[i].lng||routeWaypoints[i].lon};
+                                        let rp1 = {lat: routeWaypoints[i+1].lat, lon: routeWaypoints[i+1].lng||routeWaypoints[i+1].lon};
+                                        
+                                        for(let j = 0; j < e.geometry.length - 1; j++) {
+                                            let wp0 = e.geometry[j];
+                                            let wp1 = e.geometry[j+1];
+                                            let s1_x = wp1.lon - wp0.lon; let s1_y = wp1.lat - wp0.lat;
+                                            let s2_x = rp1.lon - rp0.lon; let s2_y = rp1.lat - rp0.lat;
+                                            let denom = (-s2_x * s1_y + s1_x * s2_y);
+                                            if (Math.abs(denom) > 1e-10) {
+                                                let s = (-s1_y * (wp0.lon - rp0.lon) + s1_x * (wp0.lat - rp0.lat)) / denom;
+                                                let t = ( s2_x * (wp0.lat - rp0.lat) - s2_y * (wp0.lon - rp0.lon)) / denom;
+                                                if (s >= 0 && s <= 1 && t >= 0 && t <= 1) {
+                                                    let ix = { lat: wp0.lat + (t * s1_y), lon: wp0.lon + (t * s1_x) };
+                                                    let distBefore = 0;
+                                                    for(let k=0; k<i; k++) distBefore += calcNav(routeWaypoints[k].lat, routeWaypoints[k].lng||routeWaypoints[k].lon, routeWaypoints[k+1].lat, routeWaypoints[k+1].lng||routeWaypoints[k+1].lon).dist;
+                                                    let distOnSeg = calcNav(rp0.lat, rp0.lon, ix.lat, ix.lon).dist;
+                                                    rawLinearFeatures.push({ type: featType, name, distNM: distBefore + distOnSeg });
+                                                    break; // Kreuzungspunkt gefunden, nächste Route prüfen
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
 
                     // --- NEU: Inkrementelles Rendering der Batches ---
                     let tempBuckets = {};
@@ -177,6 +219,7 @@ async function fetchProfileObstacles(elevData, signal) {
                     if (typeof window.throttledRenderProfiles === 'function') {
                         window.throttledRenderProfiles();
                     }
+                    vpLinearFeatures = rawLinearFeatures.sort((a,b) => a.distNM - b.distNM).filter((f, idx, arr) => idx === 0 || arr[idx-1].name !== f.name || Math.abs(arr[idx-1].distNM - f.distNM) > 1.0);
                     // -------------------------------------------------
 
                 } else {
@@ -200,9 +243,9 @@ async function fetchProfileObstacles(elevData, signal) {
             return null;
         }
 
-        // Atempause für den Server zwischen erfolgreichen Batches erhöht
+        // Minimale Atempause (nur nötig bei Flügen > 125 NM)
         if (i + BATCH_SIZE < bboxes.length) {
-            await new Promise(r => setTimeout(r, 1500)); 
+            await new Promise(r => setTimeout(r, 300)); 
         }
     }
 
@@ -222,14 +265,12 @@ async function fetchProfileObstacles(elevData, signal) {
         finalObs.push(rep);
     }
     
-    console.log(`[Overpass] Suche komplett. ${finalObs.length} Hindernis-Gruppen nach Filterung auf der Route.`);
-    return finalObs;
+    console.log(`[Overpass] Suche komplett. ${finalObs.length} Hindernisse & ${vpLinearFeatures.length} Flüsse/Straßen.`);
+    return { obs: finalObs, lin: vpLinearFeatures };
 }
 
 function triggerVerticalProfileUpdate() {
     if (vpProfileFastTimeout) clearTimeout(vpProfileFastTimeout);
-    if (vpProfileSlowTimeout) clearTimeout(vpProfileSlowTimeout);
-
     if (window.vpFetchController) window.vpFetchController.abort();
     window.vpFetchController = new AbortController();
     const currentSignal = window.vpFetchController.signal;
@@ -245,15 +286,16 @@ function triggerVerticalProfileUpdate() {
         }
 
         const status = document.getElementById('verticalProfileStatus');
-        if (status) status.textContent = 'Lade Terrain & Orte...';
+        if (status) status.textContent = 'Lade Terrain...';
 
         try {
+            // 1. Höhendaten (Blockierend, da alles andere darauf aufbaut)
             vpElevationData = await fetchRouteElevation(routeWaypoints, currentSignal);
             
+            // 2. Städte / Landmarks (Lokale JSON, blitzschnell)
             if (window._lastLmRouteKey !== cacheKey) {
                 const btnLm = document.getElementById('btnToggleLandmarks');
                 if (btnLm) btnLm.classList.add('vp-loading-pulse');
-
                 const lmStr = localStorage.getItem('ga_lms_' + cacheKey);
                 if (lmStr) {
                     try { vpLandmarks = JSON.parse(lmStr); window._lastLmRouteKey = cacheKey; } catch(e) { vpLandmarks = []; }
@@ -267,50 +309,65 @@ function triggerVerticalProfileUpdate() {
             }
             
             if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
-        } catch(e) {
-            if (e && e.name !== 'AbortError') console.error('Fast Profile Error:', e);
-        }
-    }, 500);
 
-    vpProfileSlowTimeout = setTimeout(async () => {
-        if (!routeWaypoints || routeWaypoints.length < 2) return;
-        const cacheKey = window._lastVpRouteKey;
-        const status = document.getElementById('verticalProfileStatus');
-        if (status) status.textContent = 'Lade Wetter & Hindernisse...';
+            if (status) status.textContent = 'Lade Wetter & Umgebung...';
+            
+            // 3. PARALLELER FETCH: Wetter & Overpass
+            const fetchWetter = async () => {
+                if (!vpShowClouds) return;
+                const btnCl = document.getElementById('btnToggleClouds');
+                if (btnCl) btnCl.classList.add('vp-loading-pulse');
+                vpWeatherData = await fetchRouteWeather(routeWaypoints, vpElevationData, currentSignal);
+                if (btnCl) btnCl.classList.remove('vp-loading-pulse');
+                
+                // FIX: Zwingt Layer 1 zum sofortigen Zeichnen, damit Wolken & Regen zeitgleich erscheinen!
+                window.vpBgNeedsUpdate = true; 
+            };
 
-        try {
-            if (!vpElevationData) return; 
+            const fetchOverpass = async () => {
+                if (!vpShowObstacles && !vpShowLinear) return;
+                if (window._lastObsRouteKey !== cacheKey) {
+                    const btnOb = document.getElementById('btnToggleObstacles');
+                    const btnLin = document.getElementById('btnToggleLinear');
+                    if (btnOb) btnOb.classList.add('vp-loading-pulse');
+                    if (btnLin) btnLin.classList.add('vp-loading-pulse');
 
-            const btnCl = document.getElementById('btnToggleClouds');
-            if (btnCl) btnCl.classList.add('vp-loading-pulse');
-            vpWeatherData = await fetchRouteWeather(routeWaypoints, vpElevationData, currentSignal);
-            if (btnCl) btnCl.classList.remove('vp-loading-pulse');
-
-            if (window._lastObsRouteKey !== cacheKey) {
-                const btnOb = document.getElementById('btnToggleObstacles');
-                if (btnOb) btnOb.classList.add('vp-loading-pulse');
-
-                const obStr = localStorage.getItem('ga_obs_' + cacheKey);
-                if (obStr) {
-                    try { vpObstacles = JSON.parse(obStr); window._lastObsRouteKey = cacheKey; } catch(e) { vpObstacles = []; }
-                } else {
-                    vpObstacles = await fetchProfileObstacles(vpElevationData, currentSignal);
-                    if (vpObstacles !== null) { 
-                        try { localStorage.setItem('ga_obs_' + cacheKey, JSON.stringify(vpObstacles)); window._lastObsRouteKey = cacheKey; } catch(e) {}
+                    // FIX: Kombinierter Cache für Hindernisse UND Flüsse/Autobahnen
+                    const obStr = localStorage.getItem('ga_obs_combo_' + cacheKey);
+                    if (obStr) {
+                        try { 
+                            const cached = JSON.parse(obStr); 
+                            vpObstacles = cached.obs || [];
+                            vpLinearFeatures = cached.lin || [];
+                            window._lastObsRouteKey = cacheKey; 
+                        } catch(e) { vpObstacles = []; vpLinearFeatures = []; }
+                    } else {
+                        const result = await fetchProfileObstacles(vpElevationData, currentSignal);
+                        if (result !== null) { 
+                            vpObstacles = result.obs || [];
+                            vpLinearFeatures = result.lin || [];
+                            try { localStorage.setItem('ga_obs_combo_' + cacheKey, JSON.stringify(result)); window._lastObsRouteKey = cacheKey; } catch(e) {}
+                        }
                     }
+                    if (btnOb) btnOb.classList.remove('vp-loading-pulse');
+                    if (btnLin) btnLin.classList.remove('vp-loading-pulse');
                 }
-                if (btnOb) btnOb.classList.remove('vp-loading-pulse');
-            }
+            };
+
+            // Führe beide schweren Netzwerk-Tasks komplett parallel aus!
+            await Promise.all([fetchWetter(), fetchOverpass()]);
             if (status) status.textContent = vpElevationData.length + ' Punkte & API-Daten geladen';
+            
         } catch(e) {
-            if (e && e.name !== 'AbortError') console.error('Slow Profile Error:', e);
-            if (status) status.textContent = 'API Limit erreicht';
+            if (e && e.name !== 'AbortError') console.error('Profile Fetch Error:', e);
+            if (status) status.textContent = 'API Error / Abgebrochen';
         } finally {
             const bC = document.getElementById('btnToggleClouds'); if(bC) bC.classList.remove('vp-loading-pulse');
             const bO = document.getElementById('btnToggleObstacles'); if(bO) bO.classList.remove('vp-loading-pulse');
+            const bL = document.getElementById('btnToggleLinear'); if(bL) bL.classList.remove('vp-loading-pulse');
             if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
         }
-    }, 2800);
+    }, 150); // Nur noch 150ms Debounce statt fast 3 Sekunden!
 }
 
 async function fetchRouteElevation(routePts, signal) {
@@ -392,63 +449,82 @@ async function fetchRouteElevation(routePts, signal) {
 
 async function fetchRouteWeather(routePts, elevData, signal) {
     if (!routePts || routePts.length < 2 || !elevData || elevData.length < 2) return null;
-    window._weatherCache = window._weatherCache || {};
-    // Koordinaten als Key (sobald sich die Route ändert, verfällt der Cache)
-    const weatherKey = routePts.map(p => `${(p.lat || 0).toFixed(2)},${((p.lng || p.lon) || 0).toFixed(2)}`).join('|');
-    if (window._weatherCache[weatherKey] && (Date.now() - window._weatherCache[weatherKey].time) < 15 * 60000) {
-        return window._weatherCache[weatherKey].data;
-    }
+
     const totalDist = elevData[elevData.length - 1].distNM;
-    const numZones = 10;
+    let activeMetars = [];
+
+    // METAR FIX: Route in parallele 60-NM-Blöcke schneiden, um AviationWeather API-Schnittlimits (Max Stations) zu umgehen!
+    const CHUNK_NM = 60;
+    const promises = [];
+
+    for (let d = 0; d < totalDist; d += CHUNK_NM) {
+        let cMinLat = 90, cMaxLat = -90, cMinLon = 180, cMaxLon = -180;
+        elevData.forEach(p => {
+            if (p.distNM >= d && p.distNM < d + CHUNK_NM) {
+                if (p.lat < cMinLat) cMinLat = p.lat;
+                if (p.lat > cMaxLat) cMaxLat = p.lat;
+                if (p.lon < cMinLon) cMinLon = p.lon;
+                if (p.lon > cMaxLon) cMaxLon = p.lon;
+            }
+        });
+        if (cMinLat === 90) continue;
+        
+        // Puffer hinzufügen (ca. 45 NM)
+        cMinLat -= 0.8; cMaxLat += 0.8; cMinLon -= 0.8; cMaxLon += 0.8;
+        const url = `https://aviationweather.gov/api/data/metar?bbox=${cMinLat},${cMinLon},${cMaxLat},${cMaxLon}&format=json&t=${Date.now()}`;
+        
+        promises.push(
+            fetch(url, { signal })
+            .then(r => r.ok && r.status !== 204 ? r.json() : [])
+            .catch(async () => {
+                try {
+                    const pr = await fetch(`https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`, { signal });
+                    return pr.ok && pr.status !== 204 ? pr.json() : [];
+                } catch(e) { return []; }
+            })
+        );
+    }
+
+    const results = await Promise.all(promises);
+    if (signal && signal.aborted) return null;
+
+    let seen = new Set();
+    results.forEach(arr => {
+        if (arr && arr.length) {
+            arr.forEach(m => {
+                if (!seen.has(m.icaoId)) {
+                    seen.add(m.icaoId);
+                    activeMetars.push(m);
+                }
+            });
+        }
+    });
+
+    if (!activeMetars || activeMetars.length === 0) return null;
+    const stepNM = 15;
     const zones = [];
-    const fetchPromises = [];
-    for (let i = 0; i < numZones; i++) {
-        const targetDist = (i / (numZones - 1)) * totalDist;
+
+    for (let targetDist = 0; targetDist <= totalDist; targetDist += stepNM) {
         let bestPt = elevData[0];
         let minDiff = Infinity;
         for (const pt of elevData) {
             const diff = Math.abs(pt.distNM - targetDist);
             if (diff < minDiff) { minDiff = diff; bestPt = pt; }
         }
-        const minLat = Number((bestPt.lat - 0.4).toFixed(4));
-        const maxLat = Number((bestPt.lat + 0.4).toFixed(4));
-        const minLon = Number((bestPt.lon - 0.6).toFixed(4));
-        const maxLon = Number((bestPt.lon + 0.6).toFixed(4));
-        const url = `https://aviationweather.gov/api/data/metar?bbox=${minLat},${minLon},${maxLat},${maxLon}&format=json&t=${Date.now()}`;
-        const p = fetch(url, { signal }).then(async r => {
-            if (r.status === 204) return [];
-            if (!r.ok) throw new Error("HTTP " + r.status);
-            return JSON.parse(await r.text());
-        }).catch(async e => {
-            if (e && e.name === 'AbortError') return null;
-            try {
-                const proxyUrl = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`;
-                const pr = await fetch(proxyUrl, { signal });
-                if (pr.status === 204) return [];
-                if (!pr.ok) throw new Error("Proxy Error");
-                return JSON.parse(await pr.text());
-            } catch(px) { 
-                if (px && px.name === 'AbortError') return null;
-                return []; 
-            }
-        }).then(metars => ({ targetDist, bestPt, metars, index: i }));
-        fetchPromises.push(p);
-    }
-    const results = await Promise.all(fetchPromises);
-    for (let i = 0; i < results.length; i++) {
-        const res = results[i];
-        if (!res.metars || res.metars.length === 0) continue;
+
         let closestMetar = null, minMetarDist = Infinity;
-        res.metars.forEach(m => {
-            const d = calcNav(res.bestPt.lat, res.bestPt.lon, m.lat, m.lon).dist;
+        activeMetars.forEach(m => {
+            const d = calcNav(bestPt.lat, bestPt.lon, m.lat, m.lon).dist;
             if (d < minMetarDist) { minMetarDist = d; closestMetar = m; }
         });
+
         if (closestMetar && minMetarDist < 45) {
             const clouds = [];
             const raw = closestMetar.rawOb || "";
             const stnElevFt = closestMetar.elev ? closestMetar.elev * 3.28084 : 0;
             const cloudRegex = /(FEW|SCT|BKN|OVC|VV)(\d{3})/g;
             let match, lowestBase = Infinity;
+            
             while((match = cloudRegex.exec(raw)) !== null) {
                 const type = match[1];
                 const agl = parseInt(match[2], 10) * 100;
@@ -456,33 +532,32 @@ async function fetchRouteWeather(routePts, elevData, signal) {
                 if (msl < lowestBase) lowestBase = msl;
                 clouds.push({ type, baseAgl: agl, baseMsl: msl });
             }
+            
             const hasRain = /\b(-|\+)?(RA|DZ|SH|SHRA)\b/i.test(raw);
             const hasSnow = /\b(-|\+)?(SN|SG|PL|SHSN)\b/i.test(raw);
             const hasTS = /\b(-|\+)?(TS|TSRA|CB)\b/i.test(raw);
+            
             if(clouds.length > 0 || hasRain || hasSnow || hasTS) {
                 const visuals = { puffs: [], drops: [], flashes: [] };
                 if (clouds.length > 0) {
                     for(let c=0; c<25; c++) visuals.puffs.push({ x: Math.random(), y: Math.random(), r: Math.random(), op: Math.random() });
                 }
                 if (hasRain || hasSnow) {
-                    for(let d=0; d<45; d++) visuals.drops.push({ x: Math.random(), y: Math.random(), spd: Math.random() });
+                    for(let d=0; d<120; d++) visuals.drops.push({ x: Math.random(), y: Math.random(), spd: Math.random() });
                 }
                 if (hasTS) {
                     for(let f=0; f<2; f++) visuals.flashes.push({ x: Math.random(), pts: [Math.random(), Math.random(), Math.random(), Math.random()] });
                 }
                 zones.push({
-                    distNM: res.bestPt.distNM, icao: closestMetar.icaoId, clouds: clouds,
+                    distNM: bestPt.distNM, icao: closestMetar.icaoId, clouds: clouds,
                     lowestBase: lowestBase !== Infinity ? lowestBase : 5000,
                     weather: { hasRain, hasSnow, hasTS }, visuals: visuals
                 });
             }
         }
     }
-    if (zones.length > 0) {
-        window._weatherCache[weatherKey] = { time: Date.now(), data: zones };
-        return zones;
-    }
-    return null;
+
+    return zones.length > 0 ? zones : null;
 }
 // Globale Debug-Funktion für die Entwicklerkonsole
 window.debugCloudProfile = function() {
@@ -494,7 +569,133 @@ window.debugCloudProfile = function() {
     triggerVerticalProfileUpdate();
     console.log("Update angetriggert. Bitte das Profil-Canvas öffnen und die Logs beobachten.");
 };
-function vpDrawLandmarks(ctx, xOf, yOf, elevData, totalDist, isDarkTheme, zoomFactor) {
+function vpDrawTerrainCover(ctx, xOf, yOf, elevData, viewMinX, viewMaxX, zoomFactor, maxAlt) {
+    if (!elevData || elevData.length < 2) return;
+    ctx.save();
+    const prng = (s) => { let x = Math.sin(s) * 10000; return x - Math.floor(x); };
+    
+    // 1. WÄLDER (Dunkelgrüne Tannenzacken)
+    ctx.fillStyle = '#1c3614'; 
+    ctx.beginPath();
+    
+    for (let i = 0; i < elevData.length - 1; i++) {
+        const p1 = elevData[i];
+        const p2 = elevData[i+1];
+        const startX = xOf(p1.distNM);
+        const endX = xOf(p2.distNM);
+        
+        if (endX < viewMinX || startX > viewMaxX) continue;
+        
+        const dist = p2.distNM - p1.distNM;
+        if (dist === 0) continue;
+        const slope = Math.abs(p2.elevFt - p1.elevFt) / dist;
+        
+        const isForest = (p1.elevFt > 200 && p1.elevFt < 4500) && (slope > 80 || prng(i) > 0.5);
+        
+        if (isForest) {
+            // PERFORMANCE & OPTIK FIX: Verhindert den "Blob" beim Rauszoomen
+            const pixelDist = endX - startX;
+            const maxTrees = Math.max(1, Math.floor(pixelDist / 6)); // Max 1 Baum alle 6 Pixel
+            const numTrees = Math.min(Math.max(1, Math.floor(dist * 15)), maxTrees); 
+            
+            for(let t = 0; t < numTrees; t++) {
+                const seed = i * 100 + t;
+                if (prng(seed + 0.1) > 0.7) continue;
+                
+                const f = t / numTrees;
+                const tx = startX + f * (endX - startX);
+                const altFt = p1.elevFt + f * (p2.elevFt - p1.elevFt);
+                const ty = yOf(altFt);
+                
+                // Bäume skalieren sanft runter, bleiben aber knackig
+                const scale = Math.min(1, zoomFactor / 2.5);
+                const treeHeight = Math.max(3, (5 + prng(seed + 0.2) * 8) * scale);
+                const treeWidth = Math.max(2, (4 + prng(seed + 0.3) * 4) * scale);
+                
+                ctx.moveTo(tx - treeWidth/2, ty + 2);
+                ctx.lineTo(tx, ty - treeHeight);
+                ctx.lineTo(tx + treeWidth/2, ty + 2);
+            }
+        }
+    }
+    ctx.fill();
+    
+    // 2. ECHTE FLÜSSE UND AUTOBAHNEN (Linear Features aus Overpass)
+    if (typeof vpShowLinear !== 'undefined' && vpShowLinear && typeof vpLinearFeatures !== 'undefined' && vpLinearFeatures.length > 0) {
+        const getElevY = (dNM) => {
+            for(let i=0; i<elevData.length-1; i++) {
+                if (dNM >= elevData[i].distNM && dNM <= elevData[i+1].distNM) {
+                    const f = (dNM - elevData[i].distNM) / (elevData[i+1].distNM - elevData[i].distNM);
+                    return yOf(elevData[i].elevFt + f * (elevData[i+1].elevFt - elevData[i].elevFt));
+                }
+            }
+            return yOf(elevData[elevData.length-1].elevFt);
+        };
+        
+        // PERFORMANCE FIX: Layout nur 1x pro Zoom-Stufe UND maxAlt berechnen!
+        const layoutKey = zoomFactor.toFixed(2) + '_' + (maxAlt || 0).toFixed(0);
+        if (!window._vpLinearLayouts || window._vpLinearLayouts.key !== layoutKey) {
+            let occupiedSigns = [];
+            for (const feat of vpLinearFeatures) {
+                const px = xOf(feat.distNM);
+                const py = getElevY(feat.distNM);
+                feat._render = { px, py, drawName: false, labelY: 0, tw: 0 };
+                
+                if (feat.name && zoomFactor >= 1.2) {
+                    ctx.font = feat.type === 'river' ? 'bold 8px Arial' : 'bold 7px Arial';
+                    const tw = ctx.measureText(feat.name).width;
+                    feat._render.tw = tw;
+                    let labelY = feat.type === 'river' ? py + 15 : py - 14;
+                    let collision = true, attempts = 0;
+                    while(collision && attempts < 4) {
+                        collision = false;
+                        for(let occ of occupiedSigns) {
+                            if (px - tw/2 - 3 < occ.r && px + tw/2 + 3 > occ.l && labelY < occ.b && labelY + 10 > occ.t) { collision = true; break; }
+                        }
+                        if(collision) { labelY += (feat.type === 'river' ? 10 : -12); attempts++; }
+                    }
+                    if(!collision) {
+                        occupiedSigns.push({l: px - tw/2 - 2, r: px + tw/2 + 2, t: labelY, b: labelY + 10});
+                        feat._render.drawName = true;
+                        // FIX: Wir merken uns nur den Pixel-Abstand zum Boden, nicht die absolute Höhe!
+                        feat._render.labelYOffset = labelY - py;
+                    }
+                }
+            }
+            window._vpLinearLayouts = { key: layoutKey, occ: occupiedSigns };
+            window.vpLinearOccupied = occupiedSigns; 
+        }
+
+        // NUR NOCH ZEICHNEN (mit weichem Culling)
+        for (const feat of vpLinearFeatures) {
+            if (!feat._render) continue;
+            
+            // FIX: X und Y live berechnen, damit Schilder mit der Bodenlinie wandern
+            const px = xOf(feat.distNM);
+            const py = getElevY(feat.distNM);
+            if (px < viewMinX - 50 || px > viewMaxX + 50) continue;
+            
+            if (feat.type === 'river') {
+                ctx.fillStyle = '#3498db'; ctx.beginPath();
+                ctx.moveTo(px - 4, py - 1); ctx.lineTo(px - 2, py + 5); ctx.lineTo(px + 2, py + 5); ctx.lineTo(px + 4, py - 1); ctx.fill();
+                if (feat._render.drawName) {
+                    const labelY = py + feat._render.labelYOffset;
+                    ctx.fillStyle = '#3498db'; ctx.font = 'bold 8px Arial'; ctx.textAlign = 'center'; ctx.fillText(feat.name, px, labelY + 8);
+                }
+            } else if (feat.type === 'highway') {
+                ctx.fillStyle = '#555'; ctx.fillRect(px - 3, py - 2, 6, 4);
+                ctx.fillStyle = '#f2c12e'; ctx.fillRect(px - 1, py - 1, 2, 2);
+                if (feat._render.drawName) {
+                    const labelY = py + feat._render.labelYOffset;
+                    ctx.fillStyle = '#1a73e8'; ctx.fillRect(px - feat._render.tw/2 - 2, labelY, feat._render.tw + 4, 10);
+                    ctx.fillStyle = '#fff'; ctx.font = 'bold 7px Arial'; ctx.textAlign = 'center'; ctx.fillText(feat.name, px, labelY + 8);
+                }
+            }
+        }
+    }
+    ctx.restore();
+}
+function vpDrawLandmarks(ctx, xOf, yOf, elevData, totalDist, isDarkTheme, zoomFactor, maxAlt) {
     if (!vpLandmarks || vpLandmarks.length === 0) return;
     const getElevY = (dNM) => {
         if (!elevData || elevData.length < 2) return yOf(0);
@@ -507,59 +708,120 @@ function vpDrawLandmarks(ctx, xOf, yOf, elevData, totalDist, isDarkTheme, zoomFa
         return yOf(elevData[elevData.length-1].elevFt);
     };
     
-    let viewMinX = -Infinity, viewMaxX = Infinity;
-    if (ctx.canvas.id === 'mapProfileCanvas') {
-        const sc = document.getElementById('mapProfileScroll');
-        if (sc) { viewMinX = sc.scrollLeft - 200; viewMaxX = sc.scrollLeft + sc.clientWidth + 200; }
+    // PERFORMANCE FIX: Kollisionen nur 1x pro Zoom-Stufe UND maxAlt berechnen
+    const layoutKey = zoomFactor.toFixed(2) + '_' + (maxAlt || 0).toFixed(0) + '_' + (window.vpShowLinear ? '1' : '0');
+    if (!window._vpLandmarkLayouts || window._vpLandmarkLayouts.key !== layoutKey) {
+        let globalOccupiedX = [];
+        const nmPerPx = totalDist / (xOf(totalDist) - xOf(0));
+        const edgePad = Math.min(2.5, totalDist * 0.05);
+        ctx.font = `bold ${(zoomFactor >= 1.5 ? 10 : 8)}px Arial`; // Setup für measureText
+        
+        for (const lm of vpLandmarks) {
+            lm._render = null;
+            if (lm.distNM < edgePad || lm.distNM > totalDist - edgePad) continue;
+            
+            const px = xOf(lm.distNM);
+            const icon = lm.type === 'apt' ? '🛫' : (lm.type === 'city' ? '🏢' : '🏘️');
+            const fontSize = (zoomFactor >= 1.5) ? 10 : 8;
+
+            let iconScale = 1.0;
+            if (lm.type !== 'apt') {
+                const p = Math.max(5000, Math.min(1000000, lm.pop || 5000));
+                const logPop = Math.log10(p);
+                let factor = (logPop - 3.7) / 2.3;
+                iconScale = Math.min((zoomFactor >= 1.5 ? 2.5 : 1.5), 0.5 + Math.max(0, Math.min(1, factor)) * 2.0);
+            } else iconScale = 1.2;
+            
+            const iconFontSize = Math.max(8, Math.round(11 * iconScale));
+            const iconOffsetY = Math.round(iconFontSize * 0.55);
+            
+            const textWidth = ctx.measureText(lm.name).width;
+            const reqWidth = Math.max(textWidth, iconFontSize + 4) + 6;
+            
+            let shiftAttempts = 0, currentDistNM = lm.distNM, currentPx = px, currentPy = getElevY(lm.distNM);
+            let collision = true, finalMinX, finalMaxX;
+
+            while (collision && shiftAttempts < 12) {
+                collision = false;
+                finalMinX = currentPx - reqWidth / 2;
+                finalMaxX = currentPx + reqWidth / 2;
+                const boxT = currentPy - iconOffsetY - iconFontSize;
+                const boxB = currentPy + 20;
+
+                for (const occ of globalOccupiedX) {
+                    if (finalMinX < occ.maxX && finalMaxX > occ.minX) { collision = true; break; }
+                }
+                if (!collision && window.vpLinearOccupied) {
+                    for (const occ of window.vpLinearOccupied) {
+                        if (finalMinX < occ.r && finalMaxX > occ.l && boxT < occ.b && boxB > occ.t) { collision = true; break; }
+                    }
+                }
+                if (collision) {
+                    shiftAttempts++;
+                    const shiftPx = (shiftAttempts % 2 !== 0 ? -1 : 1) * Math.ceil(shiftAttempts / 2) * 8;
+                    currentDistNM = lm.distNM + (shiftPx * nmPerPx);
+                    currentPx = xOf(currentDistNM);
+                    currentPy = getElevY(currentDistNM); 
+                }
+            }
+
+            if (!collision) {
+                globalOccupiedX.push({ minX: finalMinX, maxX: finalMaxX, t: currentPy - iconOffsetY - iconFontSize, b: currentPy + 20 });
+                // FIX: Wir cachen nur die Distanz (inkl. Ausweich-Shift), die Pixelhöhe wird im Render-Loop LIVE berechnet!
+                lm._render = { distNM: currentDistNM, icon, iconFontSize, iconOffsetY, fontSize };
+            }
+        }
+        window._vpLandmarkLayouts = { key: layoutKey, occ: globalOccupiedX };
+        window.vpLandmarkOccupiedX = globalOccupiedX;
     }
+    
+    // NUR NOCH ZEICHNEN (Schnell, ohne jegliche Kollisions-Logik)
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    let occupiedX = [];
-    let countDrawn = 0;
-    const edgePad = Math.min(2.5, totalDist * 0.05); // Dynamischer Rand-Puffer
-    for (const lm of vpLandmarks) {
-        if (lm.distNM < edgePad || lm.distNM > totalDist - edgePad) continue;
-        const px = xOf(lm.distNM);
-        if (px < viewMinX || px > viewMaxX) continue; // CULLING
-        const icon = lm.type === 'apt' ? '🛫' : (lm.type === 'city' ? '🏢' : '🏘️');
-        const fontSize = (zoomFactor >= 1.5) ? 10 : 8;
+    
+    let viewMinX = -Infinity, viewMaxX = Infinity;
+    if (ctx.canvas.id === 'mapProfileCanvasBg') {
+        const sc = document.getElementById('mapProfileScroll');
+        if (sc) { viewMinX = sc.scrollLeft - 100; viewMaxX = sc.scrollLeft + sc.clientWidth + 100; }
+    }
 
-        ctx.font = `bold ${fontSize}px Arial`;
-        const textWidth = ctx.measureText(lm.name).width;
-        const reqWidth = Math.max(textWidth, 14) + 6;
-        const minX = px - reqWidth / 2;
-        const maxX = px + reqWidth / 2;
-        let collision = false;
-        for (const occ of occupiedX) {
-            if (minX < occ.maxX && maxX > occ.minX) { collision = true; break; }
-        }
-        if (!collision) {
-            occupiedX.push({ minX, maxX });
-            const py = getElevY(lm.distNM);
-            ctx.font = '11px Arial';
-            ctx.fillText(icon, px, py - 6);
-            ctx.font = `bold ${fontSize}px Arial`;
+    for (const lm of vpLandmarks) {
+        if (!lm._render) continue;
+        
+        // FIX: X und Y Pixel in Echtzeit anhand der aktuellen Skalierung berechnen
+        const px = xOf(lm._render.distNM);
+        const py = getElevY(lm._render.distNM);
+        
+        if (px < viewMinX || px > viewMaxX) continue;
+        
+        ctx.font = lm._render.iconFontSize + 'px Arial';
+        ctx.fillStyle = '#ffffff'; 
+        ctx.fillText(lm._render.icon, px, py - lm._render.iconOffsetY);
+        
+        if (!window.vpIsFastRendering) {
+            ctx.font = `bold ${lm._render.fontSize}px Arial`;
             ctx.fillStyle = isDarkTheme ? 'rgba(190, 180, 160, 0.7)' : 'rgba(70, 60, 40, 0.7)';
-            ctx.fillText(lm.name, px, py + 10);
-            countDrawn++;
+            ctx.fillText(lm.name, px, py + 10); 
         }
     }
     ctx.restore();
-    window.vpLandmarkOccupiedX = occupiedX; // Speichert den belegten Platz für die Hindernisse
-    if(countDrawn === 0 && vpLandmarks.length > 0) console.log("⚠️ Landmarks wurden geladen, aber durch Kollision/Rand abgeschnitten!");
 }
-
-function vpDrawObstacles(ctx, xOf, yOf, totalDist, zoomFactor, elevData) {
+function vpDrawObstacles(ctx, xOf, yOf, totalDist, zoomFactor, elevData, timeMs = 0) {
     if (!vpObstacles || vpObstacles.length === 0) return;
     const edgePad = Math.min(1.0, totalDist * 0.02);
     
     const getElevY = (dNM) => {
         if (!elevData || elevData.length < 2) return yOf(0);
-        for (let i = 0; i < elevData.length - 1; i++) {
-            if (dNM >= elevData[i].distNM && dNM <= elevData[i+1].distNM) {
-                const f = (dNM - elevData[i].distNM) / (elevData[i+1].distNM - elevData[i].distNM);
-                return yOf(elevData[i].elevFt + f * (elevData[i+1].elevFt - elevData[i].elevFt));
+        let low = 0, high = elevData.length - 2;
+        while (low <= high) {
+            let mid = (low + high) >> 1;
+            if (dNM < elevData[mid].distNM) high = mid - 1;
+            else if (dNM > elevData[mid+1].distNM) low = mid + 1;
+            else {
+                const p1 = elevData[mid], p2 = elevData[mid+1];
+                const f = (dNM - p1.distNM) / (p2.distNM - p1.distNM || 1);
+                return yOf(p1.elevFt + f * (p2.elevFt - p1.elevFt));
             }
         }
         return yOf(elevData[elevData.length - 1].elevFt);
@@ -581,27 +843,28 @@ function vpDrawObstacles(ctx, xOf, yOf, totalDist, zoomFactor, elevData) {
         const px = xOf(obs.distNM);
         if (px < viewMinX || px > viewMaxX) continue; // CULLING
         const pyGround = getElevY(obs.distNM);
-        const heightPx = Math.abs(yOf(obs.hFt) - yOf(0));
-        const pyTop = pyGround - heightPx;
-        const towerHeightPx = Math.max(1, heightPx);
+        const trueHeightPx = Math.abs(yOf(obs.hFt) - yOf(0));
+        
+        // Der Mast steckt 8 Pixel tief im Boden
         const pyRoot = pyGround + 8; 
 
         if (obs.type === 'wind') {
-            // Strikt proportionale Skalierung: Rotorblätter sind exakt 45% der Masthöhe, egal bei welchem Zoom!
-            const r = Math.max(1, towerHeightPx * 0.45);
-            const pyHub = pyTop + r;                                   
+            // FIX: Die "echte" sichtbare Länge ist die Höhe über Grund PLUS die 8px im Boden!
+            const visualTotalHeight = trueHeightPx + 8;
+            
+            // Blätter sind jetzt immer ca. 45% des ECHTEN sichtbaren Mastes (mindestens 4px)
+            const r = Math.max(4, visualTotalHeight * 0.45);
+            
+            // Die Nabe sitzt so, dass das obere Blatt genau an der echten Spitze kratzt
+            const pyTop = pyGround - trueHeightPx;
+            const pyHub = pyTop + r;
 
-            ctx.beginPath();
-            ctx.moveTo(px, pyRoot);
-            ctx.lineTo(px, pyHub);
-            ctx.strokeStyle = 'rgba(230, 230, 230, 0.9)';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(px, pyRoot); ctx.lineTo(px, pyHub);
+            ctx.strokeStyle = 'rgba(230, 230, 230, 0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
 
-            ctx.fillStyle = '#f5f5f5';
-            ctx.strokeStyle = 'rgba(150, 150, 150, 0.6)';
-            ctx.lineWidth = 0.5;
-            const rotOffset = (obs.distNM * 137) % (Math.PI * 2);
+            ctx.fillStyle = '#f5f5f5'; ctx.strokeStyle = 'rgba(150, 150, 150, 0.6)'; ctx.lineWidth = 0.5;
+            const rotSpeed = 0.0015;
+            const rotOffset = ((obs.distNM * 137) + (timeMs * rotSpeed)) % (Math.PI * 2);
             for (let i = 0; i < 3; i++) {
                 const a = rotOffset + (i * 120 - 90) * Math.PI / 180;
                 ctx.beginPath();
@@ -609,25 +872,25 @@ function vpDrawObstacles(ctx, xOf, yOf, totalDist, zoomFactor, elevData) {
                 ctx.lineTo(px + Math.cos(a - 0.2) * r * 0.25, pyHub + Math.sin(a - 0.2) * r * 0.25);
                 ctx.lineTo(px + Math.cos(a) * r,               pyHub + Math.sin(a) * r);
                 ctx.lineTo(px + Math.cos(a + 0.2) * r * 0.25, pyHub + Math.sin(a + 0.2) * r * 0.25);
-                ctx.closePath();
-                ctx.fill();
-                ctx.stroke();
+                ctx.closePath(); ctx.fill(); ctx.stroke();
             }
-            ctx.beginPath(); ctx.arc(px, pyHub, 1.5, 0, Math.PI * 2); ctx.fillStyle = '#ccc'; ctx.fill();
+            // Nabe wächst proportional mit
+            ctx.beginPath(); ctx.arc(px, pyHub, Math.max(1.5, r * 0.15), 0, Math.PI * 2); ctx.fillStyle = '#ccc'; ctx.fill();
         } else {
-            ctx.beginPath();
-            ctx.moveTo(px, pyRoot);
-            ctx.lineTo(px, pyTop);
-            ctx.strokeStyle = 'rgba(80, 80, 80, 0.9)';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+            // Normale Masten (ohne Rotoren) - mindestens 2px über dem Boden sichtbar
+            const pyTop = pyGround - Math.max(2, trueHeightPx);
+            ctx.beginPath(); ctx.moveTo(px, pyRoot); ctx.lineTo(px, pyTop);
+            ctx.strokeStyle = 'rgba(80, 80, 80, 0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
 
-            const alpha = 0.4 + ((obs.distNM * 88) % 100) / 100 * 0.6;
-            ctx.beginPath(); ctx.arc(px, pyTop, 2, 0, Math.PI * 2); ctx.fillStyle = `rgba(217, 56, 41, ${alpha})`; ctx.fill();
+            // ANIMATION: Blinkendes Licht
+            const blink = 0.3 + 0.6 * (Math.sin(timeMs * 0.005 + obs.distNM * 50) * 0.5 + 0.5);
+            ctx.beginPath(); ctx.arc(px, pyTop, 2, 0, Math.PI * 2); ctx.fillStyle = `rgba(217, 56, 41, ${blink})`; ctx.fill();
         }
 
         rawLabels.push({ x: px, yBase: pyRoot, count: obs.count || 1 });
     }
+    
+    if (window.vpIsFastRendering) { ctx.restore(); return; } // Performance-Culling
     
     // 2. Labels abhängig vom Zoom/Pixelabstand clustern
     rawLabels.sort((a, b) => a.x - b.x);
@@ -698,11 +961,8 @@ function vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, isDarkTheme, elev
         return yOf(elevData[elevData.length-1].elevFt);
     };
 
+    // KEIN Culling für Layer 1 (Wird nativ von der GPU gescrollt)
     let viewMinX = -Infinity, viewMaxX = Infinity;
-    if (ctx.canvas.id === 'mapProfileCanvas') {
-        const sc = document.getElementById('mapProfileScroll');
-        if (sc) { viewMinX = sc.scrollLeft - 200; viewMaxX = sc.scrollLeft + sc.clientWidth + 200; }
-    }
     // Stabiler, deterministischer Pseudo-Zufallsgenerator gegen Flackern
     const prng = (s) => { let x = Math.sin(s) * 10000; return x - Math.floor(x); };
     ctx.save();
@@ -713,49 +973,6 @@ function vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, isDarkTheme, elev
         const startX = xOf(prevDist), endX = xOf(nextDist), width = endX - startX, midX = startX + width/2;
         
         if (endX < viewMinX || startX > viewMaxX) continue; // CULLING
-        // 1. REGEN & SCHNEE
-        if (zone.weather && (zone.weather.hasRain || zone.weather.hasSnow) && zone.lowestBase) {
-            const baseY = yOf(zone.lowestBase);
-            ctx.beginPath();
-            for(let d=0; d<35; d++) {
-                const pxRand = prng(i * 200 + d + 0.1), pyRand = prng(i * 200 + d + 0.2), spdRand = prng(i * 200 + d + 0.3);
-                const dropX = startX + pxRand * width, dNM = prevDist + pxRand * (nextDist - prevDist);
-                const groundY = getElevY(dNM);
-                if (baseY < groundY) {
-                    if (zone.weather.hasSnow) {
-                        const sy = baseY + pyRand * (groundY - baseY);
-                        ctx.moveTo(dropX, sy); ctx.arc(dropX, sy, 0.8 + spdRand, 0, Math.PI*2);
-                    } else {
-                        const ry1 = baseY + pyRand * (groundY - baseY);
-                        const ry2 = Math.min(groundY, ry1 + 6 + spdRand * 4);
-                        ctx.moveTo(dropX, ry1); ctx.lineTo(dropX - 1 - spdRand*2, ry2);
-                    }
-                }
-            }
-            ctx.fillStyle = zone.weather.hasSnow ? 'rgba(255,255,255,0.8)' : 'rgba(80, 150, 255, 0.6)';
-            ctx.strokeStyle = zone.weather.hasSnow ? 'rgba(255,255,255,0.8)' : 'rgba(80, 150, 255, 0.5)';
-            ctx.lineWidth = 1.5;
-            if (zone.weather.hasSnow) ctx.fill(); else ctx.stroke();
-        }
-        // 2. BLITZE
-        if (zone.weather && zone.weather.hasTS && zone.lowestBase) {
-            const baseY = yOf(zone.lowestBase);
-            ctx.beginPath();
-            for(let f=0; f<2; f++) {
-                const fxRand = prng(i * 300 + f + 0.1);
-                const fx = startX + width * 0.2 + fxRand * width * 0.6;
-                const groundY = getElevY(prevDist + fxRand * (nextDist - prevDist));
-                if (baseY < groundY) {
-                    const stepY = (groundY - baseY) / 4;
-                    ctx.moveTo(fx, baseY);
-                    ctx.lineTo(fx + (prng(i*300+f+0.2)-0.5)*15, baseY + stepY);
-                    ctx.lineTo(fx + (prng(i*300+f+0.3)-0.5)*15, baseY + stepY*2);
-                    ctx.lineTo(fx + (prng(i*300+f+0.4)-0.5)*15, baseY + stepY*3);
-                    ctx.lineTo(fx + (prng(i*300+f+0.5)-0.5)*15, groundY);
-                }
-            }
-            ctx.strokeStyle = 'rgba(255, 230, 100, 0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
-        }
         // 3. WOLKEN (PUFFS) – Zoom-adaptiv, isolierte Zellen für FEW/SCT
         if (zone.clouds && zone.clouds.length > 0) {
             zone.clouds.forEach((c, cIdx) => {
@@ -834,6 +1051,150 @@ function vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, isDarkTheme, elev
                 ctx.font = 'bold 8px Arial'; ctx.textAlign = 'center';
                 ctx.fillText(c.type, midX, baseY + 12);
             });
+        }
+    }
+
+    // METAR STATIONEN & GRENZEN BEI 16000 FT (Dezentes Debugging-Overlay)
+    let lastIcao = null;
+    let lastDist = 0;
+    for (let i = 0; i < vpWeatherData.length; i++) {
+        const zone = vpWeatherData[i];
+        if (zone.icao !== lastIcao) {
+            const bDist = (i === 0) ? 0 : (lastDist + zone.distNM) / 2;
+            const bx = xOf(bDist);
+            if (bx >= viewMinX - 100 && bx <= viewMaxX + 100) {
+                ctx.beginPath();
+                ctx.moveTo(bx, yOf(16500));
+                ctx.lineTo(bx, yOf(15500));
+                ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([2, 2]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+                ctx.fillStyle = 'rgba(255,255,255,0.7)';
+                ctx.font = 'bold 9px Arial';
+                ctx.textAlign = 'left';
+                ctx.fillText('📡 ' + zone.icao, bx + 4, yOf(16000));
+            }
+            lastIcao = zone.icao;
+        }
+        lastDist = zone.distNM;
+    }
+    ctx.restore();
+}
+
+function vpDrawAnimatedWeather(ctx, xOf, yOf, totalDist, elevData, timeMs, viewMinX, viewMaxX) {
+    if (!vpWeatherData || vpWeatherData.length === 0) return;
+
+    const getElevY = (dNM) => {
+        if (!elevData || elevData.length < 2) return yOf(0);
+        let low = 0, high = elevData.length - 2;
+        while (low <= high) {
+            let mid = (low + high) >> 1;
+            if (dNM < elevData[mid].distNM) high = mid - 1;
+            else if (dNM > elevData[mid+1].distNM) low = mid + 1;
+            else {
+                const p1 = elevData[mid], p2 = elevData[mid+1];
+                const f = (dNM - p1.distNM) / (p2.distNM - p1.distNM || 1);
+                return yOf(p1.elevFt + f * (p2.elevFt - p1.elevFt));
+            }
+        }
+        return yOf(elevData[elevData.length - 1].elevFt);
+    };
+
+    ctx.save();
+    for (let i = 0; i < vpWeatherData.length; i++) {
+        const zone = vpWeatherData[i];
+        if (!zone.weather || (!zone.weather.hasRain && !zone.weather.hasSnow && !zone.weather.hasTS)) continue;
+
+        const prevDist = (i > 0) ? (zone.distNM + vpWeatherData[i-1].distNM)/2 : Math.max(0, zone.distNM - totalDist*0.05);
+        const nextDist = (i < vpWeatherData.length - 1) ? (zone.distNM + vpWeatherData[i+1].distNM)/2 : Math.min(totalDist, zone.distNM + totalDist*0.05);
+        const startX = xOf(prevDist);
+        const endX = xOf(nextDist);
+        const width = endX - startX;
+
+        if (endX < viewMinX || startX > viewMaxX) continue; // CULLING
+
+        const baseY = yOf(zone.lowestBase);
+
+        // 1. REGEN & SCHNEE ANIMIERT
+        if ((zone.weather.hasRain || zone.weather.hasSnow) && zone.visuals && zone.visuals.drops) {
+            ctx.beginPath();
+            
+            // FIX: Virtuelles Fall-Band (von ganz oben nach ganz unten auf dem Bildschirm)
+            const virtualTop = -100; 
+            const virtualBottom = 500; 
+            const virtualFallDist = virtualBottom - virtualTop;
+
+            for(let d=0; d < zone.visuals.drops.length; d++) {
+                const drop = zone.visuals.drops[d];
+                const dropX = startX + drop.x * width;
+                const dNM = prevDist + drop.x * (nextDist - prevDist);
+                const groundY = getElevY(dNM);
+
+                if (baseY >= groundY) continue; 
+
+                // Unabhängige, konstante Fall-Animation
+                const speed = zone.weather.hasSnow ? (0.01 + drop.spd * 0.01) : (0.05 + drop.spd * 0.03);
+                const currentYOffset = ((drop.y * virtualFallDist) + (timeMs * speed)) % virtualFallDist;
+                const sy = virtualTop + currentYOffset;
+
+                // CULLING: Tropfen nur zeichnen, wenn er sich zwischen Wolke und Boden befindet!
+                if (sy < baseY || sy > groundY) continue;
+
+                if (zone.weather.hasSnow) {
+                    const sway = Math.sin(timeMs * 0.002 + d) * 4 * drop.spd;
+                    const snowDrift = currentYOffset * 0.15; 
+                    const sx = dropX + sway - snowDrift;
+                    ctx.moveTo(sx, sy);
+                    ctx.arc(sx, sy, 0.8 + drop.spd, 0, Math.PI*2);
+                } else {
+                    const tailLength = 6 + drop.spd * 8;
+                    const windSlant = 2 + drop.spd * 4; 
+                    const driftRatio = windSlant / tailLength;
+                    const currentX = dropX - (currentYOffset * driftRatio);
+
+                    ctx.moveTo(currentX, sy);
+                    ctx.lineTo(currentX - windSlant, sy + tailLength); 
+                }
+            }
+            ctx.fillStyle = zone.weather.hasSnow ? 'rgba(255,255,255,0.8)' : 'rgba(120, 180, 255, 0.6)';
+            ctx.strokeStyle = zone.weather.hasSnow ? 'rgba(255,255,255,0.8)' : 'rgba(100, 160, 255, 0.5)';
+            ctx.lineWidth = zone.weather.hasSnow ? 1 : 1.5;
+            if (zone.weather.hasSnow) ctx.fill(); else ctx.stroke();
+        }
+
+        // 2. BLITZE ANIMIERT
+        if (zone.weather.hasTS && zone.visuals && zone.visuals.flashes) {
+            const flashCycle = timeMs % 5000; // Ein Blitz-Zyklus dauert 5 Sekunden
+            let hasActiveFlash = false;
+            
+            ctx.beginPath();
+            for(let f=0; f < zone.visuals.flashes.length; f++) {
+                const flash = zone.visuals.flashes[f];
+                const flashTimeStart = flash.x * 4500; // Zufälliger Start im Zyklus
+                
+                // Blitz leuchtet für knackige 120ms
+                if (flashCycle > flashTimeStart && flashCycle < flashTimeStart + 120) {
+                    hasActiveFlash = true;
+                    const fx = startX + width * 0.2 + flash.x * width * 0.6;
+                    const groundY = getElevY(prevDist + flash.x * (nextDist - prevDist));
+                    if (baseY < groundY) {
+                        const stepY = (groundY - baseY) / 4;
+                        ctx.moveTo(fx, baseY);
+                        ctx.lineTo(fx + (flash.pts[0]-0.5)*20, baseY + stepY);
+                        ctx.lineTo(fx + (flash.pts[1]-0.5)*20, baseY + stepY*2);
+                        ctx.lineTo(fx + (flash.pts[2]-0.5)*20, baseY + stepY*3);
+                        ctx.lineTo(fx + (flash.pts[3]-0.5)*20, groundY);
+                    }
+                }
+            }
+            if (hasActiveFlash) {
+                ctx.strokeStyle = 'rgba(255, 230, 100, 0.9)';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
         }
     }
     ctx.restore();
@@ -977,7 +1338,7 @@ function renderVerticalProfile(canvasId) {
     const plotW = displayWidth - padLeft - padRight;
     const plotH = displayHeight - padTop - padBottom;
 
-    const cruiseAlt = parseInt(document.getElementById('altSlider')?.value || 4500);
+    const cruiseAlt = parseInt(document.getElementById('altMapInput')?.textContent || document.getElementById('altSlider')?.value || 4500);
     const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
     const totalDist = vpElevationData[vpElevationData.length - 1].distNM;
     const maxTerrain = Math.max(...vpElevationData.map(p => p.elevFt));
@@ -1012,7 +1373,7 @@ function renderVerticalProfile(canvasId) {
 
     // Airspace blocks
     let occupiedASLabels = [];
-    if (typeof activeAirspaces !== 'undefined' && activeAirspaces.length > 0) {
+    if (vpAirspaceMode !== 0 && typeof activeAirspaces !== 'undefined' && activeAirspaces.length > 0) {
         const cachedAirspaces = getCachedAirspaceIntersections(vpElevationData, totalDist);
         for (const item of cachedAirspaces) {
             const { asIdx, as, lowerFt, upperFt, isLowerAgl, isUpperAgl, asMinDist, asMaxDist, relevantPts } = item;
@@ -1104,7 +1465,7 @@ function renderVerticalProfile(canvasId) {
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    if (vpShowLandmarks) vpDrawLandmarks(ctx, xOf, yOf, typeof elevData !== 'undefined' ? elevData : vpElevationData, totalDist, typeof zoomFactor !== 'undefined', typeof zoomFactor !== 'undefined' ? zoomFactor : 1.0);
+    if (vpShowLandmarks) vpDrawLandmarks(ctx, xOf, yOf, typeof elevData !== 'undefined' ? elevData : vpElevationData, totalDist, typeof zoomFactor !== 'undefined', typeof zoomFactor !== 'undefined' ? zoomFactor : 1.0, maxAlt);
     if (vpShowClouds) vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, typeof zoomFactor !== 'undefined', typeof elevData !== 'undefined' ? elevData : vpElevationData);
     if (vpShowObstacles) vpDrawObstacles(ctx, xOf, yOf, totalDist, typeof zoomFactor !== 'undefined' ? zoomFactor : 1.0, typeof elevData !== 'undefined' ? elevData : vpElevationData);
 
@@ -1332,17 +1693,7 @@ function syncAltFromMap(val) {
     if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
 }
 
-// Globale Fast-Render Steuerung
-window.vpIsFastRendering = false;
-let vpFastRenderTimeout = null;
-window.activateFastRender = function() {
-    window.vpIsFastRendering = true;
-    if (vpFastRenderTimeout) clearTimeout(vpFastRenderTimeout);
-    vpFastRenderTimeout = setTimeout(() => {
-        window.vpIsFastRendering = false;
-        if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
-    }, 350);
-};
+// Globale Fast-Render Steuerung (Nun in app.js definiert)
 
 let vpHighResFetchTimeout = null;
 function vpZoom(delta) {
@@ -1425,364 +1776,341 @@ async function fetchHighResElevation() {
 }
 
 function renderMapProfile() {
-    const canvas = document.getElementById('mapProfileCanvas');
+    // FIX: window.vpBgNeedsUpdate = true; ENTFERNT! 
+    // Der Background aktualisiert sich nur noch, wenn sich Panning oder die Y-Achse ändert!
+    if (!window.vpAnimFrameId) {
+        window.vpAnimFrameId = requestAnimationFrame(renderMapProfileFrames);
+    }
+}
+
+function renderMapProfileFrames(timeMs) {
+    const mapTable = document.getElementById('mapTableOverlay');
+    if (!mapTable || !mapTable.classList.contains('active') || (typeof vpMapProfileVisible !== 'undefined' && !vpMapProfileVisible)) {
+        window.vpAnimFrameId = null; 
+        return;
+    }
+
+    const fgCanvas = document.getElementById('mapProfileCanvas');
+    const bgCanvas = document.getElementById('mapProfileCanvasBg');
     const scrollContainer = document.getElementById('mapProfileScroll');
-    if (!canvas || !scrollContainer) return;
+    const wrapper = document.getElementById('vpCanvasWrapper');
+    if (!fgCanvas || !bgCanvas || !scrollContainer || !wrapper) {
+        window.vpAnimFrameId = requestAnimationFrame(renderMapProfileFrames);
+        return;
+    }
 
     const elevData = (vpZoomLevel < 100 && vpHighResData) ? vpHighResData : vpElevationData;
-    if (!elevData || elevData.length < 2) return;
+    if (!elevData || elevData.length < 2) {
+        window.vpAnimFrameId = requestAnimationFrame(renderMapProfileFrames);
+        return;
+    }
 
     const containerHeight = scrollContainer.clientHeight || 100;
     const baseWidth = scrollContainer.clientWidth || 600;
-
-    // Zoom: canvas is wider than container when zoomed in
     const zoomFactor = 100 / vpZoomLevel;
-    const canvasWidth = Math.round(baseWidth * zoomFactor);
+    
+    // Virtuelle Breite für die Scrollbar
+    const virtualWidth = Math.round(baseWidth * zoomFactor);
+    if (wrapper.style.width !== virtualWidth + 'px') wrapper.style.width = virtualWidth + 'px';
 
+    // Canvas bleibt immer exakt so groß wie der sichtbare Bildschirm! (Kein iOS Absturz mehr)
     const dpr = window.devicePixelRatio || 1;
-    const targetW = canvasWidth * dpr;
+    const targetW = baseWidth * dpr;
     const targetH = containerHeight * dpr;
 
-    const ctx = canvas.getContext('2d');
-    
-    // Performance Fix: Speicher nur neu allokieren, wenn sich die echte Auflösung ändert (z.B. Zoom)!
-    if (canvas.width !== targetW || canvas.height !== targetH) {
-        canvas.width = targetW;
-        canvas.height = targetH;
-        canvas.style.width = canvasWidth + 'px';
-        canvas.style.height = containerHeight + 'px';
-        ctx.scale(dpr, dpr);
-    } else {
-        // Bei reinem Dragging/Y-Achsen Änderung: Nur den alten Inhalt wegwischen (100x schneller!)
-        ctx.clearRect(0, 0, canvasWidth, containerHeight);
-    }
-    
-    // Viewport Culling Init: Ermittle, welcher Bereich gerade sichtbar ist (mit 200px Puffer)
-    const viewMinX = scrollContainer.scrollLeft - 200;
-    const viewMaxX = scrollContainer.scrollLeft + baseWidth + 200;
-
     const padLeft = 33, padRight = 16, padTop = 12, padBottom = 22;
-    const plotW = canvasWidth - padLeft - padRight;
+    const plotW = virtualWidth - padLeft - padRight;
     const plotH = containerHeight - padTop - padBottom;
 
-    const cruiseAlt = parseInt(document.getElementById('altSliderMap')?.value || document.getElementById('altSlider')?.value || 4500);
+    const cruiseAlt = parseInt(document.getElementById('altMapInput')?.textContent || document.getElementById('altSlider')?.value || 4500);
     const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
     const totalDist = elevData[elevData.length - 1].distNM;
     const maxTerrain = Math.max(...elevData.map(p => p.elevFt));
-    let maxCloudAlt = 0;
-    if (vpShowClouds && vpWeatherData) {
-        vpWeatherData.forEach(zone => {
-            if (zone.clouds) zone.clouds.forEach(c => {
-                if (c.baseMsl > maxCloudAlt) maxCloudAlt = c.baseMsl;
-            });
-        });
-    }
     let autoMaxAlt = Math.max(cruiseAlt + 2500, maxTerrain + 1000);
-    const maxAlt = vpMaxAltOverride > 0 ? vpMaxAltOverride : autoMaxAlt;
+    let currentMaxAlt = vpMaxAltOverride > 0 ? vpMaxAltOverride : autoMaxAlt;
+
+    // PERFORMANCE & UX FIX: Y-Achse während des Ziehens einfrieren!
+    const isDragging = (typeof vpDraggingWP !== 'undefined' && vpDraggingWP >= 0) || 
+                       (typeof vpDraggingSegment !== 'undefined' && !!vpDraggingSegment) ||
+                       (window.vpDraggingPosMarker === true);
+    
+    if (isDragging) {
+        if (!window._vpFrozenMaxAlt) window._vpFrozenMaxAlt = currentMaxAlt;
+        currentMaxAlt = window._vpFrozenMaxAlt;
+    } else {
+        window._vpFrozenMaxAlt = null;
+    }
+    const maxAlt = currentMaxAlt;
     const minAlt = 0;
 
-    const fpResult = computeFlightProfile(elevData, cruiseAlt, vpClimbRate, vpDescentRate, tas);
-
+    const fpResult = typeof computeFlightProfile === 'function' ? computeFlightProfile(elevData, cruiseAlt, vpClimbRate, vpDescentRate, tas) : null;
     const xOf = (distNM) => padLeft + (distNM / totalDist) * plotW;
     const yOf = (altFt) => padTop + plotH - ((altFt - minAlt) / (maxAlt - minAlt)) * plotH;
+    
+    const maxScroll = Math.max(0, virtualWidth - baseWidth);
+    const viewXRaw = scrollContainer.scrollLeft;
+    const viewX = Math.min(viewXRaw, maxScroll);
+    
+    // Zwinge die Scrollbar sofort zurück, falls wir durch Auszoomen im Nichts gelandet sind
+    if (viewXRaw > maxScroll) {
+        scrollContainer.scrollLeft = maxScroll;
+    }
 
-    // Background - dark theme for map strip
-    ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(0, 0, canvasWidth, containerHeight);
+    if (viewX !== window._vpLastScrollLeft) {
+        window.vpBgNeedsUpdate = true;
+        window._vpLastScrollLeft = viewX;
+    }
+    
+    // Hardwarebeschleunigtes Mitführen der Leinwände (GPU Magic)
+    bgCanvas.style.transform = `translateX(${viewX}px)`;
+    fgCanvas.style.transform = `translateX(${viewX}px)`;
 
-    // Sky gradient (dark)
-    const skyGrad = ctx.createLinearGradient(0, padTop, 0, padTop + plotH);
-    skyGrad.addColorStop(0, '#1a2a3a');
-    skyGrad.addColorStop(0.5, '#1a2030');
-    skyGrad.addColorStop(1, '#151a20');
-    ctx.fillStyle = skyGrad;
-    ctx.fillRect(padLeft, padTop, plotW, plotH);
+    const viewMinX = viewX - 50;
+    const viewMaxX = viewX + baseWidth + 50;
 
-    // Airspace blocks (dark theme) with pulse highlight support
-    let occupiedASLabels = [];
-    if (typeof activeAirspaces !== 'undefined' && activeAirspaces.length > 0) {
-        const cachedAirspaces = getCachedAirspaceIntersections(elevData, totalDist);
-        for (const item of cachedAirspaces) {
-            const { asIdx, as, lowerFt, upperFt, isLowerAgl, isUpperAgl, asMinDist, asMaxDist, relevantPts } = item;
-            
-            const style = getAirspaceStyle(as);
-            const x1 = xOf(asMinDist), x2 = xOf(asMaxDist);
-            if (x2 < viewMinX || x1 > viewMaxX) continue; // CULLING
+    // NEU: Luftraum-Render-Logik als wiederverwendbare Funktion (für BG und FG)
+    const drawAirspaces = (targetCtx, isFg) => {
+        let occupiedASLabels = [];
+        if (typeof activeAirspaces !== 'undefined' && activeAirspaces.length > 0) {
+            const cachedAirspaces = getCachedAirspaceIntersections(elevData, totalDist);
+            for (const item of cachedAirspaces) {
+                const { asIdx, as, lowerFt, upperFt, isLowerAgl, isUpperAgl, asMinDist, asMaxDist, relevantPts } = item;
+                const style = getAirspaceStyle(as);
+                const x1 = xOf(asMinDist), x2 = xOf(asMaxDist);
 
-            // Pulsing highlight for the active airspace
-            const isHighlighted = (vpHighlightPulseIdx >= 0 && asIdx === vpHighlightPulseIdx);
-            const pulseOpacity = isHighlighted ? 0.2 + 0.4 * (0.5 + 0.5 * Math.sin(vpPulsePhase * Math.PI * 2)) : 0.15;
-            const strokeOpacity = isHighlighted ? 0.5 + 0.5 * (0.5 + 0.5 * Math.sin(vpPulsePhase * Math.PI * 2)) : 0.5;
-            const lineW = isHighlighted ? 2 + 2 * (0.5 + 0.5 * Math.sin(vpPulsePhase * Math.PI * 2)) : 2;
+                const isHighlighted = (typeof vpHighlightPulseIdx !== 'undefined' && vpHighlightPulseIdx >= 0 && asIdx === vpHighlightPulseIdx);
+                const phase = typeof vpPulsePhase !== 'undefined' ? vpPulsePhase : 0;
+                const pulseOpacity = isHighlighted ? 0.2 + 0.4 * (0.5 + 0.5 * Math.sin(phase * Math.PI * 2)) : (isFg ? 0.22 : 0.15);
+                const strokeOpacity = isHighlighted ? 0.5 + 0.5 * (0.5 + 0.5 * Math.sin(phase * Math.PI * 2)) : 0.5;
+                const lineW = isHighlighted ? 2 + 2 * (0.5 + 0.5 * Math.sin(phase * Math.PI * 2)) : 2;
 
-            ctx.fillStyle = vpHexToRgba(style.color, pulseOpacity);
-            ctx.strokeStyle = vpHexToRgba(style.color, strokeOpacity);
-            ctx.lineWidth = lineW;
-            ctx.setLineDash(isHighlighted ? [] : [3, 3]);
+                targetCtx.fillStyle = vpHexToRgba(style.color, pulseOpacity);
+                targetCtx.strokeStyle = vpHexToRgba(style.color, strokeOpacity);
+                targetCtx.lineWidth = lineW; 
+                targetCtx.setLineDash(isHighlighted ? [] : [3, 3]);
 
-            ctx.beginPath();
-            for (let i = 0; i < relevantPts.length; i++) {
-                const p = relevantPts[i];
-                const realUpper = isUpperAgl ? p.elevFt + upperFt : upperFt;
-                ctx.lineTo(xOf(p.distNM), yOf(Math.min(realUpper, maxAlt)));
-            }
-            for (let i = relevantPts.length - 1; i >= 0; i--) {
-                const p = relevantPts[i];
-                const realLower = isLowerAgl ? p.elevFt + lowerFt : lowerFt;
-                ctx.lineTo(xOf(p.distNM), yOf(Math.max(realLower, minAlt)));
-            }
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            let sumUpper = 0;
-            relevantPts.forEach(p => sumUpper += (isUpperAgl ? p.elevFt + upperFt : upperFt));
-            const avgUpper = sumUpper / relevantPts.length;
-
-            let labelY = yOf(Math.min(avgUpper, maxAlt));
-            labelY = Math.max(padTop + 15, labelY); 
-            if (zoomFactor >= 1.5 || (x2 - x1) > 40 || isHighlighted) {
-                const displayName = getAirspaceDisplayName(as);
-                ctx.font = isHighlighted ? 'bold 11px Arial' : 'bold 10px Arial';
-                const tw = ctx.measureText(displayName).width;
-                const tLeft = ((x1 + x2) / 2) - tw/2, tRight = tLeft + tw;
-
-                let collision = false;
-                if (!isHighlighted) {
-                    for (let occ of occupiedASLabels) {
-                        if (tLeft < occ.r && tRight > occ.l && labelY < occ.b && (labelY+25) > occ.t) { collision = true; break; }
-                    }
+                targetCtx.beginPath();
+                for (let i = 0; i < relevantPts.length; i++) {
+                    const p = relevantPts[i];
+                    const realUpper = isUpperAgl ? p.elevFt + upperFt : upperFt;
+                    targetCtx.lineTo(xOf(p.distNM), yOf(Math.min(realUpper, maxAlt)));
                 }
+                for (let i = relevantPts.length - 1; i >= 0; i--) {
+                    const p = relevantPts[i];
+                    const realLower = isLowerAgl ? p.elevFt + lowerFt : lowerFt;
+                    targetCtx.lineTo(xOf(p.distNM), yOf(Math.max(realLower, minAlt)));
+                }
+                targetCtx.closePath(); targetCtx.fill(); targetCtx.stroke(); targetCtx.setLineDash([]);
 
-                if (!collision) {
-                    if (!isHighlighted) occupiedASLabels.push({l: tLeft-5, r: tRight+5, t: labelY-5, b: labelY+25});
-                    ctx.fillStyle = vpHexToRgba(style.color, isHighlighted ? 0.9 : 0.6);
-                    ctx.textAlign = 'center';
-                    ctx.fillText(displayName, (x1 + x2) / 2, labelY + 12);
-                    if (zoomFactor >= 2 || isHighlighted) {
-                        ctx.font = '9px Arial';
-                        ctx.fillText(formatAsLimit(as.lowerLimit) + ' – ' + formatAsLimit(as.upperLimit), (x1 + x2) / 2, labelY + 23);
+                let sumUpper = 0; relevantPts.forEach(p => sumUpper += (isUpperAgl ? p.elevFt + upperFt : upperFt));
+                const avgUpper = sumUpper / relevantPts.length;
+                let labelY = yOf(Math.min(avgUpper, maxAlt)); labelY = Math.max(padTop + 15, labelY); 
+
+                if (!window.vpIsFastRendering && (zoomFactor >= 1.5 || (x2 - x1) > 40 || isHighlighted)) {
+                    const displayName = getAirspaceDisplayName(as);
+                    targetCtx.font = isHighlighted ? 'bold 11px Arial' : 'bold 10px Arial';
+                    const tw = targetCtx.measureText(displayName).width;
+                    const tLeft = ((x1 + x2) / 2) - tw/2, tRight = tLeft + tw;
+                    let collision = false;
+                    if (!isHighlighted) {
+                        for (let occ of occupiedASLabels) {
+                            if (tLeft < occ.r && tRight > occ.l && labelY < occ.b && (labelY+25) > occ.t) { collision = true; break; }
+                        }
+                    }
+                    if (!collision) {
+                        if (!isHighlighted) occupiedASLabels.push({l: tLeft-5, r: tRight+5, t: labelY-5, b: labelY+25});
+                        targetCtx.fillStyle = vpHexToRgba(style.color, isHighlighted ? 0.9 : 0.6); targetCtx.textAlign = 'center';
+                        targetCtx.fillText(displayName, (x1 + x2) / 2, labelY + 12);
+                        if (zoomFactor >= 2 || isHighlighted) {
+                            targetCtx.font = '9px Arial'; targetCtx.fillText(formatAsLimit(as.lowerLimit) + ' – ' + formatAsLimit(as.upperLimit), (x1 + x2) / 2, labelY + 23);
+                        }
                     }
                 }
             }
         }
+        targetCtx.textAlign = 'left';
+    };
+
+    // =======================================================
+    // LAYER 1: STATISCHER HINTERGRUND
+    // =======================================================
+    if (window.vpBgNeedsUpdate || bgCanvas.width !== targetW || bgCanvas.height !== targetH) {
+        if (bgCanvas.width !== targetW || bgCanvas.height !== targetH) {
+            bgCanvas.width = targetW; 
+            bgCanvas.height = targetH;
+            bgCanvas.style.width = baseWidth + 'px'; 
+            bgCanvas.style.height = containerHeight + 'px';
+        }
+        const bgCtx = bgCanvas.getContext('2d');
+        bgCtx.save();
+        bgCtx.scale(dpr, dpr);
+        bgCtx.translate(-viewX, 0); // Vektor-Koordinatensystem anpassen
+
+        bgCtx.clearRect(viewX, 0, baseWidth, containerHeight);
+
+        bgCtx.fillStyle = '#1a1a1a'; 
+        bgCtx.fillRect(viewX, 0, baseWidth, containerHeight);
+        
+        const skyGrad = bgCtx.createLinearGradient(0, padTop, 0, padTop + plotH);
+        skyGrad.addColorStop(0, '#1a2a3a'); 
+        skyGrad.addColorStop(0.5, '#1a2030'); 
+        skyGrad.addColorStop(1, '#151a20');
+        bgCtx.fillStyle = skyGrad; 
+        bgCtx.fillRect(viewX, padTop, baseWidth, plotH);
+
+        // Aufruf für Layer 1 (Statischer Hintergrund)
+        if (vpAirspaceMode === 1) {
+            drawAirspaces(bgCtx, false);
+        }
+
+        bgCtx.beginPath(); bgCtx.setLineDash([4, 4]); bgCtx.strokeStyle = 'rgba(200, 120, 40, 0.4)'; bgCtx.lineWidth = 1;
+        for (let i = 0; i < elevData.length; i++) {
+            const x = xOf(elevData[i].distNM), y = yOf(elevData[i].elevFt + 1000);
+            if (i === 0) bgCtx.moveTo(x, y); else bgCtx.lineTo(x, y);
+        }
+        bgCtx.stroke(); bgCtx.setLineDash([]);
+
+        bgCtx.beginPath(); bgCtx.moveTo(xOf(0), yOf(0));
+        for (let i = 0; i < elevData.length; i++) bgCtx.lineTo(xOf(elevData[i].distNM), yOf(elevData[i].elevFt));
+        bgCtx.lineTo(xOf(totalDist), yOf(0)); bgCtx.closePath();
+        const terrainGrad = bgCtx.createLinearGradient(0, yOf(maxTerrain), 0, yOf(0));
+        terrainGrad.addColorStop(0, '#6B5B3C'); terrainGrad.addColorStop(0.3, '#3B5B23'); terrainGrad.addColorStop(0.7, '#1B5B22'); terrainGrad.addColorStop(1, '#1E5B37');
+        bgCtx.fillStyle = terrainGrad; bgCtx.fill();
+        
+        bgCtx.beginPath();
+        for (let i = 0; i < elevData.length; i++) {
+            const x = xOf(elevData[i].distNM), y = yOf(elevData[i].elevFt);
+            if (i === 0) bgCtx.moveTo(x, y); else bgCtx.lineTo(x, y);
+        }
+        bgCtx.strokeStyle = '#4a7a30'; bgCtx.lineWidth = 1.5; bgCtx.stroke();
+
+        // WÄLDER UND FLÜSSE GENERIEREN
+        vpDrawTerrainCover(bgCtx, xOf, yOf, elevData, viewMinX, viewMaxX, zoomFactor, maxAlt);
+
+        if (vpShowLandmarks) vpDrawLandmarks(bgCtx, xOf, yOf, elevData, totalDist, true, zoomFactor, maxAlt);
+        if (vpShowClouds) vpDrawClouds(bgCtx, xOf, yOf, padTop, plotH, totalDist, true, elevData);
+
+        bgCtx.textAlign = 'right';
+        const altStep = maxAlt > 6000 ? 2000 : (maxAlt > 3000 ? 1000 : 500);
+        for (let alt = 0; alt <= maxAlt; alt += altStep) {
+            const y = yOf(alt);
+            if (y < padTop - 3 || y > padTop + plotH + 3) continue;
+            bgCtx.beginPath(); bgCtx.strokeStyle = 'rgba(255,255,255,0.05)'; bgCtx.lineWidth = 0.5;
+            bgCtx.moveTo(viewX + padLeft, y); bgCtx.lineTo(viewX + baseWidth, y); bgCtx.stroke();
+            bgCtx.fillStyle = '#777'; bgCtx.font = '9px Arial';
+            bgCtx.fillText(alt >= 1000 ? (alt / 1000).toFixed(0) + 'k' : alt + '', viewX + padLeft - 3, y + 3);
+        }
+
+        bgCtx.textAlign = 'center';
+        const distStep = totalDist > 150 ? 25 : (totalDist > 80 ? 10 : 5);
+        for (let d = distStep; d < totalDist; d += distStep) {
+            bgCtx.fillStyle = '#666'; bgCtx.font = '8px Arial'; bgCtx.fillText(d + '', xOf(d), containerHeight - 1);
+        }
+
+        const peakPt = elevData.reduce((max, p) => p.elevFt > max.elevFt ? p : max);
+        bgCtx.fillStyle = '#aaa'; bgCtx.font = '11px Arial'; bgCtx.textAlign = 'center';
+        bgCtx.fillText('▲', xOf(peakPt.distNM), yOf(peakPt.elevFt) - 3);
+        bgCtx.font = 'bold 9px Arial'; bgCtx.fillText(peakPt.elevFt + ' ft', xOf(peakPt.distNM), yOf(peakPt.elevFt) - 13);
+
+        bgCtx.strokeStyle = '#333'; bgCtx.lineWidth = 1; 
+        bgCtx.strokeRect(padLeft, padTop, plotW, plotH);
+        bgCtx.restore();
+        window.vpBgNeedsUpdate = false;
     }
-    ctx.textAlign = 'left';
 
-    // Safety line
-    ctx.beginPath();
-    ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = 'rgba(200, 120, 40, 0.4)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < elevData.length; i++) {
-        const x = xOf(elevData[i].distNM), y = yOf(elevData[i].elevFt + 1000);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    // =======================================================
+    // LAYER 2: DYNAMISCHER VORDERGRUND 
+    // =======================================================
+    if (fgCanvas.width !== targetW || fgCanvas.height !== targetH) {
+        fgCanvas.width = targetW; 
+        fgCanvas.height = targetH;
+        fgCanvas.style.width = baseWidth + 'px'; 
+        fgCanvas.style.height = containerHeight + 'px';
     }
-    ctx.stroke();
-    ctx.setLineDash([]);
+    const fgCtx = fgCanvas.getContext('2d');
+    fgCtx.save();
+    fgCtx.scale(dpr, dpr);
+    fgCtx.translate(-viewX, 0); 
 
-    // Terrain polygon
-    ctx.beginPath();
-    ctx.moveTo(xOf(0), yOf(0));
-    for (let i = 0; i < elevData.length; i++) ctx.lineTo(xOf(elevData[i].distNM), yOf(elevData[i].elevFt));
-    ctx.lineTo(xOf(totalDist), yOf(0));
-    ctx.closePath();
+    fgCtx.clearRect(viewX, 0, baseWidth, containerHeight);
 
-    const terrainGrad = ctx.createLinearGradient(0, yOf(maxTerrain), 0, yOf(0));
-    terrainGrad.addColorStop(0, '#6B5B3C');
-    terrainGrad.addColorStop(0.3, '#3B5B23');
-    terrainGrad.addColorStop(0.7, '#1B5B22');
-    terrainGrad.addColorStop(1, '#1E5B37');
-    ctx.fillStyle = terrainGrad;
-    ctx.fill();
-
-    ctx.beginPath();
-    for (let i = 0; i < elevData.length; i++) {
-        const x = xOf(elevData[i].distNM), y = yOf(elevData[i].elevFt);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    // Aufruf für Layer 2 (Dynamischer Vordergrund)
+    if (vpAirspaceMode === 2) {
+        drawAirspaces(fgCtx, true);
     }
-    ctx.strokeStyle = '#4a7a30';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
 
-    if (vpShowLandmarks) vpDrawLandmarks(ctx, xOf, yOf, typeof elevData !== 'undefined' ? elevData : vpElevationData, totalDist, typeof zoomFactor !== 'undefined', typeof zoomFactor !== 'undefined' ? zoomFactor : 1.0);
-    if (vpShowClouds) vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, typeof zoomFactor !== 'undefined', typeof elevData !== 'undefined' ? elevData : vpElevationData);
-    if (vpShowObstacles) vpDrawObstacles(ctx, xOf, yOf, totalDist, typeof zoomFactor !== 'undefined' ? zoomFactor : 1.0, typeof elevData !== 'undefined' ? elevData : vpElevationData);
+    if (vpShowObstacles) vpDrawObstacles(fgCtx, xOf, yOf, totalDist, zoomFactor, elevData, timeMs);
+    if (vpShowClouds) vpDrawAnimatedWeather(fgCtx, xOf, yOf, totalDist, elevData, timeMs, viewMinX, viewMaxX);
 
-    // Flight profile
     if (fpResult && fpResult.profile) {
-        ctx.beginPath();
+        fgCtx.beginPath();
+        let shStarted = false;
         for (let i = 0; i < fpResult.profile.length; i++) {
-            const x = xOf(fpResult.profile[i].distNM), y = yOf(fpResult.profile[i].altFt) + 1;
-            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            const x = xOf(fpResult.profile[i].distNM);
+            if (x < viewMinX - 100 && i < fpResult.profile.length - 1 && xOf(fpResult.profile[i+1].distNM) < viewMinX) continue;
+            if (x > viewMaxX + 100 && i > 0 && xOf(fpResult.profile[i-1].distNM) > viewMaxX) continue;
+            const y = yOf(fpResult.profile[i].altFt) + 1;
+            if (!shStarted) { fgCtx.moveTo(x, y); shStarted = true; } else { fgCtx.lineTo(x, y); }
         }
-        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-        ctx.lineWidth = 3;
-        ctx.stroke();
+        fgCtx.strokeStyle = 'rgba(0,0,0,0.3)'; fgCtx.lineWidth = 3; fgCtx.stroke();
 
-        ctx.beginPath();
+        fgCtx.beginPath();
+        let rdStarted = false;
         for (let i = 0; i < fpResult.profile.length; i++) {
-            const x = xOf(fpResult.profile[i].distNM), y = yOf(fpResult.profile[i].altFt);
-            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            const x = xOf(fpResult.profile[i].distNM);
+            if (x < viewMinX - 100 && i < fpResult.profile.length - 1 && xOf(fpResult.profile[i+1].distNM) < viewMinX) continue;
+            if (x > viewMaxX + 100 && i > 0 && xOf(fpResult.profile[i-1].distNM) > viewMaxX) continue;
+            const y = yOf(fpResult.profile[i].altFt);
+            if (!rdStarted) { fgCtx.moveTo(x, y); rdStarted = true; } else { fgCtx.lineTo(x, y); }
         }
-        ctx.strokeStyle = '#ff4444';
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        fgCtx.strokeStyle = '#ff4444'; fgCtx.lineWidth = 2; fgCtx.stroke();
     }
 
-    // Cruise altitude line
-    ctx.beginPath();
-    ctx.setLineDash([6, 4]);
-    ctx.strokeStyle = 'rgba(255, 68, 68, 0.3)';
-    ctx.lineWidth = 1;
-    ctx.moveTo(padLeft, yOf(cruiseAlt));
-    ctx.lineTo(padLeft + plotW, yOf(cruiseAlt));
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = 'rgba(255, 68, 68, 0.7)';
-    ctx.font = 'bold 10px Arial';
-    ctx.fillText('CRZ ' + cruiseAlt + ' ft', padLeft + 4, yOf(cruiseAlt) - 4);
+    fgCtx.beginPath(); fgCtx.setLineDash([6, 4]); fgCtx.strokeStyle = 'rgba(255, 68, 68, 0.3)'; fgCtx.lineWidth = 1;
+    fgCtx.moveTo(Math.max(padLeft, viewMinX), yOf(cruiseAlt)); 
+    fgCtx.lineTo(Math.min(padLeft + plotW, viewMaxX), yOf(cruiseAlt)); 
+    fgCtx.stroke(); fgCtx.setLineDash([]);
+    
+    fgCtx.fillStyle = 'rgba(255, 68, 68, 0.7)'; fgCtx.font = 'bold 10px Arial'; fgCtx.textAlign = 'left';
+    fgCtx.fillText('CRZ ' + cruiseAlt + ' ft', Math.max(padLeft + 4, viewMinX + 4), yOf(cruiseAlt) - 4);
 
-    // Waypoint markers
     let wpCumDist = 0;
     for (let i = 0; i < routeWaypoints.length; i++) {
-        if (i > 0) {
-            const prev = routeWaypoints[i - 1], curr = routeWaypoints[i];
-            wpCumDist += calcNav(prev.lat, prev.lng || prev.lon, curr.lat, curr.lng || curr.lon).dist;
-        }
+        if (i > 0) wpCumDist += calcNav(routeWaypoints[i - 1].lat, routeWaypoints[i - 1].lng || routeWaypoints[i - 1].lon, routeWaypoints[i].lat, routeWaypoints[i].lng || routeWaypoints[i].lon).dist;
         const x = xOf(wpCumDist);
+        if (x < viewMinX - 40 || x > viewMaxX + 40) continue;
 
-        ctx.beginPath();
-        ctx.setLineDash([2, 3]);
-        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-        ctx.lineWidth = 1;
-        ctx.moveTo(x, padTop);
-        ctx.lineTo(x, padTop + plotH);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        let wpLabel;
-        if (i === 0) wpLabel = currentStartICAO || 'DEP';
-        else if (i === routeWaypoints.length - 1) wpLabel = (currentMissionData?.poiName ? 'POI' : currentDestICAO) || 'DEST';
-        else wpLabel = routeWaypoints[i].name ? routeWaypoints[i].name.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '').split(' ')[0] : 'WP' + i;
-        if (!zoomFactor || zoomFactor < 2) { if (wpLabel.length > 6) wpLabel = wpLabel.substring(0, 5) + '…'; }
-        else { if (wpLabel.length > 12) wpLabel = wpLabel.substring(0, 11) + '…'; }
-
-        // Colored dot
-        ctx.beginPath();
-        ctx.arc(x, padTop + plotH + 3, 3, 0, Math.PI * 2);
-        ctx.fillStyle = i === 0 ? '#44ff44' : (i === routeWaypoints.length - 1 ? '#ff4444' : '#ffcc00');
-        ctx.fill();
-
-        // Label  
-        ctx.fillStyle = '#bbb';
-        ctx.font = (zoomFactor >= 2) ? 'bold 11px Arial' : 'bold 9px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(wpLabel, x, padTop + plotH + 16);
+        fgCtx.beginPath(); fgCtx.setLineDash([2, 3]); fgCtx.strokeStyle = 'rgba(255,255,255,0.2)'; fgCtx.lineWidth = 1;
+        fgCtx.moveTo(x, padTop); fgCtx.lineTo(x, padTop + plotH); fgCtx.stroke(); fgCtx.setLineDash([]);
+        let wpLabel = (i === 0) ? (currentStartICAO || 'DEP') : ((i === routeWaypoints.length - 1) ? ((currentMissionData?.poiName ? 'POI' : currentDestICAO) || 'DEST') : (routeWaypoints[i].name ? routeWaypoints[i].name.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '').split(' ')[0] : 'WP' + i));
+        if (!zoomFactor || zoomFactor < 2) { if (wpLabel.length > 6) wpLabel = wpLabel.substring(0, 5) + '…'; } else { if (wpLabel.length > 12) wpLabel = wpLabel.substring(0, 11) + '…'; }
+        fgCtx.beginPath(); fgCtx.arc(x, padTop + plotH + 3, 3, 0, Math.PI * 2); fgCtx.fillStyle = i === 0 ? '#44ff44' : (i === routeWaypoints.length - 1 ? '#ff4444' : '#ffcc00'); fgCtx.fill();
+        fgCtx.fillStyle = '#bbb'; fgCtx.font = (zoomFactor >= 2) ? 'bold 11px Arial' : 'bold 9px Arial'; fgCtx.textAlign = 'center'; fgCtx.fillText(wpLabel, x, padTop + plotH + 16);
     }
 
-    // Y axis
-    ctx.textAlign = 'right';
-    const altStep = maxAlt > 6000 ? 2000 : (maxAlt > 3000 ? 1000 : 500);
-    for (let alt = 0; alt <= maxAlt; alt += altStep) {
-        const y = yOf(alt);
-        if (y < padTop - 3 || y > padTop + plotH + 3) continue;
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-        ctx.lineWidth = 0.5;
-        ctx.moveTo(padLeft, y);
-        ctx.lineTo(padLeft + plotW, y);
-        ctx.stroke();
-        ctx.fillStyle = '#777';
-        ctx.font = '9px Arial';
-        ctx.fillText(alt >= 1000 ? (alt / 1000).toFixed(0) + 'k' : alt + '', padLeft - 3, y + 3);
-    }
-
-    // X axis ticks
-    ctx.textAlign = 'center';
-    const distStep = totalDist > 150 ? 25 : (totalDist > 80 ? 10 : 5);
-    for (let d = distStep; d < totalDist; d += distStep) {
-        const x = xOf(d);
-        ctx.fillStyle = '#666';
-        ctx.font = '8px Arial';
-        ctx.fillText(d + '', x, containerHeight - 1);
-    }
-
-    // Peak marker
-    const peakPt = elevData.reduce((max, p) => p.elevFt > max.elevFt ? p : max);
-    ctx.fillStyle = '#aaa';
-    ctx.font = '11px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('▲', xOf(peakPt.distNM), yOf(peakPt.elevFt) - 3);
-    ctx.font = 'bold 9px Arial';
-    ctx.fillText(peakPt.elevFt + ' ft', xOf(peakPt.distNM), yOf(peakPt.elevFt) - 13);
-
-    // Border
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(padLeft, padTop, plotW, plotH);
-
-    // === POSITION MARKER (Magenta triangle + line) ===
     if (typeof vpPositionFraction === 'number' && vpPositionFraction >= 0) {
-        const posDistNM = vpPositionFraction * totalDist;
-        const posX = xOf(posDistNM);
-
-        // Vertical magenta line
-        ctx.beginPath();
-        ctx.strokeStyle = '#ff00ff';
-        ctx.lineWidth = 1.5;
-        ctx.moveTo(posX, padTop);
-        ctx.lineTo(posX, padTop + plotH);
-        ctx.stroke();
-
-        // Magenta triangle at bottom
-        ctx.beginPath();
-        ctx.moveTo(posX, padTop + plotH + 2);
-        ctx.lineTo(posX - 5, padTop + plotH + 10);
-        ctx.lineTo(posX + 5, padTop + plotH + 10);
-        ctx.closePath();
-        ctx.fillStyle = '#ff00ff';
-        ctx.fill();
+        const posX = xOf(vpPositionFraction * totalDist);
+        if (posX >= viewMinX - 20 && posX <= viewMaxX + 20) {
+            fgCtx.beginPath(); fgCtx.strokeStyle = '#ff00ff'; fgCtx.lineWidth = 1.5; fgCtx.moveTo(posX, padTop); fgCtx.lineTo(posX, padTop + plotH); fgCtx.stroke();
+            fgCtx.beginPath(); fgCtx.moveTo(posX, padTop + plotH + 2); fgCtx.lineTo(posX - 5, padTop + plotH + 10); fgCtx.lineTo(posX + 5, padTop + plotH + 10); fgCtx.closePath(); fgCtx.fillStyle = '#ff00ff'; fgCtx.fill();
+        }
     }
 
-    // === ALTITUDE WAYPOINTS (user markers on flight line) ===
     if (vpAltWaypoints.length > 0) {
         for (let i = 0; i < vpAltWaypoints.length; i++) {
-            const wp = vpAltWaypoints[i];
-            const wx = xOf(wp.distNM);
-            const wy = yOf(wp.altFt);
+            const wp = vpAltWaypoints[i], wx = xOf(wp.distNM), wy = yOf(wp.altFt);
+            if (wx < viewMinX - 20 || wx > viewMaxX + 20) continue;
 
-            // Vertical dashed line from waypoint down to terrain
-            ctx.beginPath();
-            ctx.setLineDash([2, 3]);
-            ctx.strokeStyle = 'rgba(255,0,255,0.3)';
-            ctx.lineWidth = 1;
-            ctx.moveTo(wx, wy);
-            ctx.lineTo(wx, padTop + plotH);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            // Diamond marker
-            ctx.beginPath();
-            ctx.moveTo(wx, wy - 7);
-            ctx.lineTo(wx + 6, wy);
-            ctx.lineTo(wx, wy + 7);
-            ctx.lineTo(wx - 6, wy);
-            ctx.closePath();
-            ctx.fillStyle = '#ff00ff';
-            ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-
-            // Label: show altitude
-            ctx.fillStyle = '#ff00ff';
-            ctx.font = 'bold 9px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText(wp.altFt + ' ft', wx, wy - 11);
+            fgCtx.beginPath(); fgCtx.setLineDash([2, 3]); fgCtx.strokeStyle = 'rgba(255,0,255,0.3)'; fgCtx.lineWidth = 1;
+            fgCtx.moveTo(wx, wy); fgCtx.lineTo(wx, padTop + plotH); fgCtx.stroke(); fgCtx.setLineDash([]);
+            fgCtx.beginPath(); fgCtx.moveTo(wx, wy - 7); fgCtx.lineTo(wx + 6, wy); fgCtx.lineTo(wx, wy + 7); fgCtx.lineTo(wx - 6, wy); fgCtx.closePath();
+            fgCtx.fillStyle = '#ff00ff'; fgCtx.fill(); fgCtx.strokeStyle = '#fff'; fgCtx.lineWidth = 1; fgCtx.stroke();
+            fgCtx.fillStyle = '#ff00ff'; fgCtx.font = 'bold 9px Arial'; fgCtx.textAlign = 'center'; fgCtx.fillText(wp.altFt + ' ft', wx, wy - 11);
         }
     }
+    fgCtx.restore();
+
+    window.vpAnimFrameId = requestAnimationFrame(renderMapProfileFrames);
 }
 
 // Removed arbitrary setTimeout hook in favor of synchronous hooks within renderVerticalProfile
@@ -1847,7 +2175,11 @@ let vpPositionLeafletMarker = null;
 
 function vpUpdatePosition(fraction) {
     vpPositionFraction = fraction;
-    renderMapProfile();
+    
+    // FIX: Kein renderMapProfile() mehr! Weckt nur die Foreground-Schleife, falls sie schläft.
+    if (!window.vpAnimFrameId && typeof vpMapProfileVisible !== 'undefined' && vpMapProfileVisible) {
+        window.vpAnimFrameId = requestAnimationFrame(renderMapProfileFrames);
+    }
 
     // Update Leaflet marker on map
     if (!vpElevationData || vpElevationData.length < 2) return;
@@ -1925,29 +2257,29 @@ function initAltWaypoints() {
         if (!elevData || elevData.length < 2) return null;
         const rect = canvas.getBoundingClientRect();
         const scrollContainer = document.getElementById('mapProfileScroll');
+        const viewX = scrollContainer ? scrollContainer.scrollLeft : 0;
         const containerHeight = scrollContainer?.clientHeight || 100;
         const baseWidth = scrollContainer?.clientWidth || 600;
         const zoomFactor = 100 / vpZoomLevel;
-        const canvasWidth = Math.round(baseWidth * zoomFactor);
+        const virtualWidth = Math.round(baseWidth * zoomFactor);
         const totalDist = elevData[elevData.length - 1].distNM;
 
-        // FIX: Aus dem neuen Span-Feld lesen
         const cruiseAlt = parseInt(document.getElementById('altMapInput')?.textContent || document.getElementById('altSlider')?.value || 4500);
         const maxTerrain = Math.max(...elevData.map(p => p.elevFt));
-
-        // FIX: Exakt gleiche Skalierung wie beim Rendering (+ 2500)
         let autoMaxAlt = Math.max(cruiseAlt + 2500, maxTerrain + 1000);
         const maxAlt = vpMaxAltOverride > 0 ? vpMaxAltOverride : autoMaxAlt;
         const padLeft = 33, padRight = 16, padTop = 12, padBottom = 22;
-        const plotW = canvasWidth - padLeft - padRight;
+        const plotW = virtualWidth - padLeft - padRight;
         const plotH = containerHeight - padTop - padBottom;
-        const scaleX = canvasWidth / rect.width;
-        const scaleY = containerHeight / rect.height;
-        return { elevData, rect, containerHeight, baseWidth, zoomFactor, canvasWidth, totalDist, cruiseAlt, maxTerrain, maxAlt, padLeft, padRight, padTop, padBottom, plotW, plotH, scaleX, scaleY };
+        
+        return { elevData, rect, viewX, containerHeight, baseWidth, virtualWidth, zoomFactor, totalDist, cruiseAlt, maxTerrain, maxAlt, padLeft, padRight, padTop, padBottom, plotW, plotH };
     }
 
     function vpClientToCanvas(clientX, clientY, m) {
-        return { mx: (clientX - m.rect.left) * m.scaleX, my: (clientY - m.rect.top) * m.scaleY };
+        // FIX: Koordinaten 1:1 in CSS-Pixeln berechnen
+        const cssX = clientX - m.rect.left;
+        const cssY = clientY - m.rect.top;
+        return { mx: cssX + m.viewX, my: cssY };
     }
 
     function vpHitTestWaypoint(mx, my, m) {
@@ -2019,8 +2351,12 @@ function initAltWaypoints() {
                 }
             }
             if (vpAltWaypoints.length < 2) vpSegmentAlts = [];
-            renderMapProfile();
-            if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+            renderMapProfile(); // Zeichnet sofort!
+            
+            // FIX: Schwere DOM/Luftraum-Berechnungen asynchron ausführen, damit der Klick nicht einfriert!
+            setTimeout(() => {
+                if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+            }, 50);
             return true;
         }
         return false;
@@ -2046,8 +2382,12 @@ function initAltWaypoints() {
                 vpSegmentAlts.push(exactAlt);
             }
         }
-        renderMapProfile();
-        if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+        renderMapProfile(); // Zeichnet sofort!
+        
+        // FIX: Entkoppeln, um Ruckler zu vermeiden!
+        setTimeout(() => {
+            if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+        }, 50);
     }
 
     function vpHandleDoubleHit(mx, my, m) {
@@ -2077,8 +2417,7 @@ function initAltWaypoints() {
         const deltaY = dragStartY - clientY;
         const altChange = (deltaY / m.plotH) * m.maxAlt;
         if (vpDraggingWP >= 0) {
-            const scaleX = m.canvasWidth / m.rect.width;
-            const deltaX = (clientX - dragStartX) * scaleX;
+            const deltaX = clientX - dragStartX;
             const distChange = (deltaX / m.plotW) * m.totalDist;
             let newDist = dragOrigWP.distNM + distChange;
             newDist = Math.max(0, Math.min(m.totalDist, newDist));
@@ -2086,26 +2425,24 @@ function initAltWaypoints() {
             newAlt = Math.max(0, Math.min(m.maxAlt, newAlt));
             vpAltWaypoints[vpDraggingWP].distNM = newDist;
             vpAltWaypoints[vpDraggingWP].altFt = newAlt;
-            if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
         } else if (vpDraggingSegment) {
             const seg = vpDraggingSegment;
             const newAlt = Math.max(0, Math.round((seg.origAlt + altChange) / 100) * 100);
+            
             if (seg.segIdx >= 0 && seg.segIdx < vpSegmentAlts.length) {
                 vpSegmentAlts[seg.segIdx] = newAlt;
-                if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
             } else if (seg.segIdx === -1) {
-                const newGlobalAlt = Math.max(1500, Math.min(13500, Math.round((seg.origCruiseAlt + altChange) / 500) * 500));
+                const newGlobalAlt = Math.max(1500, Math.min(13500, newAlt));
                 const altMap = document.getElementById('altMapInput');
                 if (altMap && altMap.textContent != newGlobalAlt) {
                     altMap.textContent = newGlobalAlt;
-                    if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
                 }
             } else if (seg.segIdx === -2 || seg.segIdx === -3) {
-                if (vpAltWaypoints.length > 0) { vpAltWaypoints[0].altFt = newAlt; if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles(); }
+                if (vpAltWaypoints.length > 0) vpAltWaypoints[0].altFt = newAlt;
             } else if (seg.segIdx === -4) {
-                if (vpAltWaypoints.length > 0) { vpAltWaypoints[vpAltWaypoints.length - 1].altFt = newAlt; if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles(); }
+                if (vpAltWaypoints.length > 0) vpAltWaypoints[vpAltWaypoints.length - 1].altFt = newAlt;
             }
-        } else if (vpDraggingMagenta) {
+        } else if (window.vpDraggingPosMarker) {
             const { mx } = vpClientToCanvas(clientX, clientY, m);
             let frac = (mx - m.padLeft) / m.plotW;
             frac = Math.max(0, Math.min(1, frac));
@@ -2114,7 +2451,7 @@ function initAltWaypoints() {
     }
 
     function vpHandleDragEnd() {
-        if (vpDraggingWP >= 0 || vpDraggingSegment || vpDraggingMagenta) {
+        if (vpDraggingWP >= 0 || vpDraggingSegment || window.vpDraggingPosMarker) {
             const needsSave = vpDraggingWP >= 0 || !!vpDraggingSegment;
 
             // Bei globaler Höhenänderung einmalig am Ende synchronisieren
@@ -2126,19 +2463,29 @@ function initAltWaypoints() {
 
             vpDraggingWP = -1;
             vpDraggingSegment = null;
-            vpDraggingMagenta = false;
+            window.vpDraggingPosMarker = false;
             dragOrigWP = null;
 
-            renderMapProfile();
-            if (typeof renderVerticalProfile === 'function') renderVerticalProfile('verticalProfileCanvas');
-            if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList(); // Erst beim Loslassen berechnen!
-            if (needsSave) window.debouncedSaveMissionState();
+            // 1. Priorität: Vordergrund (Rote Linie) sofort einrasten lassen
+            renderMapProfile(); 
+            
+            // 2. Priorität: UI-Logik (Mini-Profil) und Background-Schatten sanft nachladen (150ms)
+            setTimeout(() => {
+                if (typeof renderVerticalProfile === 'function') renderVerticalProfile('verticalProfileCanvas');
+                window.vpBgNeedsUpdate = true; // Stellt die Wolkenschatten nach dem Drag wieder her
+            }, 150);
+
+            // 3. Priorität: Schwere Daten-Logik (Lufträume & JSON-Speichern) ins Backend schieben (300ms)
+            setTimeout(() => {
+                if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList(); 
+                if (needsSave) window.debouncedSaveMissionState();
+            }, 300);
         }
     }
 
     // === STATE ===
     let vpWasDragging = false;
-    let vpDraggingMagenta = false;
+    window.vpDraggingPosMarker = false;
     let dragStartY = 0, dragStartX = 0, dragOrigWP = null;
     let lastTapTime = 0;
     let vpIsPanning = false;
@@ -2162,7 +2509,7 @@ function initAltWaypoints() {
 
     // === HOVER CURSOR ===
     canvas.addEventListener('mousemove', (e) => {
-        if (vpDraggingWP >= 0 || vpDraggingSegment || vpDraggingMagenta) return;
+        if (vpDraggingWP >= 0 || vpDraggingSegment || window.vpDraggingPosMarker) return;
         const m = vpGetCanvasMetrics();
         if (!m) return;
         const { mx, my } = vpClientToCanvas(e.clientX, e.clientY, m);
@@ -2175,7 +2522,6 @@ function initAltWaypoints() {
 
     // === MOUSEDOWN: start drag ===
     canvas.addEventListener('mousedown', (e) => {
-        if (typeof window.activateFastRender === 'function') window.activateFastRender();
         vpWasDragging = false;
         const m = vpGetCanvasMetrics();
         if (!m) return;
@@ -2185,7 +2531,7 @@ function initAltWaypoints() {
 
         // Priority 1: Magenta marker drag
         if (vpHitTestMagenta(mx, m)) {
-            vpDraggingMagenta = true;
+            window.vpDraggingPosMarker = true;
             e.preventDefault(); e.stopPropagation();
             return;
         }
@@ -2200,16 +2546,23 @@ function initAltWaypoints() {
         // Priority 3: Flight line segment drag
         const mouseDistNM = vpHitTestFlightLine(mx, my, m);
         if (mouseDistNM !== null) {
-            const segIdx = vpFindSegmentIdx(mouseDistNM);
-            const origSegAlt = (segIdx >= 0 && segIdx < vpSegmentAlts.length) ? vpSegmentAlts[segIdx] : m.cruiseAlt;
-            vpDraggingSegment = { segIdx, origAlt: origSegAlt, origCruiseAlt: m.cruiseAlt };
             e.preventDefault(); e.stopPropagation();
+            const segIdx = vpFindSegmentIdx(mouseDistNM);
+            
+            // FIX: Exakte, physikalische Höhe an der angeklickten Stelle berechnen
+            const tas = parseInt(document.getElementById('tasSlider')?.value || 115);
+            const profObj = typeof computeFlightProfile === 'function' ? computeFlightProfile(m.elevData, m.cruiseAlt, vpClimbRate, vpDescentRate, tas) : null;
+            let exactAltAtClick = typeof getExactAltAtDist === 'function' ? getExactAltAtDist(mouseDistNM, profObj, m.cruiseAlt) : m.cruiseAlt;
+            exactAltAtClick = Math.round(exactAltAtClick / 100) * 100;
+            
+            vpDraggingSegment = { segIdx, origAlt: exactAltAtClick, origCruiseAlt: m.cruiseAlt };
+            return;
         }
     });
 
     // === MOUSEMOVE: drag ===
     document.addEventListener('mousemove', (e) => {
-        if (vpDraggingWP < 0 && !vpDraggingSegment && !vpDraggingMagenta) return;
+        if (vpDraggingWP < 0 && !vpDraggingSegment && !window.vpDraggingPosMarker) return;
         if (Math.abs(e.clientX - dragStartX) > 2 || Math.abs(e.clientY - dragStartY) > 2) vpWasDragging = true;
         vpHandleDragMove(e.clientX, e.clientY, dragStartX, dragStartY, dragOrigWP);
     });
@@ -2219,7 +2572,6 @@ function initAltWaypoints() {
 
     // === TOUCH EVENTS ===
     canvas.addEventListener('touchstart', (e) => {
-        if (typeof window.activateFastRender === 'function') window.activateFastRender();
         if (e.touches.length === 2) {
             e.preventDefault();
             initialPinchDist = Math.hypot(
@@ -2250,7 +2602,7 @@ function initAltWaypoints() {
 
         if (vpHitTestMagenta(mx, m)) {
             e.preventDefault();
-            vpDraggingMagenta = true;
+            window.vpDraggingPosMarker = true;
             return;
         }
         const wpIdx = vpHitTestWaypoint(mx, my, m);
@@ -2312,7 +2664,7 @@ function initAltWaypoints() {
             if (scrollContainer) scrollContainer.scrollLeft = vpPanStartScrollLeft + deltaX;
             return;
         }
-        if (vpDraggingWP < 0 && !vpDraggingSegment && !vpDraggingMagenta) return;
+        if (vpDraggingWP < 0 && !vpDraggingSegment && !window.vpDraggingPosMarker) return;
         e.preventDefault();
         const touch = e.touches[0];
         if (Math.abs(touch.clientX - dragStartX) > 3 || Math.abs(touch.clientY - dragStartY) > 3) vpWasDragging = true;
@@ -2322,24 +2674,32 @@ function initAltWaypoints() {
     canvas.addEventListener('touchend', (e) => {
         if (e.touches.length < 2) { initialPinchDist = null; initialTwoFingerY = null; }
         if (vpIsPanning) { vpIsPanning = false; return; }
-        if (vpDraggingWP >= 0 || vpDraggingSegment || vpDraggingMagenta) vpHandleDragEnd();
+        if (vpDraggingWP >= 0 || vpDraggingSegment || window.vpDraggingPosMarker) vpHandleDragEnd();
     });
 
     canvas.addEventListener('touchcancel', (e) => {
         initialPinchDist = null; initialTwoFingerY = null;
         vpIsPanning = false; vpWasDragging = false;
-        if (vpDraggingWP >= 0 || vpDraggingSegment || vpDraggingMagenta) vpHandleDragEnd();
+        if (vpDraggingWP >= 0 || vpDraggingSegment || window.vpDraggingPosMarker) vpHandleDragEnd();
     });
 
-    // === MOUSE WHEEL ZOOM (Multi-Achsen) ===
+    // === MOUSE WHEEL ZOOM & PAN (Multi-Achsen) ===
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault(); 
         if (e.ctrlKey) {
             let yDelta = e.deltaY > 0 ? 1000 : -1000;
             vpChangeYAxis(yDelta);
-        } else {
-            let zoomDelta = e.deltaY > 0 ? 5 : -5;
+        } else if (e.shiftKey) {
+            // FIX: OS wandelt Shift+Scroll oft in deltaX um!
+            let wheelDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+            let zoomDelta = wheelDelta > 0 ? 5 : -5;
             vpZoom(zoomDelta);
+        } else {
+            const scrollContainer = document.getElementById('mapProfileScroll');
+            if (scrollContainer) {
+                const panDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+                scrollContainer.scrollLeft += panDelta;
+            }
         }
     }, { passive: false });
 }
@@ -2450,10 +2810,23 @@ let vpMaxAltOverride = 0; // 0 = Auto-Scaling
 let vpShowClouds = localStorage.getItem('ga_show_clouds') !== 'false'; // Default: true
 let vpShowLandmarks = localStorage.getItem('ga_show_landmarks') !== 'false';
 let vpShowObstacles = localStorage.getItem('ga_show_obstacles') !== 'false';
+let vpShowLinear = localStorage.getItem('ga_show_linear') !== 'false';
+let vpAirspaceMode = parseInt(localStorage.getItem('ga_show_airspaces') || '1'); // 0=Off, 1=Bg, 2=Fg
+
+function updateAirspaceBtn() {
+    const btn = document.getElementById('btnToggleAirspaces');
+    if (!btn) return;
+    btn.classList.toggle('active', vpAirspaceMode !== 0);
+    if (vpAirspaceMode === 1) btn.innerHTML = '🛡️<span style="font-size:8px;vertical-align:sub;">BG</span>';
+    else if (vpAirspaceMode === 2) btn.innerHTML = '🛡️<span style="font-size:8px;vertical-align:super;">FG</span>';
+    else btn.innerHTML = '🛡️<span style="font-size:8px;vertical-align:sub;">OFF</span>';
+}
 document.addEventListener('DOMContentLoaded', () => {
     const bc = document.getElementById('btnToggleClouds'); if(bc) bc.classList.toggle('active', vpShowClouds);
     const bl = document.getElementById('btnToggleLandmarks'); if(bl) bl.classList.toggle('active', vpShowLandmarks);
     const bo = document.getElementById('btnToggleObstacles'); if(bo) bo.classList.toggle('active', vpShowObstacles);
+    const blin = document.getElementById('btnToggleLinear'); if(blin) blin.classList.toggle('active', vpShowLinear);
+    updateAirspaceBtn(); // NEU
 });
 function vpChangeAlt(delta) {
     let val = parseInt(document.getElementById('altMapInput').textContent) || 4500;
@@ -2543,6 +2916,25 @@ function vpToggleObstacles() {
     } else if (typeof window.throttledRenderProfiles === 'function') {
         window.throttledRenderProfiles();
     }
+}
+
+function vpToggleLinearFeatures() {
+    vpShowLinear = !vpShowLinear;
+    localStorage.setItem('ga_show_linear', vpShowLinear);
+    const btn = document.getElementById('btnToggleLinear');
+    if (btn) btn.classList.toggle('active', vpShowLinear);
+    
+    if (typeof window.throttledRenderProfiles === 'function') {
+        window.throttledRenderProfiles();
+    }
+}
+
+function vpToggleAirspaces() {
+    vpAirspaceMode = (vpAirspaceMode + 1) % 3;
+    localStorage.setItem('ga_show_airspaces', vpAirspaceMode);
+    updateAirspaceBtn();
+    window.vpBgNeedsUpdate = true; // Zwingt den Hintergrund zum Update
+    if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
 }
 
 // === PROMPT-EINGABE für ALT / V/S (V57) ===

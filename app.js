@@ -919,10 +919,28 @@ window.throttledRenderProfiles = function() {
     if (vpRenderPending) return;
     vpRenderPending = true;
     requestAnimationFrame(() => {
-        if (typeof renderMapProfile === 'function') renderMapProfile();
-        if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+        // PERFORMANCE: Nur das aktive Profil rendern, nicht beide gleichzeitig!
+        const mapTable = document.getElementById('mapTableOverlay');
+        if (mapTable && mapTable.classList.contains('active')) {
+            if (typeof renderMapProfile === 'function') renderMapProfile();
+        } else {
+            if (document.getElementById('verticalProfileCanvas')) renderVerticalProfile('verticalProfileCanvas');
+        }
         vpRenderPending = false;
     });
+};
+
+window.vpIsFastRendering = false;
+let vpFastRenderTimeout = null;
+window.activateFastRender = function() {
+    window.vpIsFastRendering = true;
+    window.vpBgNeedsUpdate = true; // Zwingt Layer 1 zum Update
+    if (vpFastRenderTimeout) clearTimeout(vpFastRenderTimeout);
+    vpFastRenderTimeout = setTimeout(() => {
+        window.vpIsFastRendering = false;
+        window.vpBgNeedsUpdate = true; 
+        if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
+    }, 350);
 };
 
 function handleSliderChange(type, val) {
@@ -2113,44 +2131,33 @@ function renderAirspaceWarningsList() {
     let finalAirspaces = activeAirspaces;
 
     if (filterActive && fpResult && fpResult.profile) {
-        finalAirspaces = activeAirspaces.filter(a => {
-            if (!a.lowerLimit || !a.upperLimit) return true;
-            const lowerFt = airspaceLimitToFt(a.lowerLimit);
-            const upperFt = airspaceLimitToFt(a.upperLimit);
-            if (lowerFt === null || upperFt === null) return true;
+        // PERFORMANCE FIX: Kompletten Polygon-Check entfernt! Wir nutzen den bestehenden 2D-Schnittstellen-Cache.
+        const totalDist = vpElevationData[vpElevationData.length - 1].distNM;
+        const cachedAirspaces = getCachedAirspaceIntersections(vpElevationData, totalDist);
 
-            const isLowerAgl = a.lowerLimit.referenceDatum === 0;
-            const isUpperAgl = a.upperLimit.referenceDatum === 0;
+        finalAirspaces = activeAirspaces.filter(a => {
+            // 1. Ist der Luftraum überhaupt im 2D-Cache? (Wenn nicht, überfliegen wir ihn in 2D gar nicht)
+            const cached = cachedAirspaces.find(ca => ca.as === a);
+            if (!cached) return false; 
+
+            // 2. Hat der Luftraum gültige Höhengrenzen?
+            if (cached.lowerFt === null || cached.upperFt === null) return true;
 
             let intersects = false;
-            if (a.geometry) {
-                const polys = [];
-                if (a.geometry.type === 'Polygon') polys.push(a.geometry.coordinates[0]);
-                else if (a.geometry.type === 'MultiPolygon') a.geometry.coordinates.forEach(mc => polys.push(mc[0]));
-
-                for (let i = 0; i < fpResult.profile.length; i++) {
-                    const pp = fpResult.profile[i];
-                    const elev = vpElevationData[i].elevFt;
-                    const realLower = isLowerAgl ? elev + lowerFt : lowerFt;
-                    const realUpper = isUpperAgl ? elev + upperFt : upperFt;
-
-                    if (pp.altFt >= realLower && pp.altFt <= realUpper) {
-                        const pt = vpElevationData[i];
-                        for (const poly of polys) {
-                            if (vpPointInPoly(pt, poly)) {
-                                intersects = true; break;
-                            }
-                        }
-                    }
-                    if (intersects) break;
-                }
-            } else {
-                for (let i = 0; i < fpResult.profile.length; i++) {
-                    const pp = fpResult.profile[i];
-                    const elev = vpElevationData[i].elevFt;
-                    const realLower = isLowerAgl ? elev + lowerFt : lowerFt;
-                    const realUpper = isUpperAgl ? elev + upperFt : upperFt;
-                    if (pp.altFt >= realLower && pp.altFt <= realUpper) { intersects = true; break; }
+            
+            // 3. Prüfe NUR die paar Wegpunkte, die in 2D bereits als "innerhalb des Luftraums" markiert wurden!
+            for (const pt of cached.relevantPts) {
+                // Finde die Flughöhe an diesem spezifischen Punkt
+                const pp = fpResult.profile.find(profPt => profPt.distNM === pt.distNM);
+                if (!pp) continue;
+                
+                const realLower = cached.isLowerAgl ? pt.elevFt + cached.lowerFt : cached.lowerFt;
+                const realUpper = cached.isUpperAgl ? pt.elevFt + cached.upperFt : cached.upperFt;
+                
+                // Wenn unsere Flug-Linie zwischen Boden und Decke des Luftraums liegt -> Konflikt!
+                if (pp.altFt >= realLower && pp.altFt <= realUpper) {
+                    intersects = true; 
+                    break;
                 }
             }
             return intersects;
