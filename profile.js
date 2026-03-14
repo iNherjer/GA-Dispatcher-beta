@@ -489,16 +489,23 @@ async function fetchRouteWeather(routePts, elevData, signal) {
     if (signal && signal.aborted) return null;
 
     let seen = new Set();
-    results.forEach(arr => {
+    let totalInChunks = 0;
+    
+    results.forEach((arr, idx) => {
         if (arr && arr.length) {
+            console.log(`[Wetter] Chunk ${idx + 1}: ${arr.length} METAR-Stationen geliefert.`);
+            totalInChunks += arr.length;
             arr.forEach(m => {
                 if (!seen.has(m.icaoId)) {
                     seen.add(m.icaoId);
                     activeMetars.push(m);
                 }
             });
+        } else {
+            console.log(`[Wetter] Chunk ${idx + 1}: 0 Stationen (Leerer Bereich oder Fehler).`);
         }
     });
+    console.log(`[Wetter] Gesamt nach Duplikat-Filterung: ${activeMetars.length} einzigartige Stationen für dieses Flugprofil.`);
 
     if (!activeMetars || activeMetars.length === 0) return null;
     const stepNM = 15;
@@ -549,7 +556,7 @@ async function fetchRouteWeather(routePts, elevData, signal) {
                     for(let f=0; f<2; f++) visuals.flashes.push({ x: Math.random(), pts: [Math.random(), Math.random(), Math.random(), Math.random()] });
                 }
                 zones.push({
-                    distNM: bestPt.distNM, icao: closestMetar.icaoId, clouds: clouds,
+                    distNM: bestPt.distNM, icao: closestMetar.icaoId, stnDist: Math.round(minMetarDist), clouds: clouds,
                     lowestBase: lowestBase !== Infinity ? lowestBase : 5000,
                     weather: { hasRain, hasSnow, hasTS }, visuals: visuals
                 });
@@ -1075,7 +1082,8 @@ function vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, isDarkTheme, elev
                 ctx.fillStyle = 'rgba(255,255,255,0.7)';
                 ctx.font = 'bold 9px Arial';
                 ctx.textAlign = 'left';
-                ctx.fillText('📡 ' + zone.icao, bx + 4, yOf(16000));
+                const distText = zone.stnDist !== undefined ? ` (${zone.stnDist} NM)` : '';
+                ctx.fillText('📡 ' + zone.icao + distText, bx + 4, yOf(16000));
             }
             lastIcao = zone.icao;
         }

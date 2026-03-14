@@ -1054,19 +1054,23 @@ async function loadMetarWidget(icao, containerId, lat, lon) {
         let isFallback = false;
         let foundIcao = icao;
 
-        // Hilfsfunktion: Versucht direkten Fetch, bei CORS-Blockade (Catch) nutzt sie einen schnellen, rohen Proxy
-        async function safeFetch(urlObj) {
-            try {
-                const r = await fetch(urlObj);
-                if (r.ok && r.status !== 204) return await r.text();
-            } catch (err) {
+        // Hilfsfunktion: Versucht Fetch mit automatischem Retry bei Netzwerkfehlern
+        async function safeFetch(urlObj, retries = 3) {
+            for (let i = 0; i < retries; i++) {
                 try {
-                    const proxyUrl = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(urlObj)}`;
-                    const pr = await fetch(proxyUrl);
-                    if (pr.ok && pr.status !== 204) return await pr.text();
-                } catch (pxErr) {
-                    console.error("Proxy fetch failed", pxErr);
+                    const r = await fetch(urlObj);
+                    if (r.ok && r.status !== 204) return await r.text();
+                } catch (err) {
+                    try {
+                        const proxyUrl = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(urlObj)}`;
+                        const pr = await fetch(proxyUrl);
+                        if (pr.ok && pr.status !== 204) return await pr.text();
+                    } catch (pxErr) {
+                        if (i === retries - 1) console.error("Metar Fetch endgültig gescheitert nach", retries, "Versuchen", pxErr);
+                    }
                 }
+                // Kurze Pause vor dem nächsten Versuch
+                if (i < retries - 1) await new Promise(res => setTimeout(res, 600));
             }
             return null;
         }
