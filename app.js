@@ -79,6 +79,17 @@ function setTheme(mode) {
     updateDynamicColors();
     refreshAllDrums();
     syncGPSWithTheme(mode, wasNavcom);
+
+    // --- NEU: Wetter-Widgets beim Theme-Wechsel sofort neu rendern ---
+    if (typeof currentStartICAO !== 'undefined' && currentStartICAO) {
+        const depP = routeWaypoints && routeWaypoints.length > 0 ? routeWaypoints[0] : null;
+        loadMetarWidget(currentStartICAO, 'metarContainerDep', depP?.lat, depP?.lng || depP?.lon);
+    }
+    if (typeof currentDestICAO !== 'undefined' && currentDestICAO) {
+        const isPOI = document.getElementById("destRwyContainer")?.style.display === "none";
+        const destP = routeWaypoints && routeWaypoints.length > 1 ? routeWaypoints[routeWaypoints.length - 1] : null;
+        loadMetarWidget(isPOI ? null : currentDestICAO, 'metarContainerDest', destP?.lat, destP?.lng || destP?.lon);
+    }
 }
 
 function syncGPSWithTheme(newMode, wasNavcom) {
@@ -1041,10 +1052,16 @@ async function loadMetarWidget(icao, containerId, lat, lon) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
-    // Überschreibt die in der HTML gesetzten Schatten und Hintergründe für den "Direkt-auf-Papier"-Look
-    container.style.boxShadow = 'none';
-    container.style.background = 'transparent';
-    container.innerHTML = '<div style="padding:20px; text-align:center; color:#555; font-family: \'Caveat\', cursive; font-size:22px; transform: rotate(-1deg);">Sucht lokales Wetter...</div>';
+    const isRetro = document.body.classList.contains('theme-retro');
+    if (isRetro) {
+        container.style.boxShadow = 'none';
+        container.style.background = 'transparent';
+        container.innerHTML = '<div style="padding:20px; text-align:center; color:#555; font-family: \'Caveat\', cursive; font-size:22px; transform: rotate(-1deg);">Sucht lokales Wetter...</div>';
+    } else {
+        container.style.boxShadow = '';
+        container.style.background = '';
+        container.innerHTML = '<div style="padding:20px; text-align:center; color:#888; font-size:12px; background:#1a1a1a; border-radius:6px;">Sucht lokales Wetter...</div>';
+    }
 
     if (!icao || icao === 'POI') {
         container.style.display = 'none';
@@ -1057,67 +1074,85 @@ async function loadMetarWidget(icao, containerId, lat, lon) {
         let isFallback = false;
         let foundIcao = icao;
 
-        // Hilfsfunktion: Versucht Fetch mit automatischem Retry bei Netzwerkfehlern
-        async function safeFetch(urlObj, retries = 3) {
-            for (let i = 0; i < retries; i++) {
-                try {
-                    const r = await fetch(urlObj);
-                    if (r.ok && r.status !== 204) return await r.text();
-                } catch (err) {
+        // --- CACHE LOGIK: Bei Theme-Wechsel nicht neu von der API laden ---
+        const cacheKey = icao + (lat ? `_${lat.toFixed(2)}` : '') + (lon ? `_${lon.toFixed(2)}` : '');
+        if (gpsState.metarCache[cacheKey]) {
+            metarDataList = gpsState.metarCache[cacheKey].data;
+            isFallback = gpsState.metarCache[cacheKey].isFallback;
+            foundIcao = gpsState.metarCache[cacheKey].foundIcao;
+        } else {
+
+            async function safeFetch(urlObj, retries = 3) {
+                for (let i = 0; i < retries; i++) {
                     try {
-                        const proxyUrl = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(urlObj)}`;
-                        const pr = await fetch(proxyUrl);
-                        if (pr.ok && pr.status !== 204) return await pr.text();
-                    } catch (pxErr) {
-                        if (i === retries - 1) console.error("Metar Fetch endgültig gescheitert nach", retries, "Versuchen", pxErr);
-                    }
-                }
-                // Kurze Pause vor dem nächsten Versuch
-                if (i < retries - 1) await new Promise(res => setTimeout(res, 600));
-            }
-            return null;
-        }
-
-        const directUrl = `https://aviationweather.gov/api/data/metar?ids=${icao}&format=json&t=${Date.now()}`;
-        const mainText = await safeFetch(directUrl);
-        if (mainText) {
-            try { metarDataList = JSON.parse(mainText); } catch (e) { }
-        }
-
-        // Falls kein METAR da ist, Fallback auf Umkreissuche
-        if ((!metarDataList || metarDataList.length === 0) && lat !== undefined && lon !== undefined) {
-            const latMin = lat - 0.6, latMax = lat + 0.6;
-            const lonMin = lon - 0.8, lonMax = lon + 0.8;
-            const fbUrl = `https://aviationweather.gov/api/data/metar?bbox=${latMin},${lonMin},${latMax},${lonMax}&format=json&t=${Date.now()}`;
-            const fbText = await safeFetch(fbUrl);
-
-            if (fbText) {
-                try {
-                    const fbData = JSON.parse(fbText);
-                    if (fbData && fbData.length > 0) {
-                        let closest = fbData[0];
-                        let minDist = calcNav(lat, lon, closest.lat, closest.lon).dist;
-                        for (let i = 1; i < fbData.length; i++) {
-                            let d = calcNav(lat, lon, fbData[i].lat, fbData[i].lon).dist;
-                            if (d < minDist) { minDist = d; closest = fbData[i]; }
+                        const r = await fetch(urlObj);
+                        if (r.ok && r.status !== 204) return await r.text();
+                    } catch (err) {
+                        try {
+                            const proxyUrl = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(urlObj)}`;
+                            const pr = await fetch(proxyUrl);
+                            if (pr.ok && pr.status !== 204) return await pr.text();
+                        } catch (pxErr) {
+                            if (i === retries - 1) console.error("Metar Fetch endgültig gescheitert nach", retries, "Versuchen", pxErr);
                         }
-                        metarDataList = [closest];
-                        foundIcao = closest.icaoId;
-                        isFallback = true;
                     }
-                } catch (parseErr) {
-                    console.error("Failed to parse fallback JSON", parseErr);
+                    if (i < retries - 1) await new Promise(res => setTimeout(res, 600));
+                }
+                return null;
+            }
+
+            const directUrl = `https://aviationweather.gov/api/data/metar?ids=${icao}&format=json&t=${Date.now()}`;
+            const mainText = await safeFetch(directUrl);
+            if (mainText) {
+                try { metarDataList = JSON.parse(mainText); } catch (e) { }
+            }
+
+            if ((!metarDataList || metarDataList.length === 0) && lat !== undefined && lon !== undefined) {
+                const latMin = lat - 0.6, latMax = lat + 0.6;
+                const lonMin = lon - 0.8, lonMax = lon + 0.8;
+                const fbUrl = `https://aviationweather.gov/api/data/metar?bbox=${latMin},${lonMin},${latMax},${lonMax}&format=json&t=${Date.now()}`;
+                const fbText = await safeFetch(fbUrl);
+                if (fbText) {
+                    try {
+                        const fbData = JSON.parse(fbText);
+                        if (fbData && fbData.length > 0) {
+                            let closest = fbData[0];
+                            let minDist = calcNav(lat, lon, closest.lat, closest.lon).dist;
+                            for (let i = 1; i < fbData.length; i++) {
+                                let d = calcNav(lat, lon, fbData[i].lat, fbData[i].lon).dist;
+                                if (d < minDist) { minDist = d; closest = fbData[i]; }
+                            }
+                            metarDataList = [closest];
+                            foundIcao = closest.icaoId;
+                            isFallback = true;
+                        }
+                    } catch (parseErr) {
+                        console.error("Failed to parse fallback JSON", parseErr);
+                    }
                 }
             }
-        }
+
+            // Ergebnis in den Cache legen
+            gpsState.metarCache[cacheKey] = { data: metarDataList, isFallback, foundIcao };
+
+        } // Ende der Cache-Else-Bedingung
 
         if (!metarDataList || metarDataList.length === 0) {
-            container.innerHTML = `
-                <div style="padding:15px; text-align:center; font-family: 'Caveat', cursive; transform: rotate(1deg);">
-                    <div style="color:#d93829; font-weight:bold; font-size: 22px; margin-bottom:5px;">Kein METAR in der Nähe von ${icao}</div>
-                    <div style="font-size:18px; color:#555; margin-bottom:12px;">Kein automatisches Wetter verfügbar.</div>
-                    <a href="https://metar-taf.com/de/${icao}" target="_blank" style="display:inline-block; color:#0b1f65; font-size:20px; font-weight:bold; text-decoration:underline;">Manuell suchen ➔</a>
-                </div>`;
+            if (isRetro) {
+                container.innerHTML = `
+                    <div style="padding:15px; text-align:center; font-family: 'Caveat', cursive; transform: rotate(1deg);">
+                        <div style="color:#d93829; font-weight:bold; font-size: 22px; margin-bottom:5px;">Kein METAR in der Nähe von ${icao}</div>
+                        <div style="font-size:18px; color:#555; margin-bottom:12px;">Kein automatisches Wetter verfügbar.</div>
+                        <a href="https://metar-taf.com/de/${icao}" target="_blank" style="display:inline-block; color:#0b1f65; font-size:20px; font-weight:bold; text-decoration:underline;">Manuell suchen ➔</a>
+                    </div>`;
+            } else {
+                container.innerHTML = `
+                    <div style="background:#1a1a1a; border-radius:6px; padding:15px; text-align:center; border: 1px solid #333;">
+                        <div style="color:#d93829; font-weight:bold; margin-bottom:5px;">Kein METAR in der Nähe von ${icao}</div>
+                        <div style="font-size:11px; color:#888; margin-bottom:12px;">Für diesen Bereich steht kein automatisches Wetter zur Verfügung.</div>
+                        <a href="https://metar-taf.com/de/${icao}" target="_blank" style="display:inline-block; background:#4da6ff; color:#111; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px; font-weight:bold; transition: background 0.2s;">Manuell suchen ➔</a>
+                    </div>`;
+            }
             return;
         }
 
@@ -1125,8 +1160,6 @@ async function loadMetarWidget(icao, containerId, lat, lon) {
         const raw = metar.rawOb || "";
         const temp = metar.temp !== null ? metar.temp + '°C' : '--';
         const dewp = metar.dewp !== null ? metar.dewp + '°C' : '--';
-
-        // Parse Flight Category color
         let catColor = "#fff";
         let catText = metar.fltCat || "N/A";
         if (catText === "VFR") catColor = "#33ff33";
@@ -1137,17 +1170,10 @@ async function loadMetarWidget(icao, containerId, lat, lon) {
         let cover = metar.cover || "--";
         if (cover === "Clear") cover = "CLR";
 
-        // Sichtweite (Visibility) extrahieren
         let visib = metar.visib !== undefined && metar.visib !== null ? metar.visib + ' sm' : '--';
-        // Für Europa: Nach metrischer Sichtweite im Raw-String suchen (z.B. 9999 oder 0800)
         const visMatch = raw.match(/\s(\d{4})\s/);
-        if (raw.includes(' 9999 ')) {
-            visib = '> 10 km';
-        } else if (visMatch && !visMatch[1].startsWith('0000')) {
-            visib = parseInt(visMatch[1], 10) + ' m';
-        }
-        
-        // Wetter / Niederschlag (Weather Phenomena)
+        if (raw.includes(' 9999 ')) visib = '> 10 km';
+        else if (visMatch && !visMatch[1].startsWith('0000')) visib = parseInt(visMatch[1], 10) + ' m';
         let wx = metar.wxString ? metar.wxString.replace(/,/g, ' ') : 'NIL';
 
         let qnhStr = "--";
@@ -1156,11 +1182,8 @@ async function loadMetarWidget(icao, containerId, lat, lon) {
         if (qMatch) qnhStr = qMatch[1] + ' hPa';
         else if (aMatch) qnhStr = Math.round((parseInt(aMatch[1]) / 100) * 33.8639) + ' hPa';
 
-        let wdir = metar.wdir;
-        let wspd = metar.wspd || 0;
-        let wgst = metar.wgst ? `G${metar.wgst}` : '';
+        let wdir = metar.wdir, wspd = metar.wspd || 0, wgst = metar.wgst ? `G${metar.wgst}` : '';
         let isVRB = raw.match ? /VRB\d{2,3}KT/.test(raw) : (wdir === "VRB");
-
         let windText = isVRB ? `VRB / ${wspd}${wgst} kt` : `${wdir}° / ${wspd}${wgst} kt`;
         if (wspd === 0) windText = "Calm (0 kt)";
 
@@ -1170,83 +1193,157 @@ async function loadMetarWidget(icao, containerId, lat, lon) {
             retries++;
         }
 
-        let rwyHdg = 0;
-        let rwy1 = "";
-        let rwy2 = "";
+        let rwyHdg = 0, rwy1 = "", rwy2 = "";
         const rData = runwayCache[foundIcao] || runwayCache[icao];
         if (rData && !rData.includes('Keine Daten')) {
             const match = rData.match(/(?:^|\s|\n|<br\s*\/?>)(0[1-9]|[12]\d|3[0-6])([LRC]?)\s*\/\s*((?:0[1-9]|[12]\d|3[0-6])[LRC]?)/);
-            if (match) {
-                rwyHdg = parseInt(match[1], 10) * 10;
-                rwy1 = match[1] + match[2];
-                rwy2 = match[3];
-            }
-        }
-
-        // --- Sketched Compass ---
-        let svgTicks = `
-            <circle cx="80" cy="80" r="70" stroke="#444" stroke-width="1.5" fill="none" stroke-dasharray="15 6 30 6" transform="rotate(12 80 80)"/>
-            <text x="80" y="22" font-family="'Caveat', cursive" font-size="20" fill="#222" font-weight="bold" text-anchor="middle">N</text>
-            <text x="142" y="86" font-family="'Caveat', cursive" font-size="20" fill="#222" font-weight="bold" text-anchor="middle">E</text>
-            <text x="80" y="152" font-family="'Caveat', cursive" font-size="20" fill="#222" font-weight="bold" text-anchor="middle">S</text>
-            <text x="18" y="86" font-family="'Caveat', cursive" font-size="20" fill="#222" font-weight="bold" text-anchor="middle">W</text>
-            <circle cx="80" cy="80" r="3" fill="#444" />
-        `;
-
-        let rwyHtml = '';
-        if (rwy1 && rwy2) {
-            rwyHtml = `
-                <g transform="translate(80,80) rotate(${rwyHdg}) translate(-80,-80)">
-                    <rect x="68" y="25" width="24" height="110" fill="none" stroke="#222" stroke-width="1.5" stroke-dasharray="30 4 15 4"/>
-                    <text x="80" y="38" font-family="'Caveat', cursive" font-size="14" fill="#111" font-weight="bold" text-anchor="middle" transform="rotate(180 80 34)">${rwy1}</text>
-                    <text x="80" y="128" font-family="'Caveat', cursive" font-size="14" fill="#111" font-weight="bold" text-anchor="middle">${rwy2}</text>
-                </g>
-            `;
-        }
-
-        let arrowHtml = '';
-        if (!isVRB && wspd > 0 && wdir !== null && wdir !== "VRB") {
-            arrowHtml = `
-            <g transform="rotate(${wdir} 80 80)">
-                <path d="M 80 10 C 77 30, 83 50, 80 65" stroke="#1a73e8" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-                <path d="M 74 54 L 80 68 L 86 52" stroke="#1a73e8" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-            </g>`;
+            if (match) { rwyHdg = parseInt(match[1], 10) * 10; rwy1 = match[1] + match[2]; rwy2 = match[3]; }
         }
 
         const headerText = isFallback ? `Nearest: ${foundIcao}` : `Station: ${icao}`;
+        const modernHeaderText = isFallback ? `▶ NEAREST: ${foundIcao}` : `▶ STATION: ${icao}`;
 
-        container.innerHTML = `
-            <div style="font-family: 'Caveat', cursive; color: #222; padding: 5px; position:relative;">
-                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid rgba(0,0,0,0.5); padding-bottom: 2px; margin-bottom: 12px;">
-                    <span style="font-size: 24px; font-weight: bold; color: #0b1f65; transform: rotate(-1deg); display: inline-block;">${headerText}</span>
-                    <span style="font-size: 18px; font-weight: bold; color: ${catColor}; border: 2px solid ${catColor}; padding: 0 6px; border-radius: 3px; transform: rotate(2deg); display: inline-block; box-shadow: 1px 1px 0 rgba(0,0,0,0.1);">${catText}</span>
-                </div>
+        if (isRetro) {
+            let svgTicks = `
+                <circle cx="80" cy="80" r="70" stroke="#444" stroke-width="1.5" fill="none" stroke-dasharray="30.65 6" transform="rotate(2.45 80 80)"/>
+                <circle cx="80" cy="80" r="3" fill="#444" />`;
+            
+            // Füge N, O, S, W und 30-Grad-Schritte rotierend hinzu
+            for (let i = 0; i < 360; i += 30) {
+                const angleRad = (i - 90) * Math.PI / 180;
+                const radius = 61;
+                const tx = 80 + radius * Math.cos(angleRad);
+                const ty = 80 + radius * Math.sin(angleRad);
                 
-                <div style="font-size: 17px; line-height: 1.25; margin-bottom: 15px; color: #333; padding-left: 12px; border-left: 2px solid rgba(0,0,0,0.2); transform: rotate(0.5deg);">
-                    ${raw}
-                </div>
-                
-                <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
-                    <div style="font-size: 20px; line-height: 1.3; display: flex; flex-direction: column; gap: 2px;">
-                        <div><span style="color:#666; font-size: 16px;">Wind:</span> <b style="color:#1a73e8; font-size:22px;">${windText}</b></div>
-                        <div><span style="color:#666; font-size: 16px;">Vis:</span> <b>${visib}</b> <span style="color:#666; font-size: 16px; margin-left:8px;">Wx:</span> <b>${wx}</b></div>
-                        <div><span style="color:#666; font-size: 16px;">Temp:</span> <b>${temp}</b> <span style="color:#666; font-size: 16px; margin-left:8px;">Dew:</span> <b>${dewp}</b></div>
-                        <div><span style="color:#666; font-size: 16px;">QNH:</span> <b>${qnhStr}</b> <span style="color:#666; font-size: 16px; margin-left:8px;">Cloud:</span> <b>${cover}</b></div>
+                // dx="-2" gleicht den kursiven Schwung (Slant) von Caveat aus, der sonst wie eine Rechtsrotation wirkt
+                if (i % 90 === 0) {
+                    let letter = i === 0 ? 'N' : (i === 90 ? 'O' : (i === 180 ? 'S' : 'W'));
+                    svgTicks += `<text x="${tx}" y="${ty}" dx="-2" font-family="'Caveat', cursive" font-size="22" fill="#222" font-weight="bold" text-anchor="middle" dominant-baseline="central" transform="rotate(${i} ${tx} ${ty})">${letter}</text>`;
+                } else {
+                    svgTicks += `<text x="${tx}" y="${ty}" dx="-1.5" font-family="'Caveat', cursive" font-size="14" fill="#666" font-weight="bold" text-anchor="middle" dominant-baseline="central" transform="rotate(${i} ${tx} ${ty})">${i / 10}</text>`;
+                }
+            }
+            
+            let rwyHtml = '';
+            if (rwy1 && rwy2) {
+                // Piste wurde oben und unten gekürzt (y="29", height="102") um Abstand zu den Zahlen zu gewinnen
+                rwyHtml = `
+                    <g transform="translate(80,80) rotate(${rwyHdg}) translate(-80,-80)">
+                        <rect x="68" y="29" width="24" height="102" fill="none" stroke="#222" stroke-width="1.5" stroke-dasharray="30 4 15 4"/>
+                        <text x="80" y="43" font-family="'Caveat', cursive" font-size="14" fill="#111" font-weight="bold" text-anchor="middle" transform="rotate(180 80 39)">${rwy1}</text>
+                        <text x="80" y="125" font-family="'Caveat', cursive" font-size="14" fill="#111" font-weight="bold" text-anchor="middle">${rwy2}</text>
+                    </g>`;
+            }
+
+            let arrowHtml = '';
+            if (!isVRB && wspd > 0 && wdir !== null && wdir !== "VRB") {
+                arrowHtml = `
+                <g transform="rotate(${wdir} 80 80)">
+                    <path d="M 80 10 C 77 30, 83 50, 80 65" stroke="#1a73e8" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+                    <path d="M 74 54 L 80 68 L 86 52" stroke="#1a73e8" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                </g>`;
+            }
+
+            container.innerHTML = `
+                <div style="font-family: 'Caveat', cursive; color: #222; padding: 5px; position:relative;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid rgba(0,0,0,0.5); padding-bottom: 2px; margin-bottom: 12px;">
+                        <span style="font-size: 24px; font-weight: bold; color: #0b1f65; transform: rotate(-1deg); display: inline-block;">${headerText}</span>
+                        <span style="font-size: 18px; font-weight: bold; color: ${catColor}; border: 2px solid ${catColor}; padding: 0 6px; border-radius: 3px; transform: rotate(2deg); display: inline-block; box-shadow: 1px 1px 0 rgba(0,0,0,0.1);">${catText}</span>
                     </div>
-                    
-                    <div style="position:relative; width: 130px; height: 130px; flex-shrink: 0;">
-                        <svg viewBox="0 0 160 160" style="width:100%; height:100%; overflow:visible;">
-                            ${svgTicks}
-                            ${rwyHtml}
+                    <div style="font-size: 17px; line-height: 1.25; margin-bottom: 15px; color: #333; padding-left: 12px; border-left: 2px solid rgba(0,0,0,0.2); transform: rotate(0.5deg);">
+                        ${raw}
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                        <div style="font-size: 20px; line-height: 1.3; display: flex; flex-direction: column; gap: 2px;">
+                            <div><span style="color:#666; font-size: 16px;">Wind:</span> <b style="color:#1a73e8; font-size:22px;">${windText}</b></div>
+                            <div><span style="color:#666; font-size: 16px;">Vis:</span> <b>${visib}</b> <span style="color:#666; font-size: 16px; margin-left:8px;">Wx:</span> <b>${wx}</b></div>
+                            <div><span style="color:#666; font-size: 16px;">Temp:</span> <b>${temp}</b> <span style="color:#666; font-size: 16px; margin-left:8px;">Dew:</span> <b>${dewp}</b></div>
+                            <div><span style="color:#666; font-size: 16px;">QNH:</span> <b>${qnhStr}</b> <span style="color:#666; font-size: 16px; margin-left:8px;">Cloud:</span> <b>${cover}</b></div>
+                        </div>
+                        <div style="position:relative; width: 130px; height: 130px; flex-shrink: 0;">
+                            <svg viewBox="0 0 160 160" style="width:100%; height:100%; overflow:visible;">
+                                ${svgTicks}${rwyHtml}${arrowHtml}
+                            </svg>
+                        </div>
+                    </div>
+                </div>`;
+        } else {
+            let svgTicks = '';
+            for (let i = 0; i < 360; i += 5) {
+                const isCard = i % 90 === 0, isLong = i % 10 === 0;
+                const len = isCard ? 8 : (isLong ? 5 : 3), sw = isCard ? 2 : 1, col = isCard ? '#111' : '#888';
+                svgTicks += `<line x1="80" y1="2" x2="80" y2="${2 + len}" stroke="${col}" stroke-width="${sw}" transform="rotate(${i} 80 80)" />`;
+                if (i % 30 === 0 && !isCard) {
+                    const angleRad = (i - 90) * Math.PI / 180, tx = 80 + 61 * Math.cos(angleRad), ty = 80 + 61 * Math.sin(angleRad);
+                    svgTicks += `<text x="${tx}" y="${ty}" font-family="sans-serif" font-size="10" fill="#333" font-weight="bold" text-anchor="middle" dominant-baseline="central" transform="rotate(${i} ${tx} ${ty})">${i / 10}</text>`;
+                } else if (isCard) {
+                    const angleRad = (i - 90) * Math.PI / 180, tx = 80 + 61 * Math.cos(angleRad), ty = 80 + 61 * Math.sin(angleRad);
+                    let letter = i === 0 ? 'N' : (i === 90 ? 'O' : (i === 180 ? 'S' : 'W'));
+                    svgTicks += `<text x="${tx}" y="${ty}" font-family="sans-serif" font-size="14" fill="#111" font-weight="bold" text-anchor="middle" dominant-baseline="central" transform="rotate(${i} ${tx} ${ty})">${letter}</text>`;
+                }
+            }
+            let arrowHtml = '';
+            if (!isVRB && wspd > 0 && wdir !== null && wdir !== "VRB") {
+                arrowHtml = `
+                <svg viewBox="0 0 160 160" style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:10; pointer-events:none;">
+                    <g transform="rotate(${wdir} 80 80)">
+                        <line x1="80" y1="6" x2="80" y2="70" stroke="#1a73e8" stroke-width="4" stroke-linecap="round"/>
+                        <polygon points="72,55 80,80 88,55" fill="#1a73e8" />
+                    </g>
+                </svg>`;
+            }
+            container.innerHTML = `
+                <div style="background:#f0eada; border-radius:12px; padding:15px 15px 20px 15px; border: 3px solid #c2bba8; box-shadow: 0 4px 8px rgba(0,0,0,0.2), inset 0 2px 5px rgba(255,255,255,0.5); font-family: 'Arial', sans-serif; color: #333; position:relative; overflow:hidden;">
+                    <div style="position:absolute; top:6px; left:6px; width:6px; height:6px; background:#ddd; border-radius:50%; box-shadow: inset 0 0 2px #555;"></div>
+                    <div style="position:absolute; bottom:6px; right:6px; width:6px; height:6px; background:#ddd; border-radius:50%; box-shadow: inset 0 0 2px #555;"></div>
+                    <div style="position:absolute; top:6px; right:6px; width:6px; height:6px; background:#ddd; border-radius:50%; box-shadow: inset 0 0 2px #555;"></div>
+                    <div style="position:absolute; bottom:6px; left:6px; width:6px; height:6px; background:#ddd; border-radius:50%; box-shadow: inset 0 0 2px #555;"></div>
+
+                    <div style="color: #8a1a12; font-size: 14px; font-weight: bold; margin-bottom: 12px; border-bottom: 2px dashed #c2bba8; padding-bottom: 8px; font-family: 'Courier New', Courier, monospace; display: flex; justify-content: space-between; align-items: center; letter-spacing: 0.5px;">
+                        <span>${modernHeaderText}</span>
+                        <span style="color:${catColor}; font-size:14px; padding: 2px 8px; border: 2px solid ${catColor}; border-radius: 4px; background: rgba(255,255,255,0.7); box-shadow: 0 1px 2px rgba(0,0,0,0.1);">${catText}</span>
+                    </div>
+                    <div style="background:#e6e0ce; color:#333; font-family: 'Courier New', Courier, monospace; padding:10px; border-radius:4px; font-size:11.5px; margin-bottom:18px; border: 1px inset #c2bba8; line-height: 1.4; letter-spacing: 0.5px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);">
+                        ${raw}
+                    </div>
+                    <div style="display:flex; justify-content: space-between; align-items: center; gap: 8px;">
+                        <div style="display:flex; flex-direction:column; gap:8px; font-family: 'Courier New', Courier, monospace; flex-shrink: 1; min-width: 0;">
+                            <div><div style="color:#666; font-size:10px; font-weight:bold; letter-spacing:1px;">WIND</div><div style="color:#1a73e8; font-size:15px; font-weight:bold; white-space: nowrap;">${windText}</div></div>
+                            <div style="display:flex; gap:12px;">
+                                <div><div style="color:#666; font-size:10px; font-weight:bold; letter-spacing:1px;">VIS</div><div style="color:#111; font-size:15px; font-weight:bold; white-space: nowrap;">${visib}</div></div>
+                                <div><div style="color:#666; font-size:10px; font-weight:bold; letter-spacing:1px;">WX</div><div style="color:#111; font-size:15px; font-weight:bold; white-space: nowrap;">${wx}</div></div>
+                            </div>
+                            <div style="display:flex; gap:12px;">
+                                <div><div style="color:#666; font-size:10px; font-weight:bold; letter-spacing:1px;">TEMP</div><div style="color:#111; font-size:15px; font-weight:bold; white-space: nowrap;">${temp}</div></div>
+                                <div><div style="color:#666; font-size:10px; font-weight:bold; letter-spacing:1px;">DEWP</div><div style="color:#111; font-size:15px; font-weight:bold; white-space: nowrap;">${dewp}</div></div>
+                            </div>
+                            <div style="display:flex; gap:12px;">
+                                <div><div style="color:#666; font-size:10px; font-weight:bold; letter-spacing:1px;">QNH</div><div style="color:#111; font-size:15px; font-weight:bold; white-space: nowrap;">${qnhStr}</div></div>
+                                <div><div style="color:#666; font-size:10px; font-weight:bold; letter-spacing:1px;">COVER</div><div style="color:#111; font-size:15px; font-weight:bold; white-space: nowrap;">${cover}</div></div>
+                            </div>
+                        </div>
+                        <div style="position:relative; width:160px; height:160px; flex-shrink: 0; border:4px solid #a8a291; border-radius:50%; background:#fcfaf5; box-shadow: inset 0 2px 8px rgba(0,0,0,0.1), 0 2px 6px rgba(0,0,0,0.2);">
+                            <svg viewBox="0 0 160 160" style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:1; pointer-events:none;">
+                                ${svgTicks}
+                            </svg>
+                            <div style="position:absolute; top:50%; left:50%; width:26px; height:105px; background:#444; border:1px solid #111; border-radius: 3px; transform: translate(-50%, -50%) rotate(${rwyHdg}deg); transform-origin: center center; display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding: 4px 0; box-sizing: border-box; z-index:5; box-shadow: 0 2px 4px rgba(0,0,0,0.4);">
+                                <div style="width:100%; text-align:center; font-size:10px; line-height:1; color:#fff; font-weight:bold; transform: rotate(180deg); font-family: sans-serif;">${rwy1}</div>
+                                <div style="width:2px; flex-grow:1; margin: 4px 0; background: repeating-linear-gradient(to bottom, #d4d4d4 0, #d4d4d4 8px, transparent 8px, transparent 16px);"></div>
+                                <div style="width:100%; text-align:center; font-size:10px; line-height:1; color:#fff; font-weight:bold; font-family: sans-serif;">${rwy2}</div>
+                            </div>
                             ${arrowHtml}
-                        </svg>
+                        </div>
                     </div>
-                </div>
-            </div>
-        `;
+                </div>`;
+        }
     } catch (err) {
         console.error("METAR fetch error:", err);
-        container.innerHTML = `<div style="padding:10px; text-align:center; color:#d93829; font-family: 'Caveat', cursive; font-size:20px; transform: rotate(-1deg);">Fehler beim Laden des METARs: <br/>${err.message || err}</div>`;
+        const isRetro = document.body.classList.contains('theme-retro');
+        if (isRetro) {
+            container.innerHTML = `<div style="padding:10px; text-align:center; color:#d93829; font-family: 'Caveat', cursive; font-size:20px; transform: rotate(-1deg);">Fehler beim Laden des METARs: <br/>${err.message || err}</div>`;
+        } else {
+            container.innerHTML = `<div style="padding:10px; text-align:center; color:#d93829; font-size:12px; background:#1a1a1a;">Fehler beim Laden des METARs: <br/>${err.message || err}</div>`;
+        }
     }
 }
 function calcNav(lat1, lon1, lat2, lon2) {
