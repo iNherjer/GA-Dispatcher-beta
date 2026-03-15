@@ -2891,8 +2891,9 @@ function vpToggleClouds() {
     
     if (vpShowClouds && window._lastVpRouteKey) {
         triggerVerticalProfileUpdate();
-    } else if (typeof window.throttledRenderProfiles === 'function') {
-        window.throttledRenderProfiles();
+    } else {
+        window.vpBgNeedsUpdate = true; // FIX: Hintergrund zum Löschen zwingen
+        if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
     }
 }
 
@@ -2906,8 +2907,9 @@ function vpToggleLandmarks() {
         localStorage.removeItem('ga_lms_' + window._lastVpRouteKey);
         window._lastLmRouteKey = null; // Zwingt zum erneuten Fetch
         triggerVerticalProfileUpdate();
-    } else if (typeof window.throttledRenderProfiles === 'function') {
-        window.throttledRenderProfiles();
+    } else {
+        window.vpBgNeedsUpdate = true; // FIX: Hintergrund zum Löschen zwingen
+        if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
     }
 }
 
@@ -2921,8 +2923,9 @@ function vpToggleObstacles() {
         localStorage.removeItem('ga_obs_' + window._lastVpRouteKey);
         window._lastObsRouteKey = null; // Zwingt zum erneuten Fetch
         triggerVerticalProfileUpdate();
-    } else if (typeof window.throttledRenderProfiles === 'function') {
-        window.throttledRenderProfiles();
+    } else {
+        window.vpBgNeedsUpdate = true; // FIX: Hintergrund zum Löschen zwingen
+        if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
     }
 }
 
@@ -2932,6 +2935,7 @@ function vpToggleLinearFeatures() {
     const btn = document.getElementById('btnToggleLinear');
     if (btn) btn.classList.toggle('active', vpShowLinear);
     
+    window.vpBgNeedsUpdate = true; // FIX: Hintergrund zum Löschen zwingen
     if (typeof window.throttledRenderProfiles === 'function') {
         window.throttledRenderProfiles();
     }
