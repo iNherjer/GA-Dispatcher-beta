@@ -108,7 +108,10 @@
         </div>
 
         <div class="action-bar" id="classicActionBar">
-            <button class="btn-main" id="generateBtn" onclick="generateMission()">Auftrag generieren</button>
+            <div style="display:flex; gap:8px; flex-grow: 1;">
+                <button class="btn-main" id="generateBtn" onclick="generateMission()" style="flex-grow: 1; margin: 0;">Auftrag generieren</button>
+                <button class="btn-main" id="importHubBtn" onclick="openTransferModal()" style="flex-grow: 0; width: 55px; margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; background: #4da6ff; color: #111; border-color: #222;" title="Transfer Hub (Import/Export)">💾</button>
+            </div>
             
             <div class="emergency-reset" onclick="resetApp()" title="Briefing verwerfen & Reset">
                 <div class="emergency-reset-inner">↻</div>
@@ -331,6 +334,10 @@
                     <span class="audio-btn-label">DISPATCH</span>
                     <div class="audio-led"></div>
                 </div>
+                <div class="audio-btn navcom-clear-btn" id="radioTransferBtn" onclick="openTransferModal()" style="width: 55px; color: #4da6ff !important;">
+                    <span class="audio-btn-label">DATA</span>
+                    <div class="audio-led"></div>
+                </div>
                 <div class="audio-btn navcom-clear-btn" id="radioClearBtn" onclick="resetApp()">
                     <span class="audio-btn-label">CLEAR</span>
                     <div class="audio-led"></div>
@@ -351,7 +358,7 @@
             
             <div class="mission-note-page front-note" id="notePage1">
                 <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
-                <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
+                <div class="briefing-export-pin" onclick="openTransferModal(); event.stopPropagation();" title="Flugdaten Transfer (MSFS & Code)">💾</div>
                 <div class="briefing-pdf-pin" onclick="generateBriefingPDF(); event.stopPropagation();" title="Briefing Pack als PDF drucken">📄</div>
                 <div class="page-number">Seite 1</div>
                 <h2 id="mTitle"></h2>
@@ -381,7 +388,7 @@
 
             <div class="mission-note-page back-note" id="notePage2">
                 <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
-                <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
+                <div class="briefing-export-pin" onclick="openTransferModal(); event.stopPropagation();" title="Flugdaten Transfer (MSFS & Code)">💾</div>
                 <div class="briefing-pdf-pin" onclick="generateBriefingPDF(); event.stopPropagation();" title="Briefing Pack als PDF drucken">📄</div>
                 <div class="page-number">Seite 2</div>
                 <h2 class="wiki-title" style="margin-bottom: 2px;">Nav-Log</h2>
@@ -402,7 +409,7 @@
 
             <div class="mission-note-page third-note" id="notePage3">
                 <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
-                <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
+                <div class="briefing-export-pin" onclick="openTransferModal(); event.stopPropagation();" title="Flugdaten Transfer (MSFS & Code)">💾</div>
                 <div class="briefing-pdf-pin" onclick="generateBriefingPDF(); event.stopPropagation();" title="Briefing Pack als PDF drucken">📄</div>
                 <div class="page-number">Seite 3</div>
                 <h2 class="wiki-title">Start-Info</h2>
@@ -428,7 +435,7 @@
 
             <div class="mission-note-page fourth-note" id="notePage4">
                 <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
-                <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
+                <div class="briefing-export-pin" onclick="openTransferModal(); event.stopPropagation();" title="Flugdaten Transfer (MSFS & Code)">💾</div>
                 <div class="briefing-pdf-pin" onclick="generateBriefingPDF(); event.stopPropagation();" title="Briefing Pack als PDF drucken">📄</div>
                 <div class="page-number">Seite 4</div>
                 <h2 class="wiki-title">Ziel-Info</h2>
@@ -454,7 +461,7 @@
 
             <div class="mission-note-page fifth-note" id="notePage5" style="display:none;">
                 <div class="briefing-save-pin" onclick="pinCurrentFlight(); event.stopPropagation();" title="Flug ans Hangar-Board heften">📌</div>
-                <div class="briefing-export-pin" onclick="exportMission(); event.stopPropagation();" title="Flug als Code kopieren">🔗</div>
+                <div class="briefing-export-pin" onclick="openTransferModal(); event.stopPropagation();" title="Flugdaten Transfer (MSFS & Code)">💾</div>
                 <div class="briefing-pdf-pin" onclick="generateBriefingPDF(); event.stopPropagation();" title="Briefing Pack als PDF drucken">📄</div>
                 <div class="page-number">Seite 5</div>
                 <h2 class="wiki-title" style="margin-bottom: 2px;">Vertical Profile</h2>
@@ -785,6 +792,40 @@
             <button class="btn-main" style="padding:12px; font-size:14px; text-transform:none;" onclick="executePin('private')">👤 An mein privates Brett</button>
             <button class="btn-main" style="padding:12px; font-size:14px; text-transform:none; background:linear-gradient(to bottom, #4da6ff, #1a73e8);" id="btnPinGroup" onclick="executePin('group')">👥 An das Crew-Brett</button>
             <button class="btn-preset" style="padding:12px; margin-top:5px;" onclick="closePinModal()">❌ Abbrechen</button>
+        </div>
+    </div>
+</div>
+
+<div id="transferModalOverlay" class="pin-modal-overlay">
+    <div class="pin-modal-box" style="width: 340px;">
+        <h3 style="margin-top:0; color: #fff; margin-bottom: 8px; font-family: 'Arial', sans-serif;">💾 Flugdaten Transfer</h3>
+        <p style="color: #aaa; font-size: 13px; margin:0 0 20px 0;">Exportiere oder importiere Routen für den MSFS oder als Text-Code zum Teilen.</p>
+        
+        <div style="display:flex; flex-direction:column; gap:8px; margin-bottom: 15px; text-align: left;">
+            <strong style="color: #4da6ff; font-size: 12px; border-bottom: 1px solid #444; padding-bottom: 4px;">EXPORT (Speichern)</strong>
+            <button class="btn-main" style="padding:10px; font-size:13px; text-transform:none;" onclick="exportMSFS()">✈️ Als MSFS Flugplan (.pln)</button>
+            <button class="btn-preset" style="padding:10px; font-size:13px; text-transform:none;" onclick="exportMission()">📋 Als Text-Code kopieren</button>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:8px; text-align: left;">
+            <strong style="color: #f2c12e; font-size: 12px; border-bottom: 1px solid #444; padding-bottom: 4px;">IMPORT (Laden)</strong>
+            <button class="btn-main" style="padding:10px; font-size:13px; text-transform:none; background:linear-gradient(to bottom, #f2c12e, #a88212); color: #111;" onclick="document.getElementById('msfsFileInput').click()">📂 MSFS Flugplan laden (.pln)</button>
+            <button class="btn-preset" style="padding:10px; font-size:13px; text-transform:none;" onclick="importMission()">📋 Text-Code einfügen</button>
+        </div>
+
+        <button class="btn-preset" style="padding:12px; margin-top:15px; width: 100%;" onclick="closeTransferModal()">❌ Schließen</button>
+        <input type="file" id="msfsFileInput" accept=".pln" style="display: none;" onchange="importMSFS(event)">
+    </div>
+</div>
+
+<div id="importActionModalOverlay" class="pin-modal-overlay">
+    <div class="pin-modal-box" style="width: 340px;">
+        <h3 style="margin-top:0; color: #fff; margin-bottom: 8px; font-family: 'Arial', sans-serif;">📂 Externer Flugplan</h3>
+        <p id="importActionText" style="color: #aaa; font-size: 13px; margin:0 0 20px 0;">Externe Route erkannt.</p>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+            <button class="btn-main" style="padding:12px; font-size:14px; text-transform:none;" onclick="executeMSFSImport('private')">📝 Als Blanko-Flug importieren</button>
+            <button class="btn-main" style="padding:12px; font-size:14px; text-transform:none; background:linear-gradient(to bottom, #4da6ff, #1a73e8);" onclick="executeMSFSImport('ki')">🤖 KI-Briefing generieren</button>
+            <button class="btn-preset" style="padding:12px; margin-top:5px;" onclick="cancelMSFSImport()">❌ Abbrechen</button>
         </div>
     </div>
 </div>

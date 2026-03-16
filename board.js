@@ -1114,3 +1114,253 @@ window.generateBriefingPDF = async function() {
         alert('PDF konnte nicht erstellt werden: ' + e.message);
     }
 };
+
+// ==========================================
+// V87: MSFS .PLN EXPORT / IMPORT & TRANSFER HUB
+// ==========================================
+window.openTransferModal = function() {
+    document.getElementById('transferModalOverlay').style.display = 'flex';
+};
+
+window.closeTransferModal = function() {
+    document.getElementById('transferModalOverlay').style.display = 'none';
+};
+
+function formatMSFSCoords(lat, lon) {
+    const latDir = lat >= 0 ? 'N' : 'S';
+    const lonDir = lon >= 0 ? 'E' : 'W';
+    lat = Math.abs(lat); lon = Math.abs(lon);
+    const latDeg = Math.floor(lat), latMin = Math.floor((lat - latDeg) * 60), latSec = ((lat - latDeg - latMin/60) * 3600).toFixed(2);
+    const lonDeg = Math.floor(lon), lonMin = Math.floor((lon - lonDeg) * 60), lonSec = ((lon - lonDeg - lonMin/60) * 3600).toFixed(2);
+    return `${latDir}${latDeg}° ${latMin}' ${String(latSec).padStart(5, '0')}", ${lonDir}${String(lonDeg).padStart(3, '0')}° ${lonMin}' ${String(lonSec).padStart(5, '0')}"`;
+}
+
+function parseMSFSCoords(coordStr) {
+    const regex = /([NS])\s*(\d+)°\s*(\d+)'\s*([\d.]+)"?,\s*([EW])\s*(\d+)°\s*(\d+)'\s*([\d.]+)"?/i;
+    const match = coordStr.match(regex);
+    if (!match) return null;
+    let lat = parseInt(match[2]) + parseInt(match[3])/60 + parseFloat(match[4])/3600;
+    if (match[1].toUpperCase() === 'S') lat = -lat;
+    let lon = parseInt(match[6]) + parseInt(match[7])/60 + parseFloat(match[8])/3600;
+    if (match[5].toUpperCase() === 'W') lon = -lon;
+    return { lat: parseFloat(lat.toFixed(6)), lng: parseFloat(lon.toFixed(6)) };
+}
+
+window.exportMSFS = function() {
+    if (!currentMissionData || routeWaypoints.length < 2) { alert("Kein aktiver Flugplan!"); return; }
+    const activeData = localStorage.getItem('ga_active_mission');
+    const secretBackup = activeData ? btoa(encodeURIComponent(activeData)) : "";
+    const cruiseAlt = document.getElementById('altSlider')?.value || 4500;
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<SimBase.Document Type="AceXML" version="1,0">\n  <Descr>AceXML Document</Descr>\n  <FlightPlan.FlightPlan>\n    <Title>${currentStartICAO} to ${currentDestICAO}</Title>\n    <FPType>VFR</FPType>\n    <CruisingAlt>${cruiseAlt}</CruisingAlt>\n    <DepartureID>${currentStartICAO}</DepartureID>\n    <DepartureLLA>${formatMSFSCoords(routeWaypoints[0].lat, routeWaypoints[0].lng || routeWaypoints[0].lon)}, +000000.00</DepartureLLA>\n    <DestinationID>${currentDestICAO}</DestinationID>\n    <DestinationLLA>${formatMSFSCoords(routeWaypoints[routeWaypoints.length-1].lat, routeWaypoints[routeWaypoints.length-1].lng || routeWaypoints[routeWaypoints.length-1].lon)}, +000000.00</DestinationLLA>\n    <Descr>${currentMissionData.mission} - GA_DISPATCHER_BACKUP[${secretBackup}]</Descr>\n    <AppVersion>\n      <AppVersionMajor>11</AppVersionMajor>\n      <AppVersionBuild>282174</AppVersionBuild>\n    </AppVersion>\n`;
+    
+    routeWaypoints.forEach((wp, i) => {
+        let wpName = wp.name ? wp.name.replace(/[^a-zA-Z0-9 ]/g, '').substring(0,10).trim() : `WP${i}`;
+        if(i===0) wpName = currentStartICAO;
+        if(i===routeWaypoints.length-1) wpName = currentDestICAO;
+        let alt = typeof vpAltWaypoints !== 'undefined' && vpAltWaypoints && vpAltWaypoints[i] ? vpAltWaypoints[i].altFt : cruiseAlt;
+        xml += `    <ATCWaypoint id="${wpName}">\n      <ATCWaypointType>User</ATCWaypointType>\n      <WorldPosition>${formatMSFSCoords(wp.lat, wp.lng || wp.lon)}, +${String(alt).padStart(6, '0')}.00</WorldPosition>\n    </ATCWaypoint>\n`;
+    });
+    xml += `  </FlightPlan.FlightPlan>\n</SimBase.Document>`;
+    
+    const blob = new Blob([xml], { type: 'text/xml' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `VFR_${currentStartICAO}_to_${currentDestICAO}.pln`;
+    a.click();
+    closeTransferModal();
+};
+
+let pendingMSFSImport = null;
+
+window.importMSFS = function(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const content = e.target.result;
+        document.getElementById('msfsFileInput').value = ''; 
+        
+        const backupMatch = content.match(/GA_DISPATCHER_BACKUP\[(.*?)\]/);
+        if (backupMatch && backupMatch[1]) {
+            try {
+                const decoded = decodeURIComponent(atob(backupMatch[1]));
+                const state = JSON.parse(decoded);
+                localStorage.setItem('ga_active_mission', JSON.stringify(state));
+                restoreMissionState(state);
+                closeTransferModal();
+                alert("✅ Eigener Flugplan inkl. KI-Briefing erfolgreich wiederhergestellt!");
+                setTimeout(() => {
+                    if (typeof map !== 'undefined' && map && routeWaypoints.length >= 2) {
+                        map.fitBounds(L.latLngBounds(routeWaypoints), { padding: [40, 40] });
+                        updateMiniMap();
+                    }
+                }, 300);
+                return;
+            } catch(err) { console.warn("Backup Code fehlerhaft, parse regulär."); }
+        }
+
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(content, "text/xml");
+        const waypoints = xmlDoc.getElementsByTagName("ATCWaypoint");
+        if (!waypoints || waypoints.length < 2) { alert("Keine gültigen Wegpunkte in dieser .pln gefunden."); return; }
+
+        let newRoute = [];
+        let startIcao = xmlDoc.getElementsByTagName("DepartureID")[0]?.textContent || "START";
+        let destIcao = xmlDoc.getElementsByTagName("DestinationID")[0]?.textContent || "DEST";
+        
+        for (let i = 0; i < waypoints.length; i++) {
+            const wp = waypoints[i];
+            const wpId = wp.getAttribute("id") || `WP${i}`;
+            const posTag = wp.getElementsByTagName("WorldPosition")[0];
+            if (posTag) {
+                const coords = parseMSFSCoords(posTag.textContent);
+                if (coords) {
+                    coords.name = wpId;
+                    newRoute.push(coords);
+                }
+            }
+        }
+
+        if (newRoute.length < 2) { alert("Koordinaten konnten nicht gelesen werden."); return; }
+
+        const cruiseAltTag = xmlDoc.getElementsByTagName("CruisingAlt")[0];
+        let cruiseAlt = cruiseAltTag ? parseInt(cruiseAltTag.textContent) : 4500;
+        if (isNaN(cruiseAlt) || cruiseAlt < 1000) cruiseAlt = 4500;
+
+        pendingMSFSImport = { newRoute, startIcao, destIcao, cruiseAlt };
+        
+        closeTransferModal();
+        document.getElementById('importActionText').innerText = `Externe Route (${newRoute.length} Wegpunkte) erkannt!\nWie möchtest du diesen Flugplan laden?`;
+        document.getElementById('importActionModalOverlay').style.display = 'flex';
+    };
+    reader.readAsText(file);
+};
+
+window.cancelMSFSImport = function() {
+    document.getElementById('importActionModalOverlay').style.display = 'none';
+    pendingMSFSImport = null;
+};
+
+window.executeMSFSImport = async function(mode) {
+    document.getElementById('importActionModalOverlay').style.display = 'none';
+    if (!pendingMSFSImport) return;
+    
+    const { newRoute, startIcao, destIcao, cruiseAlt } = pendingMSFSImport;
+    pendingMSFSImport = null;
+    
+    routeWaypoints = newRoute;
+    currentStartICAO = startIcao;
+    currentDestICAO = destIcao;
+    
+    const sData = await getAirportData(startIcao);
+    const dData = await getAirportData(destIcao);
+    currentSName = sData ? (sData.n || startIcao) : startIcao;
+    currentDName = dData ? (dData.n || destIcao) : destIcao;
+    
+    const nav = calcNav(newRoute[0].lat, newRoute[0].lng, newRoute[newRoute.length-1].lat, newRoute[newRoute.length-1].lng);
+    let totalDist = 0;
+    for (let i = 0; i < newRoute.length - 1; i++) {
+         totalDist += calcNav(newRoute[i].lat, newRoute[i].lng, newRoute[i+1].lat, newRoute[i+1].lng).dist;
+    }
+    
+    document.getElementById('startLoc').value = startIcao;
+    document.getElementById('destLoc').value = destIcao;
+    if (document.getElementById('altSlider')) {
+        document.getElementById('altSlider').value = cruiseAlt;
+        handleSliderChange('alt', cruiseAlt);
+    }
+
+    if (mode === 'ki') {
+        const maxSeats = parseInt(document.getElementById("maxSeats")?.value || 4);
+        const paxText = `${Math.floor(Math.random() * Math.max(1, maxSeats - 1)) + 1} PAX`;
+        const cargoText = `${Math.floor(Math.random() * 300) + 20} lbs`;
+        
+        document.getElementById('searchIndicator').innerText = "Kontaktiere KI-Dispatcher...";
+        
+        const isPOI = (startIcao === destIcao);
+        let m = await fetchGeminiMission(currentSName, currentDName, totalDist, isPOI, paxText, cargoText);
+        
+        // Lokaler Fallback, falls Gemini aus ist oder abbricht
+        if (!m) {
+            const availM = typeof missions !== 'undefined' ? missions.filter(ms => (totalDist < 50 || ms.cat === "std")) : [{ t: "Privater Flugplan", s: "Standard Flug nach Instrumenten oder Sicht." }];
+            let history = JSON.parse(localStorage.getItem('ga_std_history')) || [];
+            let freshM = availM.filter(ms => !history.includes(ms.t));
+            if (freshM.length === 0) { freshM = availM; history = []; }
+            m = freshM[Math.floor(Math.random() * freshM.length)] || availM[0];
+            history.push(m.t);
+            if (history.length > 30) history.shift();
+            localStorage.setItem('ga_std_history', JSON.stringify(history));
+            if (m.cat === "trn" || m.cat === "cargo") { m.pax = "0 PAX"; }
+            m.i = "📋";
+        }
+        
+        let missionTitle = `${m.i ? m.i + ' ' : ''}${m.t}`;
+        let missionStory = m.s;
+        let finalPax = m.pax || paxText;
+        let finalCargo = m.cargo || cargoText;
+        
+        currentMissionData = { start: startIcao, dest: destIcao, poiName: isPOI ? currentDName : null, mission: missionTitle, dist: totalDist, ac: typeof selectedAC !== 'undefined' ? selectedAC : "N/A", heading: nav.brng };
+        populateBriefingUI(missionTitle, missionStory, finalPax, finalCargo, isPOI, newRoute, sData, dData);
+        
+    } else {
+        const isPOI = (startIcao === destIcao);
+        currentMissionData = { start: startIcao, dest: destIcao, poiName: isPOI ? currentDName : null, mission: "Privater Import-Flug", dist: totalDist, ac: typeof selectedAC !== 'undefined' ? selectedAC : "N/A", heading: nav.brng };
+        populateBriefingUI("Privater Flugplan", "Externer Flugplan importiert aus Microsoft Flight Simulator.", "N/A", "N/A", isPOI, newRoute, sData, dData);
+    }
+};
+
+function populateBriefingUI(mTitle, mStory, mPax, mCargo, isPOI, newRoute, sData, dData) {
+    document.getElementById("mTitle").innerHTML = mTitle;
+    document.getElementById("mStory").innerText = mStory;
+    
+    document.getElementById("mDepICAO").innerText = currentStartICAO;
+    document.getElementById("mDepName").innerText = currentSName;
+    document.getElementById("mDepCoords").innerText = sData ? `${sData.lat.toFixed(4)}, ${sData.lon.toFixed(4)}` : `${newRoute[0].lat.toFixed(4)}, ${newRoute[0].lng.toFixed(4)}`;
+    
+    const wikiDepNameEl = document.getElementById('wikiDepNameDisplay');
+    if (wikiDepNameEl) wikiDepNameEl.innerText = `${currentStartICAO} – ${currentSName}`;
+
+    document.getElementById("destIcon").innerText = isPOI ? "🎯" : "🛬";
+    document.getElementById("mDestICAO").innerText = isPOI ? "POI" : currentDestICAO;
+    document.getElementById("mDestName").innerText = currentDName;
+    document.getElementById("mDestCoords").innerText = dData ? `${dData.lat.toFixed(4)}, ${dData.lon.toFixed(4)}` : `${newRoute[newRoute.length-1].lat.toFixed(4)}, ${newRoute[newRoute.length-1].lng.toFixed(4)}`;
+    
+    const wikiDestNameEl = document.getElementById('wikiDestNameDisplay');
+    if (wikiDestNameEl) wikiDestNameEl.innerText = `${isPOI ? 'POI' : currentDestICAO} – ${currentDName}`;
+
+    document.getElementById("mPay").innerText = mPax; 
+    document.getElementById("mWeight").innerText = mCargo;
+    
+    document.getElementById("destRwyContainer").style.display = isPOI ? "none" : "block";
+    if (document.getElementById("wikiDestRwyText")) document.getElementById("wikiDestRwyText").style.display = isPOI ? "none" : "block";
+    const destSwitchRow = document.getElementById("destSwitchRow"); if (destSwitchRow) destSwitchRow.style.display = isPOI ? "none" : "flex";
+    const destLinks = document.getElementById("wikiDestLinks"); if (destLinks) destLinks.style.display = isPOI ? "none" : "block";
+
+    document.getElementById("briefingBox").style.display = "block";
+    
+    fetchRunwayDetails(newRoute[0].lat, newRoute[0].lng, 'mDepRwy', currentStartICAO);
+    if (!isPOI) fetchRunwayDetails(newRoute[newRoute.length-1].lat, newRoute[newRoute.length-1].lng, 'mDestRwy', currentDestICAO);
+    
+    fetchAreaDescription(newRoute[0].lat, newRoute[0].lng, 'wikiDepDescText', null, currentStartICAO, 'wikiDepImageContainer', 'wikiDepImage');
+    fetchAreaDescription(newRoute[newRoute.length-1].lat, newRoute[newRoute.length-1].lng, 'wikiDestDescText', isPOI ? currentDName : null, isPOI ? null : currentDestICAO, 'wikiDestImageContainer', 'wikiDestImage');
+
+    currentDepFreq = ""; currentDestFreq = "";
+    fetchAirportFreq(currentStartICAO, 'wikiDepFreqText', 'dep');
+    if (!isPOI) fetchAirportFreq(currentDestICAO, 'wikiDestFreqText', 'dest');
+    
+    loadMetarWidget(currentStartICAO, 'metarContainerDep', newRoute[0].lat, newRoute[0].lng);
+    loadMetarWidget(isPOI ? null : currentDestICAO, 'metarContainerDest', newRoute[newRoute.length-1].lat, newRoute[newRoute.length-1].lng);
+
+    document.getElementById('searchIndicator').innerText = "Flugplan bereit.";
+    
+    // WICHTIG: renderMainRoute triggert das Vertical Profile (inkl. Wetter) sauber!
+    renderMainRoute();
+    map.fitBounds(L.latLngBounds(routeWaypoints), { padding: [40, 40] });
+    
+    setTimeout(() => { 
+        updateMiniMap();
+        // triggerVerticalProfileUpdate() hier entfernt, um Wetter-Abbruch zu verhindern
+        window.debouncedSaveMissionState();
+    }, 500);
+}
