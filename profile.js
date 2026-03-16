@@ -281,6 +281,8 @@ function triggerVerticalProfileUpdate() {
         
         if (window._lastVpRouteKey !== cacheKey) {
             vpAltWaypoints = []; vpSegmentAlts = []; vpHighResData = null; vpZoomLevel = 100;
+            vpWeatherData = null;
+            if (typeof renderWeatherMarkers === 'function') renderWeatherMarkers();
             const zd = document.getElementById('vpZoomDisplay'); if (zd) zd.textContent = '0%';
             window._lastVpRouteKey = cacheKey;
         }
@@ -314,14 +316,14 @@ function triggerVerticalProfileUpdate() {
             
             // 3. PARALLELER FETCH: Wetter & Overpass
             const fetchWetter = async () => {
-                if (!vpShowClouds) return;
+                if (!vpShowClouds && !(typeof window.vpShowMapMetar !== 'undefined' && window.vpShowMapMetar)) return;
                 const btnCl = document.getElementById('btnToggleClouds');
                 if (btnCl) btnCl.classList.add('vp-loading-pulse');
                 vpWeatherData = await fetchRouteWeather(routeWaypoints, vpElevationData, currentSignal);
                 if (btnCl) btnCl.classList.remove('vp-loading-pulse');
                 
-                // FIX: Zwingt Layer 1 zum sofortigen Zeichnen, damit Wolken & Regen zeitgleich erscheinen!
                 window.vpBgNeedsUpdate = true; 
+                if (typeof renderWeatherMarkers === 'function') renderWeatherMarkers(); // Sofort zeichnen, nicht auf Overpass warten!
             };
 
             const fetchOverpass = async () => {
@@ -354,7 +356,7 @@ function triggerVerticalProfileUpdate() {
                 }
             };
 
-            // Führe beide schweren Netzwerk-Tasks komplett parallel aus!
+            // Führe beide schweren Netzwerk-Tasks parallel aus
             await Promise.all([fetchWetter(), fetchOverpass()]);
             if (status) status.textContent = vpElevationData.length + ' Punkte & API-Daten geladen';
             
@@ -486,7 +488,7 @@ async function fetchRouteWeather(routePts, elevData, signal) {
     }
 
     const results = await Promise.all(promises);
-    if (signal && signal.aborted) return null;
+    if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
     let seen = new Set();
     let totalInChunks = 0;
@@ -495,10 +497,18 @@ async function fetchRouteWeather(routePts, elevData, signal) {
         if (arr && arr.length) {
             console.log(`[Wetter] Chunk ${idx + 1}: ${arr.length} METAR-Stationen geliefert.`);
             totalInChunks += arr.length;
+            
+            // BULK CACHE: Füttert die Widgets sofort mit den heruntergeladenen Daten!
+            const useBulk = (typeof gpsState !== 'undefined' && gpsState.metarCache);
+            
             arr.forEach(m => {
-                if (!seen.has(m.icaoId)) {
+                if (m && m.icaoId && !seen.has(m.icaoId)) {
                     seen.add(m.icaoId);
                     activeMetars.push(m);
+                    
+                    if (useBulk) {
+                        gpsState.metarCache[m.icaoId] = { data: [m], isFallback: false, foundIcao: m.icaoId };
+                    }
                 }
             });
         } else {
@@ -533,34 +543,38 @@ async function fetchRouteWeather(routePts, elevData, signal) {
             let match, lowestBase = Infinity;
             
             while((match = cloudRegex.exec(raw)) !== null) {
-                const type = match[1];
                 const agl = parseInt(match[2], 10) * 100;
                 const msl = Math.round(agl + stnElevFt);
                 if (msl < lowestBase) lowestBase = msl;
-                clouds.push({ type, baseAgl: agl, baseMsl: msl });
+                clouds.push({ type: match[1], baseAgl: agl, baseMsl: msl });
             }
             
             const hasRain = /\b(-|\+)?(RA|DZ|SH|SHRA)\b/i.test(raw);
             const hasSnow = /\b(-|\+)?(SN|SG|PL|SHSN)\b/i.test(raw);
             const hasTS = /\b(-|\+)?(TS|TSRA|CB)\b/i.test(raw);
             
-            if(clouds.length > 0 || hasRain || hasSnow || hasTS) {
-                const visuals = { puffs: [], drops: [], flashes: [] };
-                if (clouds.length > 0) {
-                    for(let c=0; c<25; c++) visuals.puffs.push({ x: Math.random(), y: Math.random(), r: Math.random(), op: Math.random() });
-                }
-                if (hasRain || hasSnow) {
-                    for(let d=0; d<120; d++) visuals.drops.push({ x: Math.random(), y: Math.random(), spd: Math.random() });
-                }
-                if (hasTS) {
-                    for(let f=0; f<2; f++) visuals.flashes.push({ x: Math.random(), pts: [Math.random(), Math.random(), Math.random(), Math.random()] });
-                }
-                zones.push({
-                    distNM: bestPt.distNM, icao: closestMetar.icaoId, stnDist: Math.round(minMetarDist), clouds: clouds,
-                    lowestBase: lowestBase !== Infinity ? lowestBase : 5000,
-                    weather: { hasRain, hasSnow, hasTS }, visuals: visuals
-                });
+            const visuals = { puffs: [], drops: [], flashes: [] };
+            if (clouds.length > 0) {
+                for(let c=0; c<25; c++) visuals.puffs.push({ x: Math.random(), y: Math.random(), r: Math.random(), op: Math.random() });
             }
+            if (hasRain || hasSnow) {
+                for(let d=0; d<120; d++) visuals.drops.push({ x: Math.random(), y: Math.random(), spd: Math.random() });
+            }
+            if (hasTS) {
+                for(let f=0; f<2; f++) visuals.flashes.push({ x: Math.random(), pts: [Math.random(), Math.random(), Math.random(), Math.random()] });
+            }
+            
+            // IMMER pushen, damit auch wolkenlose Stationen als Marker auf der Karte landen!
+            zones.push({
+                distNM: bestPt.distNM, icao: closestMetar.icaoId, stnDist: Math.round(minMetarDist), clouds: clouds,
+                lowestBase: lowestBase !== Infinity ? lowestBase : 5000,
+                weather: { hasRain, hasSnow, hasTS }, visuals: visuals,
+                stnLat: closestMetar.lat, stnLon: closestMetar.lon,
+                fltCat: closestMetar.fltcat || closestMetar.fltCat || "VFR",
+                raw: raw,
+                wdir: closestMetar.wdir, 
+                wspd: closestMetar.wspd
+            });
         }
     }
 
@@ -678,8 +692,8 @@ function vpDrawTerrainCover(ctx, xOf, yOf, elevData, viewMinX, viewMaxX, zoomFac
             if (!feat._render) continue;
             
             // FIX: X und Y live berechnen, damit Schilder mit der Bodenlinie wandern
-            const px = xOf(feat.distNM);
-            const py = getElevY(feat.distNM);
+            const px = xOf(feat._render.distNM);
+            const py = getElevY(feat._render.distNM);
             if (px < viewMinX - 50 || px > viewMaxX + 50) continue;
             
             if (feat.type === 'river') {
@@ -1154,14 +1168,19 @@ function vpDrawAnimatedWeather(ctx, xOf, yOf, totalDist, elevData, timeMs, viewM
                 if (zone.weather.hasSnow) {
                     const sway = Math.sin(timeMs * 0.002 + d) * 4 * drop.spd;
                     const snowDrift = currentYOffset * 0.15; 
-                    const sx = dropX + sway - snowDrift;
+                    let rawSx = dropX + sway - snowDrift;
+                    // FIX: Zwingt den Schnee durch Modulo-Wrap immer in der exakten Stations-Breite (Zone) zu bleiben!
+                    const sx = startX + ((rawSx - startX) % width + width) % width;
+                    
                     ctx.moveTo(sx, sy);
                     ctx.arc(sx, sy, 0.8 + drop.spd, 0, Math.PI*2);
                 } else {
                     const tailLength = 6 + drop.spd * 8;
                     const windSlant = 2 + drop.spd * 4; 
                     const driftRatio = windSlant / tailLength;
-                    const currentX = dropX - (currentYOffset * driftRatio);
+                    let rawX = dropX - (currentYOffset * driftRatio);
+                    // FIX: Zwingt den Regen durch Modulo-Wrap immer in der exakten Stations-Breite (Zone) zu bleiben!
+                    const currentX = startX + ((rawX - startX) % width + width) % width;
 
                     ctx.moveTo(currentX, sy);
                     ctx.lineTo(currentX - windSlant, sy + tailLength); 
@@ -2892,7 +2911,7 @@ function vpToggleClouds() {
     if (vpShowClouds && window._lastVpRouteKey) {
         triggerVerticalProfileUpdate();
     } else {
-        window.vpBgNeedsUpdate = true; // FIX: Hintergrund zum Löschen zwingen
+        window.vpBgNeedsUpdate = true;
         if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
     }
 }
