@@ -77,6 +77,24 @@ async function fetchProfileLandmarks(elevData) {
 
 
 
+// Helfer zum Entdoppeln von Hindernissen (nimmt das höchste in einem 0.5 NM Fenster)
+function deduplicateFeatures(features) {
+    let buckets = {};
+    features.forEach(f => {
+        let bIdx = Math.floor(f.distNM / 0.5);
+        if (!buckets[bIdx]) buckets[bIdx] = [];
+        buckets[bIdx].push(f);
+    });
+    let final = [];
+    for (let k in buckets) {
+        buckets[k].sort((a,b) => b.hFt - a.hFt);
+        let rep = buckets[k][0];
+        rep.count = buckets[k].length;
+        final.push(rep);
+    }
+    return final;
+}
+
 async function fetchProfileObstacles(elevData, signal) {
     if (!elevData || elevData.length < 2) return [];
 
@@ -101,42 +119,62 @@ async function fetchProfileObstacles(elevData, signal) {
         }
     }
 
-    const BATCH_SIZE = 5; // 125 NM pro Batch - Reduziert API-Aufrufe auf 1-2 pro Flug!
+    const BATCH_SIZE = 2; // 50 NM pro Batch - Schnelleres optisches Feedback
     let rawObstacles = [];
     let anySuccess = false;
     let rawLinearFeatures = [];
 
+    // Array der offiziellen Overpass-Instanzen für Load-Balancing (Round-Robin)
+    const overpassServers = [
+        'https://overpass-api.de/api/interpreter',
+        'https://lz4.overpass-api.de/api/interpreter',
+        'https://z.overpass-api.de/api/interpreter'
+    ];
+
     console.log(`[Overpass] Starte Hindernis-Suche. ${bboxes.length} Boxen total. Teile in Batches von ${BATCH_SIZE}.`);
 
+    let currentBackoff = 15000; // FIX: Startet exakt bei den 15s, die Overpass in der Doku verlangt!
+
     for (let i = 0; i < bboxes.length; i += BATCH_SIZE) {
+        if (signal && signal.aborted) break; 
+
         const batch = bboxes.slice(i, i + BATCH_SIZE);
         let queryBody = batch.map(b => `node["generator:source"="wind"](${b});node["man_made"~"mast|tower"]["height"](${b});way["highway"="motorway"](${b});way["waterway"="river"](${b});`).join('');
         let query = `[out:json][timeout:25];(${queryBody});out geom qt;`;
 
         const batchNum = Math.floor(i / BATCH_SIZE) + 1;
         const totalBatches = Math.ceil(bboxes.length / BATCH_SIZE);
-        console.log(`[Overpass] Fetching Batch ${batchNum} / ${totalBatches}...`);
+        
+        // Round-Robin Logik
+        const primaryIdx = (batchNum - 1) % overpassServers.length;
+        const fallbackIdx = (batchNum) % overpassServers.length;
 
-        let retries = 3; // Erhöht auf 3 Versuche
+        console.log(`[Overpass] Fetching Batch ${batchNum} / ${totalBatches} via Server ${primaryIdx}...`);
+
+        let retries = 5; // FIX: Mehr Versuche, da die Wartezeit nun länger ist
         let batchSuccess = false;
 
         while (retries > 0 && !batchSuccess) {
+            if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError'); 
+            
             try {
-                if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
-
-                // 1. Versuch: Hauptserver
-                let res = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`, { signal });
+                let res = await fetch(`${overpassServers[primaryIdx]}?data=${encodeURIComponent(query)}`, { signal });
                 
-                // 2. Versuch: Wenn Hauptserver zickt, sofort auf Fallback lz4 wechseln
-                if (!res.ok) {
-                    console.warn(`[Overpass] Hauptserver Fehler (Status: ${res.status}) bei Batch ${batchNum}. Versuche lz4 Fallback...`);
-                    res = await fetch(`https://lz4.overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`, { signal });
+                if (!res.ok && res.status !== 429) {
+                    if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
+                    console.warn(`[Overpass] Server ${primaryIdx} Fehler (${res.status}). Versuche Fallback ${fallbackIdx}...`);
+                    res = await fetch(`${overpassServers[fallbackIdx]}?data=${encodeURIComponent(query)}`, { signal });
                 }
 
-                // 3. Auswertung: Bei 429 drastisch längere Pause einlegen!
-                if (res.status === 429) {
-                    console.warn(`[Overpass] Beide Server blocken (429 Rate Limit) bei Batch ${batchNum}. Warte 5s (Cool-Down)...`);
-                    await new Promise(r => setTimeout(r, 5000)); // Längere Strafe absitzen
+                if (!res.ok) {
+                    if (res.status === 429) {
+                        console.warn(`[Overpass] Rate Limit (429)! Server verlangt Abklingzeit. Warte ${currentBackoff / 1000}s...`);
+                        await new Promise(r => setTimeout(r, currentBackoff));
+                        currentBackoff += 5000; // Moderater Anstieg (15s -> 20s -> 25s) statt extremer Verdopplung
+                    } else {
+                        console.warn(`[Overpass] Server down (Status: ${res.status}). Warte 5s...`);
+                        await new Promise(r => setTimeout(r, 5000));
+                    }
                     retries--;
                     continue;
                 }
@@ -216,10 +254,12 @@ async function fetchProfileObstacles(elevData, signal) {
                     }
                     // Globales Array sofort updaten und neu zeichnen lassen
                     vpObstacles = tempFinal;
+                    vpLinearFeatures = rawLinearFeatures.sort((a,b) => a.distNM - b.distNM).filter((f, idx, arr) => idx === 0 || arr[idx-1].name !== f.name || Math.abs(arr[idx-1].distNM - f.distNM) > 1.0);
+                    
+                    window.vpBgNeedsUpdate = true; // FIX: Zwingt Layer 1 (Hintergrund), die Flüsse/Straßen sofort zu zeichnen!
                     if (typeof window.throttledRenderProfiles === 'function') {
                         window.throttledRenderProfiles();
                     }
-                    vpLinearFeatures = rawLinearFeatures.sort((a,b) => a.distNM - b.distNM).filter((f, idx, arr) => idx === 0 || arr[idx-1].name !== f.name || Math.abs(arr[idx-1].distNM - f.distNM) > 1.0);
                     // -------------------------------------------------
 
                 } else {
@@ -237,15 +277,39 @@ async function fetchProfileObstacles(elevData, signal) {
                 if (retries > 0) await new Promise(r => setTimeout(r, 3000));
             }
         }
-
         if (!batchSuccess) {
-            console.error(`[Overpass] Batch ${batchNum} endgültig gescheitert. Breche ab, um unvollständigen Cache zu verhindern.`);
-            return null;
+            console.error(`[Overpass] Batch ${batchNum} gescheitert. Liefere bisher gesammelte partielle Daten.`);
+            break; // Schleife abbrechen, aber bereits gesammelte Daten behalten
         }
 
-        // Minimale Atempause (nur nötig bei Flügen > 125 NM)
+        // --- Inkrementelles Rendering ---
+        if (rawObstacles.length > 0 || rawLinearFeatures.length > 0) {
+            if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
+            
+            let tempFinal = deduplicateFeatures(rawObstacles);
+            tempFinal.forEach(obs => {
+                const elevNode = elevData.reduce((prev, curr) => Math.abs(curr.distNM - obs.distNM) < Math.abs(prev.distNM - obs.distNM) ? curr : prev);
+                obs.groundElevFt = elevNode.elevFt;
+            });
+            
+            // FIX: Wir nutzen hier NICHT vpAnimFrameId, da das sonst die 60FPS Map-Schleife killt!
+            requestAnimationFrame(() => {
+                if (signal && !signal.aborted) {
+                    vpObstacles = tempFinal;
+                    vpLinearFeatures = rawLinearFeatures.sort((a,b) => a.distNM - b.distNM).filter((f, idx, arr) => idx === 0 || arr[idx-1].name !== f.name || Math.abs(arr[idx-1].distNM - f.distNM) > 1.0);
+                    
+                    window.vpBgNeedsUpdate = true; // Flüsse sofort im Hintergrund zeichnen
+                    if (typeof window.throttledRenderProfiles === 'function') {
+                        window.throttledRenderProfiles();
+                    }
+                }
+            });
+        }
+
+        // Dynamische Atempause zwischen Batches (hilft, den Bann zu vermeiden)
         if (i + BATCH_SIZE < bboxes.length) {
-            await new Promise(r => setTimeout(r, 300)); 
+            if (signal && signal.aborted) break;
+            await new Promise(r => setTimeout(r, 1500)); 
         }
     }
 
@@ -282,6 +346,8 @@ function triggerVerticalProfileUpdate() {
         if (window._lastVpRouteKey !== cacheKey) {
             vpAltWaypoints = []; vpSegmentAlts = []; vpHighResData = null; vpZoomLevel = 100;
             vpWeatherData = null;
+            vpObstacles = []; // NEU: Alte Hindernisse sofort löschen
+            vpLinearFeatures = []; // NEU: Alte Straßen/Flüsse sofort löschen
             if (typeof renderWeatherMarkers === 'function') renderWeatherMarkers();
             const zd = document.getElementById('vpZoomDisplay'); if (zd) zd.textContent = '0%';
             window._lastVpRouteKey = cacheKey;
@@ -348,6 +414,7 @@ function triggerVerticalProfileUpdate() {
                         if (result !== null) { 
                             vpObstacles = result.obs || [];
                             vpLinearFeatures = result.lin || [];
+                            window.vpBgNeedsUpdate = true; // FIX: Garantiert, dass der Hintergrund nach dem finalen Fetch aktualisiert wird
                             try { localStorage.setItem('ga_obs_combo_' + cacheKey, JSON.stringify(result)); window._lastObsRouteKey = cacheKey; } catch(e) {}
                         }
                     }
@@ -653,9 +720,12 @@ function vpDrawTerrainCover(ctx, xOf, yOf, elevData, viewMinX, viewMaxX, zoomFac
             return yOf(elevData[elevData.length-1].elevFt);
         };
         
-        // PERFORMANCE FIX: Layout nur 1x pro Zoom-Stufe UND maxAlt berechnen!
-        const layoutKey = zoomFactor.toFixed(2) + '_' + (maxAlt || 0).toFixed(0);
-        if (!window._vpLinearLayouts || window._vpLinearLayouts.key !== layoutKey) {
+        // PERFORMANCE FIX: Layout nur 1x pro Zoom-Stufe, maxAlt UND aktueller Route berechnen!
+        const routeKey = window._lastVpRouteKey || 'none';
+        const layoutKey = routeKey + '_' + zoomFactor.toFixed(2) + '_' + (maxAlt || 0).toFixed(0);
+        
+        // Neu berechnen, wenn sich der Cache-Key ändert ODER die Features noch keine Render-Daten haben
+        if (!window._vpLinearLayouts || window._vpLinearLayouts.key !== layoutKey || (vpLinearFeatures.length > 0 && !vpLinearFeatures[0]._render)) {
             let occupiedSigns = [];
             for (const feat of vpLinearFeatures) {
                 const px = xOf(feat.distNM);
@@ -692,8 +762,8 @@ function vpDrawTerrainCover(ctx, xOf, yOf, elevData, viewMinX, viewMaxX, zoomFac
             if (!feat._render) continue;
             
             // FIX: X und Y live berechnen, damit Schilder mit der Bodenlinie wandern
-            const px = xOf(feat._render.distNM);
-            const py = getElevY(feat._render.distNM);
+            const px = xOf(feat.distNM);
+            const py = getElevY(feat.distNM);
             if (px < viewMinX - 50 || px > viewMaxX + 50) continue;
             
             if (feat.type === 'river') {
@@ -729,9 +799,12 @@ function vpDrawLandmarks(ctx, xOf, yOf, elevData, totalDist, isDarkTheme, zoomFa
         return yOf(elevData[elevData.length-1].elevFt);
     };
     
-    // PERFORMANCE FIX: Kollisionen nur 1x pro Zoom-Stufe UND maxAlt berechnen
-    const layoutKey = zoomFactor.toFixed(2) + '_' + (maxAlt || 0).toFixed(0) + '_' + (window.vpShowLinear ? '1' : '0');
-    if (!window._vpLandmarkLayouts || window._vpLandmarkLayouts.key !== layoutKey) {
+    // PERFORMANCE FIX: Kollisionen nur 1x pro Zoom-Stufe, maxAlt UND aktueller Route berechnen
+    const routeKey = window._lastVpRouteKey || 'none';
+    const layoutKey = routeKey + '_' + zoomFactor.toFixed(2) + '_' + (maxAlt || 0).toFixed(0) + '_' + (window.vpShowLinear ? '1' : '0');
+    
+    // Neu berechnen, wenn sich der Cache-Key ändert ODER die Städte noch keine Render-Daten haben
+    if (!window._vpLandmarkLayouts || window._vpLandmarkLayouts.key !== layoutKey || (vpLandmarks.length > 0 && !vpLandmarks[0]._render)) {
         let globalOccupiedX = [];
         const nmPerPx = totalDist / (xOf(totalDist) - xOf(0));
         const edgePad = Math.min(2.5, totalDist * 0.05);
@@ -1232,10 +1305,6 @@ function computeFlightProfile(elevationData, cruiseAltFt, climbRateFpm, descentR
 
     const depElevFt = elevationData[0].elevFt;
     let destElevFt = elevationData[elevationData.length - 1].elevFt;
-    // If destination is a POI, stay at cruise altitude (no descent)
-    if (typeof currentMissionData !== 'undefined' && currentMissionData && currentMissionData.poiName) {
-        destElevFt = cruiseAltFt;
-    }
     const totalDistNM = elevationData[elevationData.length - 1].distNM;
 
     const climbFt = Math.max(0, cruiseAltFt - depElevFt);
@@ -1556,7 +1625,7 @@ function renderVerticalProfile(canvasId) {
 
         let wpLabel;
         if (i === 0) wpLabel = currentStartICAO || 'DEP';
-        else if (i === routeWaypoints.length - 1) wpLabel = (currentMissionData?.poiName ? 'POI' : currentDestICAO) || 'DEST';
+        else if (i === routeWaypoints.length - 1) wpLabel = currentDestICAO || 'DEST';
         else wpLabel = routeWaypoints[i].name ? routeWaypoints[i].name.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '').split(' ')[0] : 'WP' + i;
         if (wpLabel.length > 8) wpLabel = wpLabel.substring(0, 7) + '…';
 
@@ -2109,7 +2178,7 @@ function renderMapProfileFrames(timeMs) {
 
         fgCtx.beginPath(); fgCtx.setLineDash([2, 3]); fgCtx.strokeStyle = 'rgba(255,255,255,0.2)'; fgCtx.lineWidth = 1;
         fgCtx.moveTo(x, padTop); fgCtx.lineTo(x, padTop + plotH); fgCtx.stroke(); fgCtx.setLineDash([]);
-        let wpLabel = (i === 0) ? (currentStartICAO || 'DEP') : ((i === routeWaypoints.length - 1) ? ((currentMissionData?.poiName ? 'POI' : currentDestICAO) || 'DEST') : (routeWaypoints[i].name ? routeWaypoints[i].name.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '').split(' ')[0] : 'WP' + i));
+        let wpLabel = (i === 0) ? (currentStartICAO || 'DEP') : ((i === routeWaypoints.length - 1) ? (currentDestICAO || 'DEST') : (routeWaypoints[i].name ? routeWaypoints[i].name.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '').split(' ')[0] : 'WP' + i));
         if (!zoomFactor || zoomFactor < 2) { if (wpLabel.length > 6) wpLabel = wpLabel.substring(0, 5) + '…'; } else { if (wpLabel.length > 12) wpLabel = wpLabel.substring(0, 11) + '…'; }
         fgCtx.beginPath(); fgCtx.arc(x, padTop + plotH + 3, 3, 0, Math.PI * 2); fgCtx.fillStyle = i === 0 ? '#44ff44' : (i === routeWaypoints.length - 1 ? '#ff4444' : '#ffcc00'); fgCtx.fill();
         fgCtx.fillStyle = '#bbb'; fgCtx.font = (zoomFactor >= 2) ? 'bold 11px Arial' : 'bold 9px Arial'; fgCtx.textAlign = 'center'; fgCtx.fillText(wpLabel, x, padTop + plotH + 16);
@@ -2744,10 +2813,6 @@ computeFlightProfile = function (elevationData, cruiseAltFt, climbRateFpm, desce
     const totalDistNM = elevationData[elevationData.length - 1].distNM;
     const depElevFt = elevationData[0].elevFt;
     let destElevFt = elevationData[elevationData.length - 1].elevFt;
-    // If destination is a POI (not an airport), keep cruise altitude — no descent to ground
-    if (typeof currentMissionData !== 'undefined' && currentMissionData && currentMissionData.poiName) {
-        destElevFt = cruiseAltFt;
-    }
     const wps = vpAltWaypoints;
 
     // Ensure vpSegmentAlts has the right length
@@ -2954,9 +3019,14 @@ function vpToggleLinearFeatures() {
     const btn = document.getElementById('btnToggleLinear');
     if (btn) btn.classList.toggle('active', vpShowLinear);
     
-    window.vpBgNeedsUpdate = true; // FIX: Hintergrund zum Löschen zwingen
-    if (typeof window.throttledRenderProfiles === 'function') {
-        window.throttledRenderProfiles();
+    if (vpShowLinear && window._lastVpRouteKey) {
+        // Löscht den Kombi-Cache für Hindernisse & Straßen und triggert einen sauberen Neubau
+        localStorage.removeItem('ga_obs_combo_' + window._lastVpRouteKey);
+        window._lastObsRouteKey = null; 
+        triggerVerticalProfileUpdate();
+    } else {
+        window.vpBgNeedsUpdate = true; // Hintergrund zum Löschen zwingen
+        if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
     }
 }
 
