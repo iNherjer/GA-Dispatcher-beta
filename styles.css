@@ -16,6 +16,8 @@
     --navlog-data: #ffcc00;
     --navlog-freq: #ffcc00;
     --navlog-border: #444;
+    --plane-color: #E63946;
+    --plane-size: 40px;
 }
 
 html {

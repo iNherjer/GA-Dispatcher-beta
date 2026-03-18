@@ -1,4 +1,11 @@
 /* === MAP, ROUTING & LEAFLET ENGINE === */
+if (!document.getElementById('route-anim-style')) {
+    const style = document.createElement('style');
+    style.id = 'route-anim-style';
+    // -20 lässt die Striche der Linie vorwärts (Richtung Ziel) fließen
+    style.innerHTML = `@keyframes routeDashAnim { to { stroke-dashoffset: -20; } } .animated-route-line { animation: routeDashAnim 1.5s linear infinite; }`;
+    document.head.appendChild(style);
+}
 /* =========================================================
    7. KARTE (LEAFLET, KARTENTISCH & MESS-WERKZEUG)
    ========================================================= */
@@ -7,6 +14,7 @@ const hitBoxIcon = (color) => L.divIcon({ className: 'custom-pin', html: hitBoxH
 
 const startIcon = hitBoxIcon('#44ff44'), destIcon = hitBoxIcon('#ff4444');
 const wpIcon = L.divIcon({ className: 'custom-pin', html: `<div class="pin-hitbox" style="cursor: move;"><div class="pin-dot" style="background-color: #fdfd86;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
+const poiIcon = L.divIcon({ className: 'custom-pin', html: `<div class="pin-hitbox" style="cursor: move;"><div class="pin-dot" style="background-color: #b266ff; border: 2px solid #fff;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
 const measureIcon = L.divIcon({ className: 'custom-pin', html: `<div class="pin-hitbox" style="cursor: move;"><div class="pin-dot" style="background-color: #fff; width: 12px; height: 12px; min-width: 12px; min-height: 12px;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
 
 function toggleMeasureMode() {
@@ -68,7 +76,7 @@ function renderMainRoute() {
     }
 
     if (!polyline) {
-        polyline = L.polyline(routeWaypoints, { color: '#ff4444', weight: 8, dashArray: '10,10', interactive: false }).addTo(map);
+        polyline = L.polyline(routeWaypoints, { color: '#ff4444', weight: 8, dashArray: '10,10', className: 'animated-route-line', interactive: false }).addTo(map);
     } else {
         polyline.setLatLngs(routeWaypoints);
     }
@@ -91,14 +99,22 @@ function renderMainRoute() {
 
     routeWaypoints.forEach((latlng, index) => {
         let isStart = (index === 0), isDest = (index === routeWaypoints.length - 1 && routeWaypoints.length > 1);
-        let icon = isStart ? startIcon : (isDest ? destIcon : wpIcon);
+        let isPOI = routeWaypoints[index].isPOI === true;
+        
+        let icon = isStart ? startIcon : (isDest ? destIcon : (isPOI ? poiIcon : wpIcon));
+        // Wir erlauben das Draggen von POIs und Wegpunkten. Start/Dest bleiben fix.
         let draggable = (!isStart && !isDest);
-        let marker = L.marker(latlng, { icon: icon, draggable: draggable }).addTo(map);
+        // POI Marker immer nach vorne holen (Z-Index), damit er nicht hinter der Linie verschwindet
+        let marker = L.marker(latlng, { icon: icon, draggable: draggable, zIndexOffset: isPOI ? 1000 : 0 }).addTo(map);
 
         if (isStart) {
             marker.bindPopup(`<b>DEP:</b> ${currentSName}`);
         } else if (isDest) {
-            marker.bindPopup(`<b>DEST:</b> ${currentDName}`);
+            // Bei einem Rundflug heißt das Ziel wieder so wie der Startplatz
+            marker.bindPopup(`<b>DEST:</b> ${currentMissionData?.poiName ? currentSName : currentDName}`);
+        } else if (isPOI) {
+            // POIs bekommen ein spezielles lila Popup ohne Löschen-Button (da es das Missionsziel ist)
+            marker.bindPopup(`<div style="text-align:center; color:#b266ff;"><b>${routeWaypoints[index].name}</b></div>`);
         } else {
             let wpName = routeWaypoints[index].name ? `<b>${routeWaypoints[index].name}</b>` : `<b>Wegpunkt</b>`;
             marker.bindPopup(`<div style="text-align:center;">${wpName}<br><button onclick="removeRouteWaypoint(${index})" style="margin-top:5px; background:#d93829; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius: 2px;">🗑️ Löschen</button></div>`);
@@ -146,6 +162,117 @@ function renderMainRoute() {
 
             marker.on('dragend', function (e) {
                 let dropLatLng = marker.getLatLng();
+                const origLatLng = { lat: routeWaypoints[index].lat, lng: routeWaypoints[index].lng || routeWaypoints[index].lon };
+
+                // === NEU: SPEZIELLE POI LOGIK (Auto-Name & Fallback) ===
+                if (isPOI) {
+                    if (confirm("Möchtest du das Ziel für den Rundflug an diese Position verschieben?")) {
+                        
+                        const mDestName = document.getElementById("mDestName");
+                        if (mDestName) mDestName.innerText = "Ermittle Ort...";
+                        
+                        setTimeout(async () => {
+                            let newName = "Neuer Wendepunkt";
+                            
+                            // 1. Ort via Wikipedia (Geosearch) ermitteln
+                            try {
+                                const geoRes = await fetch(`https://de.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${dropLatLng.lat}|${dropLatLng.lng}&gsradius=10000&gslimit=1&format=json&origin=*`);
+                                const geoData = await geoRes.json();
+                                if (geoData?.query?.geosearch?.length > 0) {
+                                    newName = geoData.query.geosearch[0].title;
+                                } else {
+                                    // Fallback auf Nominatim (OSM) wenn kein Wiki-Artikel in der Nähe ist
+                                    const nomRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${dropLatLng.lat}&lon=${dropLatLng.lng}&zoom=10`);
+                                    const nomData = await nomRes.json();
+                                    if (nomData && nomData.name) newName = nomData.name;
+                                }
+                            } catch(e) {}
+                            
+                            // 2. POI aktualisieren
+                            routeWaypoints[index].lat = dropLatLng.lat;
+                            routeWaypoints[index].lng = dropLatLng.lng;
+                            routeWaypoints[index].name = "🎯 " + newName;
+                            
+                            if (typeof currentMissionData !== 'undefined' && currentMissionData) {
+                                currentMissionData.poiName = newName;
+                            }
+                            
+                            // 3. Das dynamische Dreieck anpassen
+                            const returnNav = calcNav(dropLatLng.lat, dropLatLng.lng, routeWaypoints[0].lat, routeWaypoints[0].lng || routeWaypoints[0].lon);
+                            const offsetBearing = (returnNav.brng + 20) % 360;
+                            const returnWp = getDestinationPoint(dropLatLng.lat, dropLatLng.lng, returnNav.dist * 0.45, offsetBearing);
+                            
+                            if (routeWaypoints.length > 2) {
+                                routeWaypoints[2].lat = returnWp.lat;
+                                routeWaypoints[2].lng = returnWp.lon;
+                            }
+
+                            // 4. UI aktualisieren
+                            if (mDestName) mDestName.innerText = newName;
+                            const wikiDestNameEl = document.getElementById('wikiDestNameDisplay');
+                            if (wikiDestNameEl) wikiDestNameEl.innerText = `POI – ${newName}`;
+                            
+                            // 5. Wiki-Daten live laden
+                            if (typeof fetchAreaDescription === 'function') {
+                                const descEl = document.getElementById("wikiDestDescText");
+                                if (descEl) descEl.innerText = "Lade neue Ziel-Info...";
+                                fetchAreaDescription(dropLatLng.lat, dropLatLng.lng, 'wikiDestDescText', newName, null, 'wikiDestImageContainer', 'wikiDestImage');
+                            }
+
+                            // 6. KI-Briefing Story umschreiben (Live Dispatch)
+                            renderMainRoute(); // Aktualisiert die Distanzen im Hintergrund
+                            
+                            const paxText = document.getElementById("mPay") ? document.getElementById("mPay").innerText : "0 PAX";
+                            const cargoText = document.getElementById("mWeight") ? document.getElementById("mWeight").innerText : "0 lbs";
+                            const totalDist = currentMissionData.dist;
+                            
+                            const titleEl = document.getElementById("mTitle");
+                            const storyEl = document.getElementById("mStory");
+                            
+                            if (titleEl) titleEl.innerHTML = "🔄 Auftrag wird umgeschrieben...";
+                            if (storyEl) storyEl.innerText = "Dispatcher passt die Story an das neue Ziel an...";
+                            
+                            // Die Gemini-Funktion gibt intern sofort 'null' zurück, wenn API aus/offline ist
+                            let m = await fetchGeminiMission(currentSName, newName, totalDist, true, paxText, cargoText);
+                            
+                            if (m) {
+                                if (titleEl) titleEl.innerHTML = `${m.i ? m.i + ' ' : ''}${m.t}`;
+                                if (storyEl) storyEl.innerText = m.s;
+                                currentMissionData.mission = m.t;
+                            } else {
+                                // Offline / Fallback Modus aus der lokalen Datenbank
+                                let fallbackM;
+                                if (typeof generateDynamicPOIMission === 'function') {
+                                    const maxSeats = parseInt(document.getElementById("maxSeats")?.value || 4);
+                                    fallbackM = generateDynamicPOIMission(newName, maxSeats);
+                                    
+                                    // Aktualisiert auch die Passagiere und Fracht passend zur Offline-Story
+                                    if (document.getElementById("mPay")) document.getElementById("mPay").innerText = fallbackM.payloadText || paxText;
+                                    if (document.getElementById("mWeight")) document.getElementById("mWeight").innerText = fallbackM.cargoText || cargoText;
+                                } else if (typeof missions !== 'undefined') {
+                                    fallbackM = missions[Math.floor(Math.random() * missions.length)];
+                                } else {
+                                    fallbackM = { t: "Privater Rundflug", s: `Umgeleiteter Flugpunkt: ${newName}`, i: "📋" };
+                                }
+                                
+                                if (titleEl) titleEl.innerHTML = `${fallbackM.i ? fallbackM.i + ' ' : '📋 '}${fallbackM.t}`;
+                                if (storyEl) storyEl.innerText = fallbackM.s;
+                                currentMissionData.mission = fallbackM.t;
+                            }
+                            
+                            window.debouncedSaveMissionState();
+                        }, 50);
+
+                        return;
+                    } else {
+                        // Abbruch: Marker schnipst an Original-Position zurück
+                        routeWaypoints[index].lat = origLatLng.lat;
+                        routeWaypoints[index].lng = origLatLng.lng;
+                    }
+                    renderMainRoute();
+                    return;
+                }
+                // === ENDE POI LOGIK ===
 
                 if (snapMode && cachedNavData.length > 0) {
                     let mousePoint = map.latLngToLayerPoint(dropLatLng);
@@ -212,7 +339,14 @@ function updateRoutePerformance() {
         let isEnd = (i === routeWaypoints.length - 2);
 
         let name1 = isStart ? currentStartICAO : (routeWaypoints[i].name || `WP ${i}`);
-        let name2 = isEnd ? (currentMissionData?.poiName ? 'POI' : currentDestICAO) : (routeWaypoints[i + 1].name || `WP ${i + 1}`);
+        
+        let name2;
+        if (isEnd) {
+            // Bei einem Rundflug (POI-Mission) ist das Endziel der Startplatz
+            name2 = (currentMissionData && currentMissionData.poiName) ? currentStartICAO : currentDestICAO;
+        } else {
+            name2 = routeWaypoints[i + 1].name || `WP ${i + 1}`;
+        }
 
         let cleanName1 = name1.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '');
         let cleanName2 = name2.replace(/^RPP\s+/i, '').replace(/^APT\s+/i, '');
@@ -400,7 +534,25 @@ function initMapBase() {
 function updateMap(lat1, lon1, lat2, lon2, s, d) {
     if (!map) initMapBase();
     currentSName = s || "Start"; currentDName = d || "Ziel";
-    routeWaypoints = [{ lat: lat1, lng: lon1 }, { lat: lat2, lng: lon2 }];
+    
+    // POI-Check: Wenn poiName gesetzt ist, bauen wir ein Rundflug-Dreieck
+    if (typeof currentMissionData !== 'undefined' && currentMissionData && currentMissionData.poiName) {
+        // Berechnung des direkten Rückwegs (vom POI zurück zum Start)
+        const returnNav = calcNav(lat2, lon2, lat1, lon1);
+        // Wir biegen den Rückflug um 20 Grad ab und legen den Wegpunkt auf ~45% der Strecke
+        const offsetBearing = (returnNav.brng + 20) % 360;
+        const returnWp = getDestinationPoint(lat2, lon2, returnNav.dist * 0.45, offsetBearing);
+        
+        routeWaypoints = [
+            { lat: lat1, lng: lon1 }, 
+            { lat: lat2, lng: lon2, name: "🎯 " + currentMissionData.poiName, isPOI: true }, 
+            { lat: returnWp.lat, lng: returnWp.lon, name: "Return Leg" }, 
+            { lat: lat1, lng: lon1, name: currentSName } // HIER: Name explizit auf den Startplatz setzen
+        ];
+    } else {
+        routeWaypoints = [{ lat: lat1, lng: lon1 }, { lat: lat2, lng: lon2 }];
+    }
+    
     renderMainRoute();
 }
 

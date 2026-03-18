@@ -1,4 +1,4 @@
-/* === VERTICAL PROFILE & CANVAS ENGINE === */
+/* === VERTICAL PROFILE & CANVAS ENGINE (v208) === */
 if (!document.getElementById('vp-err-dot-style')) {
     const style = document.createElement('style');
     style.id = 'vp-err-dot-style';
@@ -176,8 +176,8 @@ async function fetchProfileObstacles(elevData, signal) {
         const polylineStr = pathCoords.join(',');
 
         const radius = 4000; 
-        // Autobahnen und Masten (ohne RAM-fressende Flüsse)
-        const queryBody = `node["generator:source"="wind"](around:${radius},${polylineStr});node["man_made"~"mast|tower"]["height"](around:${radius},${polylineStr});way["highway"="motorway"](around:${radius},${polylineStr});`;
+        // Autobahnen, Masten UND Flüsse
+        const queryBody = `node["generator:source"="wind"](around:${radius},${polylineStr});node["man_made"~"mast|tower"]["height"](around:${radius},${polylineStr});way["highway"="motorway"](around:${radius},${polylineStr});way["waterway"="river"](around:${radius},${polylineStr});`;
         const query = `[out:json][timeout:45][bbox:${bbox}];(${queryBody});out geom qt;`;
 
         let retries = 3; // 3 Versuche pro Segment reichen bei sequenzieller Abfrage
@@ -409,6 +409,7 @@ function triggerVerticalProfileUpdate() {
                             vpObstacles = cached.obs || [];
                             vpLinearFeatures = cached.lin || [];
                             window._lastObsRouteKey = cacheKey; 
+                            window.vpBgNeedsUpdate = true; // <--- FIX: Redraw nach Laden aus Cache erzwingen
                         } catch(e) { vpObstacles = []; vpLinearFeatures = []; }
                     } else {
                         const result = await fetchProfileObstacles(vpElevationData, currentSignal);
@@ -2185,11 +2186,49 @@ function renderMapProfileFrames(timeMs) {
         fgCtx.fillStyle = '#bbb'; fgCtx.font = (zoomFactor >= 2) ? 'bold 11px Arial' : 'bold 9px Arial'; fgCtx.textAlign = 'center'; fgCtx.fillText(wpLabel, x, padTop + plotH + 16);
     }
 
+    // A: SCRUB-MARKER (Magenta Linie bei Hover)
     if (typeof vpPositionFraction === 'number' && vpPositionFraction >= 0) {
         const posX = xOf(vpPositionFraction * totalDist);
         if (posX >= viewMinX - 20 && posX <= viewMaxX + 20) {
             fgCtx.beginPath(); fgCtx.strokeStyle = '#ff00ff'; fgCtx.lineWidth = 1.5; fgCtx.moveTo(posX, padTop); fgCtx.lineTo(posX, padTop + plotH); fgCtx.stroke();
             fgCtx.beginPath(); fgCtx.moveTo(posX, padTop + plotH + 2); fgCtx.lineTo(posX - 5, padTop + plotH + 10); fgCtx.lineTo(posX + 5, padTop + plotH + 10); fgCtx.closePath(); fgCtx.fillStyle = '#ff00ff'; fgCtx.fill();
+        }
+    }
+
+            // B: LIVE-GPS-MARKER (Das Flugzeug, unabhängig vom Scrubbing)
+    if (typeof vpLiveGpsFraction === 'number' && vpLiveGpsFraction >= 0) {
+        const liveX = xOf(vpLiveGpsFraction * totalDist);
+        if (liveX >= viewMinX - 50 && liveX <= viewMaxX + 50) {
+            const liveY = yOf(vpLiveAltFt);
+            
+            // CSS Variablen auslesen
+            const rootStyle = getComputedStyle(document.documentElement);
+            const planeColor = rootStyle.getPropertyValue('--plane-color').trim() || '#E63946';
+            const planeSizePx = parseInt(rootStyle.getPropertyValue('--plane-size')) || 40;
+
+            fgCtx.save();
+            fgCtx.translate(liveX, liveY);
+            
+            // Berechnung der Skalierung (Basisbreite Path: 504.91)
+            const baseScale = planeSizePx / 504.91;
+            
+            // USER: "scaleX(-1)" als Standard -> nach rechts schauen
+            let sx = -1;
+            // Wenn West (180-360) -> Spiegeln (nach links schauen)
+            if (vpLiveHdg > 180 && vpLiveHdg < 360) sx = 1;
+
+            fgCtx.scale(sx * baseScale, baseScale);
+            
+            fgCtx.fillStyle = planeColor;
+            
+            // Side-View Path (ViewBox 504.91 x 184.69, Zentrum: 252.45, 92.35)
+            const sideViewPath = new Path2D("M504.83,54.71l-.57-2.37a1.12,1.12,0,0,0-.84-.84,1.14,1.14,0,0,0-1.13.35,108.13,108.13,0,0,0-7.76,9.95,42.45,42.45,0,0,0-6.15,11.54,20.33,20.33,0,0,0-2.53-.45c-1.13-2.15-6.44-3.5-15.36-3.92-12.18-.81-42.61-3.25-51.64-4a13.91,13.91,0,0,1-3.4-.72l-.53-.2a15,15,0,0,1-1.62-.77c-5.49-3.07-19.3-10.65-29.11-14.65-7.6-3.09-12.88-5.24-18.9-6.51l-.8-.16a71.07,71.07,0,0,0-12.43-1.21,161,161,0,0,0-20.61,1.63v-.86a1.45,1.45,0,0,0-1.62-1.43c-2.38.28-6.23,1.11-7.08,3.5L320,44c-2.6-2-6.49-2.07-8.85-1.92a2,2,0,0,0-1.88,2.22l.15,1.42c-13.69,1.51-38.55,6-65.14,11.22l-.07-1.22A4.24,4.24,0,0,0,243,52.92l-17-16.46a.46.46,0,0,0-.65,0,.47.47,0,0,0,0,.65l17,16.46a3.36,3.36,0,0,1,1,2.22l.07,1.35c-19.92,3.91-40.74,8.21-58.51,11.94l-.22-4a4.17,4.17,0,0,0-1.29-2.83l-17-16.46a.46.46,0,0,0-.64.66l17,16.46a3.3,3.3,0,0,1,1,2.22l.23,4.2c-15.46,3.25-28.52,6.07-36.53,7.8a18.29,18.29,0,0,1-17.05-5.25L73.68,12.1a9.11,9.11,0,0,0-5-2.7V5.7A.68.68,0,0,0,68,5H67V1.89A1.89,1.89,0,0,0,65.08,0a1.89,1.89,0,0,0-1.89,1.89V5H62.13a.68.68,0,0,0-.67.68v4.55L38.14,15.42a4.46,4.46,0,0,0-1.16.41,4.74,4.74,0,0,0-1,.69,1.66,1.66,0,0,0-.45.69h0L24,18.84a.46.46,0,0,0,.06.92h.07l11.35-1.61a1.58,1.58,0,0,0,.82,1l.07,0a4.28,4.28,0,0,1,2.17,2.37l26.85,72a24.81,24.81,0,0,0-2.32,5.77L0,110.9l1.15.32c.18,0,18.4,5,48.57,5.2h0l17.32-4.16a1.51,1.51,0,0,1,1.34.31c1.35,1.13,5.76,3.21,20.08,4.44l.41,0-1.62,2.45a2.43,2.43,0,0,0,3.49,3.29l6.64-5c7.72.7,16.8,1.57,26.24,2.47,15.52,1.48,31.57,3,42.88,4,18.77,1.55,54.16,4.95,61,5.6l-19.28,7.63,39.35.54,3.63,6.59a1.32,1.32,0,0,0,1.52.63l1.57-.47a1.31,1.31,0,0,0,.8-1.84l-2.4-4.84,13.36.19.8,2.92,9.31-2.57,36.25,2v4.57l5.11,3.2c-3.29.8-18.46,4.51-24.31,6.06-6.22,1.65-9.95,2.88-9.29,6.17.41,2.05,2.4,3.68,4.29,5,3.29,2.3,6.84,3.11,10.19,3.73s6.52,1.17,9.34,1.65l5.46.93a13.62,13.62,0,0,0,27,1.79c.42-.06.87-.13,1.33-.22a41.71,41.71,0,0,0,10.61-3.56l.16-.07c2.56-1.25,6.42-3.13,5.92-6.53-.69-4.67-5.09-7.72-8.63-10.16-5.13-3.55-14.6-4.94-18.2-5.36v-7.41c3.37-.32,39.35-3.77,51.17-5.41,12.27-1.71,32.66-6.86,37-9.86.82.14,5.58.81,9.48-1.56v3.31l1.82,1.81a.78.78,0,0,0,1.34-.55v-5.27l7.93-1.18v.82l-7.77,7.73,7.05,3.51a11.14,11.14,0,0,1-3.52,1.38c-1.71.33-18.72-.25-26-.51a2.13,2.13,0,0,0-1.82,3.35l5.63,8.07a5.22,5.22,0,0,0,3.56,2.17,53.38,53.38,0,0,1,9.85,2.13L430,151.4a36.46,36.46,0,0,0,9.37,2.64,13.18,13.18,0,0,0,24.92-.47c.83-.36,1.67-.76,2.51-1.19l.49-.25c2.2-1.11,5.52-2.79,4.68-5.72a11.89,11.89,0,0,0-3.26-4.68l-.33-.34a45.54,45.54,0,0,0-7.27-6.28,29.74,29.74,0,0,0-7.87-3.61,56.48,56.48,0,0,0-5.57-1.47l-1.82-9.58,1.25-.19c4.59-.7,9.32-1.42,13.94-2.31,1.52-.3,3.07-.54,4.58-.78s3-.48,4.51-.77l.18,0c2.9-.56,5.89-1.13,8.24-3.11a21.78,21.78,0,0,0,7.26-11.85,64.85,64.85,0,0,0,1.29-8.49,37.13,37.13,0,0,0,15.63-8.15,2.93,2.93,0,0,0,1-2.35,3,3,0,0,0-1.22-2.31,43,43,0,0,0-6.18-3.8l8.32-19.79A2.86,2.86,0,0,0,504.83,54.71ZM321.27,80.13a3.12,3.12,0,0,1-2.14,1.07l-24,1.61a3.13,3.13,0,0,1-3-1.78l-6.32-13.25a3.11,3.11,0,0,1,2.16-4.4l29.13-6.25A3.13,3.13,0,0,1,320.84,60L322,77.86A3.09,3.09,0,0,1,321.27,80.13Zm67.42-6.44-21.6-30c5.14,1.29,10.06,3.29,16.65,6h0c9.75,4,23.52,11.53,29,14.59.34.19.68.36,1,.52-3.91,5.23-13.17,9.1-18.45,11a5.69,5.69,0,0,1-1.91.33A5.83,5.83,0,0,1,388.69,73.69Zm4.68,3h0Zm-.35,0-.33,0Zm-.4,0-.27,0Zm-.35,0-.31-.07Zm-.38-.09-.27-.07Zm-.34-.09-.31-.1Zm-.38-.13-.25-.1Zm-.33-.13-.29-.14Zm-.35-.17-.24-.13Zm-.31-.17-.28-.18Zm-.33-.21a1.88,1.88,0,0,1-.23-.16A1.88,1.88,0,0,0,389.85,75.56Zm-.3-.21-.26-.21Zm-14-.4a5.12,5.12,0,0,1-4.27,2.83l-36.16,2.38a5.21,5.21,0,0,1-3.89-1.38A5.16,5.16,0,0,1,329.57,75l-.26-15.32a5.33,5.33,0,0,1,4.77-5.4l23.15-2.51a9.58,9.58,0,0,1,9.11,4.31l9,13.75A5.11,5.11,0,0,1,375.58,75Zm12.87-.67a3.17,3.17,0,0,1-.21-.27A3.17,3.17,0,0,0,388.45,74.28Zm.27.32-.21-.25Zm0,0,.24.24Zm.53.51-.23-.21Zm4.19,1.53h0Zm1.81-.28.25-.08Zm-1.55.27h0Zm.26,0h0Zm.26,0,.14,0Zm.26,0,.15,0Zm.26,0,.15,0Zm.25-.07.17,0Zm44.66,54.37-3.46-1.25,5.23-4.35,1.93,2.46Z");
+            
+            // Zentrierung (ViewBox: 504.91 x 184.69)
+            fgCtx.translate(-252.45 * sx, -92.35); 
+            fgCtx.fill(sideViewPath);
+            
+            fgCtx.restore();
         }
     }
 
@@ -2267,13 +2306,16 @@ function initProfileResize() {
 /* =========================================================
    POSITION MARKER (Magenta triangle + Leaflet marker sync)
    ========================================================= */
-let vpPositionFraction = 0; // 0 = start of profile
+let vpPositionFraction = -1; // -1 = hidden scrub marker
+let vpLiveGpsFraction = -1;  // -1 = hidden live aircraft
+let vpLiveAltFt = 0;
+let vpLiveHdg = 0;
 let vpPositionLeafletMarker = null;
 
 function vpUpdatePosition(fraction) {
     vpPositionFraction = fraction;
     
-    // FIX: Kein renderMapProfile() mehr! Weckt nur die Foreground-Schleife, falls sie schläft.
+    // Weckt nur die Foreground-Schleife, falls sie schläft.
     if (!window.vpAnimFrameId && typeof vpMapProfileVisible !== 'undefined' && vpMapProfileVisible) {
         window.vpAnimFrameId = requestAnimationFrame(renderMapProfileFrames);
     }
@@ -2316,6 +2358,16 @@ function vpUpdatePosition(fraction) {
                 if (map.hasLayer(vpPositionLeafletMarker)) map.removeLayer(vpPositionLeafletMarker);
             }
         }
+    }
+}
+
+function vpUpdateLiveAircraft(fraction, altFt, hdg) {
+    vpLiveGpsFraction = fraction;
+    vpLiveAltFt = altFt;
+    vpLiveHdg = hdg;
+
+    if (!window.vpAnimFrameId && typeof vpMapProfileVisible !== 'undefined' && vpMapProfileVisible) {
+        window.vpAnimFrameId = requestAnimationFrame(renderMapProfileFrames);
     }
 }
 
@@ -3073,7 +3125,7 @@ window.retryFailedOverpassChunks = async function() {
         const lastPt = `${chunkData[chunkData.length-1].lat.toFixed(4)},${chunkData[chunkData.length-1].lon.toFixed(4)}`;
         if (pathCoords[pathCoords.length-1] !== lastPt) pathCoords.push(lastPt);
         
-        const queryBody = `node["generator:source"="wind"](around:4000,${pathCoords.join(',')});node["man_made"~"mast|tower"]["height"](around:4000,${pathCoords.join(',')});way["highway"="motorway"](around:4000,${pathCoords.join(',')});`;
+        const queryBody = `node["generator:source"="wind"](around:4000,${pathCoords.join(',')});node["man_made"~"mast|tower"]["height"](around:4000,${pathCoords.join(',')});way["highway"="motorway"](around:4000,${pathCoords.join(',')});way["waterway"="river"](around:4000,${pathCoords.join(',')});`;
         const query = `[out:json][timeout:25][bbox:${bbox}];(${queryBody});out geom qt;`;
 
         let retries = 5, attempt = 0, success = false;
