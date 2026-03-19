@@ -660,8 +660,21 @@
     </div>
     <div class="pinboard-scroll-area">
         <div class="maptable-content" style="flex-direction: column;">
-            <div id="mapArea" style="flex:1; display:flex; align-items:center; justify-content:center; width:100%; min-height:0;">
+            <div id="mapArea" style="position: relative; flex:1; display:flex; align-items:center; justify-content:center; width:100%; min-height:0;">
                 <div id="map"></div>
+                <!-- Feature 2: Auto-Follow Button -->
+                <button id="autoFollowBtn" onclick="toggleAutoFollow()" class="map-overlay-btn" title="Auto-Follow (Karten-Zentrierung)">
+                    🎯
+                </button>
+                <!-- Feature 3: Live Telemetry Box -->
+                <div id="liveTelemetryBox" class="telemetry-box" style="display: none;">
+                    <div style="display:flex; justify-content:space-between; gap:20px; margin-bottom: 2px;">
+                        <span>GS:</span> <span><span id="teleGS" class="tele-val" style="color:var(--blue);">0.0</span> <span class="tele-unit">KT</span></span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; gap:20px;">
+                        <span>VS:</span> <span><span id="teleVS" class="tele-val" style="color:var(--green);">0</span> <span class="tele-unit">FT/M</span></span>
+                    </div>
+                </div>
             </div>
             <div id="profileResizeHandle" class="profile-resize-handle" title="Ziehen zum Ändern der Profilhöhe"></div>
             <div id="mapProfileStrip" class="map-profile-strip">
