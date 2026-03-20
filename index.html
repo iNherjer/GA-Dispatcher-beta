@@ -562,28 +562,42 @@
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
             <div style="display: flex; align-items: center; gap: 10px;">
                 <label style="margin: 0;">🆔 Pilot Identity & Sync</label>
-                <label class="switch" style="transform: scale(0.6); margin: 0; transform-origin: left;">
-                    <input type="checkbox" id="syncToggle" onchange="saveSyncToggle()">
-                    <span class="slider"></span>
-                </label>
+                <!-- Login Status Indicator -->
+                <div id="loginIndicator" style="display: flex; align-items: center; gap: 5px; font-size: 10px; margin-left: 5px;">
+                    <span id="loginLed" style="width: 8px; height: 8px; border-radius: 50%; background: #d93829; box-shadow: 0 0 5px #d93829;"></span>
+                    <span id="loginText" style="color: #888;">Offline</span>
+                </div>
             </div>
             <div style="display: flex; align-items: center;">
                 <span id="syncTrafficIndicator" style="font-size: 13px; margin-right: 6px; opacity: 0; transition: opacity 0.3s;"></span>
-                <span id="syncStatus" style="font-size: 10px; color: #888;">Offline</span>
+                <span id="syncStatus" style="font-size: 10px; color: #888;">Warte auf Login</span>
                 <span id="liveGpsIndicator" style="color: #666; margin-left: 10px; font-size: 14px; font-weight: bold; transition: color 0.3s;" title="Live GPS Status">🛰️ OFF</span>
             </div>
         </div>
+        
         <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
-            <input type="text" id="syncIdInput" placeholder="Pilot-ID (z.B. Echo-Bravo-123)" style="flex: 2; margin: 0; font-family: monospace;" onchange="saveSyncId()" autocomplete="off" spellcheck="false" data-1p-ignore>
-            <input type="text" id="syncPinInput" placeholder="PIN" maxlength="4" style="flex: 1; margin: 0; font-family: monospace; text-align: center;" onchange="saveSyncId()" autocomplete="off" spellcheck="false" data-1p-ignore>
-            <button class="btn-preset" style="flex: 0 0 auto; width: 40px; margin: 0; height: 42px;" onclick="generateSyncId()" title="Zufällige ID würfeln">🎲</button>
+            <input type="text" id="syncIdInput" placeholder="Pilot-ID" style="flex: 2; margin: 0; font-family: monospace;" oninput="saveSyncId()" autocomplete="off" spellcheck="false" data-1p-ignore>
+            <input type="password" id="syncPinInput" placeholder="PIN" maxlength="8" style="flex: 1; margin: 0; font-family: monospace; text-align: center;" oninput="saveSyncId()" autocomplete="off" spellcheck="false" data-1p-ignore>
         </div>
-        <div style="display: flex; gap: 8px;">
-            <button class="btn-preset" style="flex: 1; margin: 0; height: 42px; background: #333; color: #4da6ff;" onclick="triggerCloudSave('manual')">☁️ Cloud Push</button>
-            <button class="btn-preset" style="flex: 1; margin: 0; height: 42px; background: #333; color: #f2c12e;" onclick="forceSyncLoad()">📥 Cloud Pull</button>
+        <button class="btn-preset sync-req-btn" id="loginSyncBtn" style="width: 100%; margin-top: 8px; margin-bottom: 12px; height: 42px; background: #333; color: #4caf50; font-weight: bold;" onclick="triggerLoginFlow()">
+            🔑 Login
+        </button>
+
+        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+            <label class="switch" style="transform: scale(0.6); margin: 0; transform-origin: left;">
+                <input type="checkbox" id="syncToggle" onchange="saveSyncToggle()" disabled>
+                <span class="slider"></span>
+            </label>
+            <label for="syncToggle" id="autoSyncLabel" style="font-size: 12px; color: #888; cursor: pointer; user-select: none;">Auto-Sync</label>
+            
+            <div style="display: flex; gap: 8px; flex: 1; justify-content: flex-end;">
+                <button class="btn-preset sync-req-btn" id="cloudPushBtn" style="flex: 1; margin: 0; height: 42px; background: #333; color: #4da6ff;" onclick="triggerCloudSave('manual')" disabled>☁️ Push</button>
+                <button class="btn-preset sync-req-btn" id="cloudPullBtn" style="flex: 1; margin: 0; height: 42px; background: #333; color: #f2c12e;" onclick="forceSyncLoad()" disabled>📥 Pull</button>
+            </div>
         </div>
-        <div class="api-hint">
-            Die Pilot-ID + PIN schützt deine Daten. Falls die ID neu ist, wird sie mit diesem PIN registriert.
+        
+        <div class="api-hint" id="loginHint">
+            Ein Pilot-ID + PIN schützt deine Identität. Logge dich ein, um Cloud-Sync zu nutzen.
         </div>
     </div>
 
@@ -597,7 +611,7 @@
             <input type="text" id="groupNickInput" placeholder="Anzeigename (Opt.)" style="flex: 2; margin: 0; font-family: monospace;" autocomplete="off" spellcheck="false">
         </div>
         <div style="display: flex; gap: 8px;">
-            <button class="btn-preset" style="flex: 1; margin: 0; height: 42px; background: #333; color: #4da6ff;" onclick="joinGroup()">🤝 Beitreten / Update</button>
+            <button class="btn-preset sync-req-btn" id="joinGroupBtn" style="flex: 1; margin: 0; height: 42px; background: #333; color: #4da6ff;" onclick="joinGroup()" disabled>🤝 Beitreten / Update</button>
             <button class="btn-preset" style="flex: 1; margin: 0; height: 42px; background: #332222; color: #ff4444; border-color: #552222;" onclick="leaveGroup()">🚪 Verlassen</button>
         </div>
         <div class="api-hint">

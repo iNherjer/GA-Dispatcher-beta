@@ -1,4 +1,4 @@
-/* === CLOUD SYNC & MULTIPLAYER FETCH LOGIC (v215) === */
+/* === CLOUD SYNC & MULTIPLAYER FETCH LOGIC (v220) === */
 /* =========================================================
    CLOUD SYNC LOGIC (Adaptive, Diffing, Debounce & Toggle)
    ========================================================= */
@@ -8,7 +8,11 @@ let lastSyncedPayloadStr = "";
 
 function saveSyncToggle() {
     const t = document.getElementById('syncToggle');
-    if (t) localStorage.setItem('ga_sync_enabled', t.checked);
+    const label = document.getElementById('autoSyncLabel');
+    if (t) {
+        localStorage.setItem('ga_sync_enabled', t.checked);
+        if (label) label.style.color = t.checked ? '#4caf50' : '#888';
+    }
     if (t && t.checked) silentSyncLoad();
 }
 
@@ -38,43 +42,132 @@ function toggleAutoFollow() {
 function saveSyncId() {
     const id = document.getElementById('syncIdInput').value.trim();
     const pin = document.getElementById('syncPinInput').value.trim();
-    const oldId = localStorage.getItem('ga_sync_id');
-    const oldPin = localStorage.getItem('ga_sync_pin');
     
-    if (id !== oldId || pin !== oldPin) {
-        localSyncTime = 0;
-        localStorage.setItem('ga_sync_time', 0);
-    }
     localStorage.setItem('ga_sync_id', id);
     localStorage.setItem('ga_sync_pin', pin);
     
-    if (id && pin.length === 4) {
-        silentSyncLoad();
-        if (typeof connectToLiveGPS === 'function') connectToLiveGPS(id);
+    // Wir setzen den Status auf Offline zurück, wenn sich die ID ändert,
+    // außer wir sind gerade mitten im Login-Check.
+    setSyncLoginState(false);
+}
+
+async function triggerLoginFlow(isAutoLogin = false) {
+    const id = getSyncId();
+    const pin = getSyncPin();
+
+    if (!id || !pin) {
+        if (!isAutoLogin) alert("Bitte Pilot-ID und PIN eingeben.");
+        return;
+    }
+
+    const loginBtn = document.getElementById('loginSyncBtn');
+    if (loginBtn) {
+        loginBtn.innerText = "🔑 Prüfe...";
+        loginBtn.disabled = true;
+    }
+
+    try {
+        // Fall A: Existenz-Prüfung & PIN-Check (GET)
+        const res = await fetch(SYNC_URL + id + "?pin=" + pin, {
+            headers: { 'X-Pilot-PIN': pin }
+        });
+
+        if (res.status === 200) {
+            // Erfolg (Existiert & PIN stimmt)
+            localStorage.setItem('ga_saved_id', id);
+            localStorage.setItem('ga_saved_pin', pin);
+            if (!isAutoLogin) alert("✅ Erfolgreich angemeldet!");
+            setSyncLoginState(true);
+        } else if (res.status === 401) {
+            // ID existiert, aber PIN falsch
+            if (!isAutoLogin) {
+                alert("❌ Zugriff verweigert: Passwort falsch oder ID bereits vergeben!");
+            } else {
+                // Bei stillem Auto-Login Fehler: Daten löschen, damit nicht bei jedem Load der Fehler passiert
+                localStorage.removeItem('ga_saved_id');
+                localStorage.removeItem('ga_saved_pin');
+            }
+            setSyncLoginState(false);
+        } else if (res.status === 404) {
+            // ID ist noch frei! -> Fall C: Registrieren (POST)
+            const registerRes = await fetch(SYNC_URL + id, {
+                method: 'POST',
+                headers: { 'X-Pilot-PIN': pin, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin: pin, flights: [], lastModified: Date.now() })
+            });
+            if (registerRes.ok) {
+                localStorage.setItem('ga_saved_id', id);
+                localStorage.setItem('ga_saved_pin', pin);
+                if (!isAutoLogin) alert("✅ Neuer Pilot erfolgreich registriert!");
+                setSyncLoginState(true);
+            } else {
+                throw new Error("Registrierung fehlgeschlagen");
+            }
+        } else {
+            throw new Error("Server-Fehler");
+        }
+    } catch (e) {
+        console.error("[Login] Fehler:", e);
+        if (!isAutoLogin) alert("⚠️ Verbindung zum Sync-Server fehlgeschlagen.");
+        setSyncLoginState(false);
+    } finally {
+        if (loginBtn) {
+            loginBtn.innerText = "🔑 Login / Verknüpfen";
+            loginBtn.disabled = false;
+        }
     }
 }
 
-function generateSyncId() {
-    const words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett", "Kilo", "Lima", "Mike", "November", "Oscar", "Papa", "Quebec", "Romeo", "Sierra", "Tango", "Uniform", "Victor", "Whiskey", "Xray", "Yankee", "Zulu"];
-    const w1 = words[Math.floor(Math.random() * words.length)];
-    const w2 = words[Math.floor(Math.random() * words.length)];
-    const num = Math.floor(Math.random() * 900) + 100;
-    const newId = `${w1}-${w2}-${num}`;
-    const newPin = Math.floor(Math.random() * 9000) + 1000;
+function setSyncLoginState(isLoggedIn) {
+    const led = document.getElementById('loginLed');
+    const txt = document.getElementById('loginText');
+    const syncStatus = document.getElementById('syncStatus');
+    const syncId = getSyncId();
+    const loginBtn = document.getElementById('loginSyncBtn');
 
-    document.getElementById('syncIdInput').value = newId;
-    document.getElementById('syncPinInput').value = newPin;
+    if (isLoggedIn) {
+        if (led) { led.style.background = "#00ff41"; led.style.boxShadow = "0 0 8px #00ff41"; }
+        if (txt) { txt.innerText = "Verbunden"; txt.style.color = "#00ff41"; }
+        if (syncStatus) syncStatus.innerText = "Bereit (" + syncId + ")";
+        
+        // Buttons aktivieren, Login-Button bleibt immer aktiv
+        document.querySelectorAll('.sync-req-btn').forEach(btn => btn.disabled = false);
+        if (loginBtn) loginBtn.disabled = false; // Ensure login button is enabled
 
-    localSyncTime = 0;
-    localStorage.setItem('ga_sync_time', 0);
-    localStorage.setItem('ga_sync_id', newId);
-    localStorage.setItem('ga_sync_pin', newPin);
+        const toggle = document.getElementById('syncToggle');
+        if (toggle) toggle.disabled = false;
 
-    const t = document.getElementById('syncToggle');
-    if (t) { t.checked = true; localStorage.setItem('ga_sync_enabled', 'true'); }
-    updateSyncStatus("Identität gewürfelt ✅");
-    triggerCloudSave(true);
-    if (typeof connectToLiveGPS === 'function') connectToLiveGPS(newId);
+        // Hint aktualisieren
+        const hint = document.getElementById('loginHint');
+        if (hint) hint.innerText = "Du bist als " + syncId + " angemeldet. Daten werden synchronisiert.";
+
+        // Sync & GPS starten falls gewünscht
+        const t = document.getElementById('syncToggle');
+        if (t) {
+            const savedToggle = localStorage.getItem('ga_sync_enabled') === 'true';
+            t.checked = savedToggle;
+            const label = document.getElementById('autoSyncLabel');
+            if (label) label.style.color = savedToggle ? '#4caf50' : '#888';
+        }
+        if (t && t.checked) silentSyncLoad();
+        if (typeof connectToLiveGPS === 'function') connectToLiveGPS(syncId);
+    } else {
+        if (led) { led.style.background = "#d93829"; led.style.boxShadow = "0 0 5px #d93829"; }
+        if (txt) { txt.innerText = "Offline"; txt.style.color = "#888"; }
+        if (syncStatus) syncStatus.innerText = "Anmeldung erforderlich";
+        
+        // Buttons deaktivieren, Login-Button bleibt immer aktiv
+        document.querySelectorAll('.sync-req-btn').forEach(btn => {
+            if (btn.id !== 'loginSyncBtn') btn.disabled = true;
+        });
+        if (loginBtn) loginBtn.disabled = false; // Ensure login button is enabled
+
+        const toggle = document.getElementById('syncToggle');
+        if (toggle) { toggle.disabled = true; toggle.checked = false; }
+
+        const hint = document.getElementById('loginHint');
+        if (hint) hint.innerText = "Bitte logge dich ein, um Cloud-Sync zu nutzen.";
+    }
 }
 function updateSyncStatus(msg, isError = false) {
     const el = document.getElementById('syncStatus');
@@ -690,12 +783,26 @@ function updateLivePlanePosition(lat, lon, alt, hdg) {
     }
 }
 
-// Auto-Start Live GPS on app load
+// Auto-Start & Login on app load
 document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => {
-        const savedId = localStorage.getItem('ga_sync_id');
-        if (savedId && typeof connectToLiveGPS === 'function') {
-            connectToLiveGPS(savedId);
-        }
-    }, 1000); // Kurze Verzögerung, damit Karte und UI erst fertig laden
+    // Felder aus dem bestätigten Speicher vorbefüllen
+    const savedId = localStorage.getItem('ga_saved_id') || localStorage.getItem('ga_sync_id');
+    const savedPin = localStorage.getItem('ga_saved_pin') || localStorage.getItem('ga_sync_pin');
+    
+    if (savedId) {
+        const idInp = document.getElementById('syncIdInput');
+        if (idInp) idInp.value = savedId;
+    }
+    if (savedPin) {
+        const pinInp = document.getElementById('syncPinInput');
+        if (pinInp) pinInp.value = savedPin;
+    }
+
+    // Falls Daten vorhanden -> Auto-Login Versuch im Hintergrund
+    if (savedId && savedPin) {
+        setTimeout(() => {
+            console.log("[Sync] Starte Auto-Login...");
+            triggerLoginFlow(true); 
+        }, 800);
+    }
 });

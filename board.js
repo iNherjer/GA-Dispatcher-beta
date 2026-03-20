@@ -1,4 +1,4 @@
-/* === PINNBOARD & PDF EXPORT LOGIC (v215) === */
+/* === PINNBOARD & PDF EXPORT LOGIC (v220) === */
 let currentBoardMode = 'private'; 
 let pendingPinNote = null;
 let groupDataCache = { members: [], notes: [] };

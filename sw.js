@@ -1,5 +1,5 @@
 // GA Dispatcher – Service Worker
-const CACHE = 'ga-dispatcher-v215';
+const CACHE = 'ga-dispatcher-v220';
 
 const STATIC = [
     './',
@@ -22,7 +22,6 @@ const STATIC = [
     './board.jpg',
     './map.jpg',
     './pinicon.png',
-    // CDN – Leaflet
     'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
     'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
     // CDN – html2canvas & jsPDF
