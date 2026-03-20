@@ -1,4 +1,4 @@
-/* === PINNBOARD & PDF EXPORT LOGIC === */
+/* === PINNBOARD & PDF EXPORT LOGIC (v215) === */
 let currentBoardMode = 'private'; 
 let pendingPinNote = null;
 let groupDataCache = { members: [], notes: [] };
@@ -13,44 +13,54 @@ const tutorialNotes = [
     { id: 108, text: "📌 FLÜGE MERKEN\n\nPinne coole Routen an dieses Brett. Geflogen? Logge sie unten, um deinen Startplatz zu versetzen!", x: 78, y: 46, rot: -2 }
 ];
 function getGroupName() { return localStorage.getItem('ga_group_name') || ""; }
-function getGroupNick() { return localStorage.getItem('ga_group_nick') || ""; }
-function getGroupPin() { return localStorage.getItem('ga_group_pin') || null; }
-function hashPin(str) {
-    let h = 0;
-    for(let i=0; i<str.length; i++) h = Math.imul(31, h) + str.charCodeAt(i) | 0;
-    return h.toString();
-}
+function getGroupNick() { return localStorage.getItem('ga_group_nick') || getSyncId() || "Pilot"; }
+
 async function joinGroup() {
     const gName = document.getElementById('groupNameInput').value.trim().toUpperCase();
-    const gNick = document.getElementById('groupNickInput').value.trim();
-    const gPin = document.getElementById('groupPinInput').value.trim();
-    if(!gName || !gNick) { alert("Bitte Gruppen-Code und Rufname eingeben!"); return; }
-    document.getElementById('groupStatus').innerText = "Prüfe Zugang...";
+    let gNick = document.getElementById('groupNickInput').value.trim();
+    
+    // Authentifizierung via Pilot-ID
+    const syncId = getSyncId();
+    const syncPin = getSyncPin();
+
+    if(!gName) { alert("Bitte einen Gruppen-Code (z.B. EDTK) eingeben!"); return; }
+    if(!syncId || !syncPin) { 
+        alert("🔒 Zugriff verweigert: Bitte lege zuerst oben im Sync-Bereich eine Pilot-ID und einen PIN fest!"); 
+        return; 
+    }
+    
+    // Fallback: Falls kein Nickname eingegeben wurde, nutze die Pilot-ID (oder einen Teil davon)
+    if (!gNick) gNick = syncId;
+
+    document.getElementById('groupStatus').innerText = "Verbinde...";
 
     try {
-        const res = await fetch(SYNC_URL + "GROUP_" + gName);
-        let data = { members: [], kicked: [] };
-        if (res.ok) data = await res.json();
-        // 1. Kick-Prüfung
-        if (data.kicked && data.kicked.includes(gNick)) {
-            alert("Dieser Rufname wurde aus der Crew gebannt!");
-            document.getElementById('groupStatus').innerText = "Nicht verbunden";
+        // Wir fragen die Gruppe ab. Die Berechtigung wird über die Pilot-ID + PIN geprüft.
+        // Der Server muss prüfen: Ist diese SyncId+Pin Kombination valide?
+        const res = await fetch(SYNC_URL + "GROUP_" + gName + "?pin=" + syncPin + "&syncId=" + syncId, {
+            headers: { 'X-Pilot-PIN': syncPin, 'X-Pilot-ID': syncId }
+        });
+
+        if (res.status === 401) {
+            alert("❌ Authentifizierungs-Fehler!\n\nDeine Pilot-ID oder dein PIN ist falsch. Bitte prüfe die Eingaben oben im Sync-Bereich.");
+            document.getElementById('groupStatus').innerText = "Auth-Fehler";
             return;
         }
-        // 2. PIN-Prüfung
-        const existingUser = (data.members || []).find(m => m.nick === gNick);
-        const pinHash = gPin ? hashPin(gPin) : null;
-        if (existingUser && existingUser.pin) {
-            if (existingUser.pin !== pinHash) {
-                alert("Falscher PIN für diesen Rufnamen!");
-                document.getElementById('groupStatus').innerText = "Nicht verbunden";
-                return;
-            }
+
+        let data = { members: [], kicked: [] };
+        if (res.ok) data = await res.json();
+        
+        // Kick-Prüfung (jetzt über die Pilot-ID, nicht nur über den Nick!)
+        if (data.kicked && data.kicked.includes(syncId)) {
+            alert("Diese Pilot-ID wurde aus der Crew gebannt!");
+            document.getElementById('groupStatus').innerText = "Gebannt";
+            return;
         }
-        // Zugang gewährt
+
+        // Zugang gewährt: Wir speichern den Gruppen-Namen und den Anzeigenamen
         localStorage.setItem('ga_group_name', gName);
         localStorage.setItem('ga_group_nick', gNick);
-        if (pinHash) localStorage.setItem('ga_group_pin', pinHash); else localStorage.removeItem('ga_group_pin');
+        
         document.getElementById('groupStatus').innerText = "Verbunden als " + gNick;
         document.getElementById('groupStatus').style.color = "var(--green)";
 
@@ -58,18 +68,21 @@ async function joinGroup() {
         triggerCloudSave(true);
         alert("🤝 Du bist der Crew '" + gName + "' beigetreten!");
     } catch(e) {
-        alert("Verbindungsfehler.");
+        alert("Verbindungsfehler zum Crew-Server.");
         document.getElementById('groupStatus').innerText = "Offline";
     }
 }
 async function removeSelfFromGroup(gName, gNick) {
+    const syncId = getSyncId();
     try {
-        const res = await fetch(SYNC_URL + "GROUP_" + gName);
+        const res = await fetch(SYNC_URL + "GROUP_" + gName, {
+            headers: { 'X-Pilot-PIN': getSyncPin(), 'X-Pilot-ID': syncId }
+        });
         if (!res.ok) return;
         let data = await res.json();
         if (data.members) {
-            const me = data.members.find(m => m.nick === gNick);
-            data.members = data.members.filter(m => m.nick !== gNick);
+            const me = data.members.find(m => m.syncId === syncId);
+            data.members = data.members.filter(m => m.syncId !== syncId);
 
             // Admin-Rechte weitergeben, falls Admin geht
             if (me && me.isAdmin && data.members.length > 0) {
@@ -78,7 +91,12 @@ async function removeSelfFromGroup(gName, gNick) {
             }
 
             data.lastModified = Date.now();
-            await fetch(SYNC_URL + "GROUP_" + gName, { method: 'POST', body: JSON.stringify(data), keepalive: true });
+            await fetch(SYNC_URL + "GROUP_" + gName, { 
+                method: 'POST', 
+                headers: { 'X-Pilot-PIN': getSyncPin(), 'X-Pilot-ID': syncId },
+                body: JSON.stringify(data), 
+                keepalive: true 
+            });
         }
     } catch(e) {}
 }
@@ -98,18 +116,24 @@ function leaveGroup(isBanned = false) {
     triggerCloudSave(true);
     if(!isBanned) alert("🚪 Crew verlassen.");
 }
-async function kickGroupUser(targetNick) {
-    if(!confirm(`Möchtest du ${targetNick} wirklich aus der Crew kicken?`)) return;
+async function kickGroupUser(targetSyncId) {
+    if(!confirm(`Möchtest du dieses Mitglied wirklich aus der Crew kicken?`)) return;
     const gName = getGroupName();
     try {
-        const res = await fetch(SYNC_URL + "GROUP_" + gName);
+        const res = await fetch(SYNC_URL + "GROUP_" + gName, {
+            headers: { 'X-Pilot-PIN': getSyncPin(), 'X-Pilot-ID': getSyncId() }
+        });
         if (!res.ok) return;
         let data = await res.json();
-        data.members = (data.members || []).filter(m => m.nick !== targetNick);
+        data.members = (data.members || []).filter(m => m.syncId !== targetSyncId);
         data.kicked = data.kicked || [];
-        data.kicked.push(targetNick);
+        data.kicked.push(targetSyncId);
         data.lastModified = Date.now();
-        await fetch(SYNC_URL + "GROUP_" + gName, { method: 'POST', body: JSON.stringify(data) });
+        await fetch(SYNC_URL + "GROUP_" + gName, { 
+            method: 'POST', 
+            headers: { 'X-Pilot-PIN': getSyncPin(), 'X-Pilot-ID': getSyncId() },
+            body: JSON.stringify(data) 
+        });
         forceGroupSync();
     } catch(e) {}
 }
@@ -359,17 +383,18 @@ function renderNotes() {
         roster.style.top = '4%';
         roster.style.transform = 'rotate(-2deg)';
         
-        const amIAdmin = (groupDataCache.members || []).find(m => m.nick === getGroupNick())?.isAdmin;
+        const amIAdmin = (groupDataCache.members || []).find(m => m.syncId === getSyncId())?.isAdmin;
         let membersHtml = (groupDataCache.members || []).map(m => {
-            const isMe = m.nick === getGroupNick();
+            const isMe = m.syncId === getSyncId();
             const timeoutMs = m.isAdmin ? (365 * 24 * 60 * 60 * 1000) : (28 * 24 * 60 * 60 * 1000); // Admin=12Mon, Normal=28Tage
             const isStale = (Date.now() - m.lastSeen) > timeoutMs;
             if(isStale) return '';
 
+            const displayName = m.nick || m.syncId;
             const adminIcon = m.isAdmin ? '<span title="Admin">👑 </span>' : '';
-            const kickBtn = (amIAdmin && !isMe) ? `<span onclick="kickGroupUser('${m.nick}')" style="cursor:pointer; font-size:1cqw; margin-left:6px; transition:transform 0.2s;" title="Mitglied kicken">👢</span>` : '';
+            const kickBtn = (amIAdmin && !isMe) ? `<span onclick="kickGroupUser('${m.syncId}')" style="cursor:pointer; font-size:1cqw; margin-left:6px; transition:transform 0.2s;" title="Mitglied kicken">👢</span>` : '';
 
-            return `<div class="roster-item"><span style="font-weight:${isMe?'bold':'normal'}">${adminIcon}${m.nick}</span><span class="roster-status" style="display:flex; align-items:center;">${isMe?'Online':'Aktiv'}${kickBtn}</span></div>`;
+            return `<div class="roster-item"><span style="font-weight:${isMe?'bold':'normal'}">${adminIcon}${displayName}</span><span class="roster-status" style="display:flex; align-items:center;">${isMe?'Online':'Aktiv'}${kickBtn}</span></div>`;
         }).join('');
         
         roster.innerHTML = `<div class="post-it-pin"></div><div style="font-weight:bold; font-size:1.4cqw; border-bottom:2px solid #aaa; padding-bottom:4px; margin-bottom:4px;">👥 CREW: ${getGroupName()}</div><div class="roster-list">${membersHtml}</div>`;

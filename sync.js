@@ -1,59 +1,78 @@
-/* === CLOUD SYNC & MULTIPLAYER FETCH LOGIC (v211) === */
+/* === CLOUD SYNC & MULTIPLAYER FETCH LOGIC (v215) === */
 /* =========================================================
    CLOUD SYNC LOGIC (Adaptive, Diffing, Debounce & Toggle)
    ========================================================= */
 const SYNC_URL = 'https://ga-proxy.einherjer.workers.dev/api/sync/';
 let localSyncTime = localStorage.getItem('ga_sync_time') ? parseInt(localStorage.getItem('ga_sync_time')) : 0;
 let lastSyncedPayloadStr = "";
+
 function saveSyncToggle() {
     const t = document.getElementById('syncToggle');
     if (t) localStorage.setItem('ga_sync_enabled', t.checked);
     if (t && t.checked) silentSyncLoad();
 }
+
 function getSyncId() {
     return document.getElementById('syncIdInput')?.value.trim() || localStorage.getItem('ga_sync_id') || "";
 }
+
+function getSyncPin() {
+    return document.getElementById('syncPinInput')?.value.trim() || localStorage.getItem('ga_sync_pin') || "";
+}
+
 let liveSnailTrail = null;
 let lastTrailPoint = null;
 let isAutoFollow = true;
-let lastGpsTickDetails = null; // {lat, lon, alt, t}
+let lastGpsTickDetails = null; 
 let lastTelemetryUpdateAt = 0;
 
 function toggleAutoFollow() {
     isAutoFollow = !isAutoFollow;
     const btn = document.getElementById('autoFollowBtn');
     if (btn) {
-        btn.style.background = isAutoFollow ? '#4da6ff' : '#666';
+        btn.style.background = isAutoFollow ? 'var(--blue)' : '#666';
         btn.innerHTML = isAutoFollow ? '🎯' : '📍';
     }
 }
 
 function saveSyncId() {
     const id = document.getElementById('syncIdInput').value.trim();
+    const pin = document.getElementById('syncPinInput').value.trim();
     const oldId = localStorage.getItem('ga_sync_id');
-    if (id !== oldId) {
+    const oldPin = localStorage.getItem('ga_sync_pin');
+    
+    if (id !== oldId || pin !== oldPin) {
         localSyncTime = 0;
         localStorage.setItem('ga_sync_time', 0);
     }
     localStorage.setItem('ga_sync_id', id);
-    if (id) {
+    localStorage.setItem('ga_sync_pin', pin);
+    
+    if (id && pin.length === 4) {
         silentSyncLoad();
         if (typeof connectToLiveGPS === 'function') connectToLiveGPS(id);
     }
 }
+
 function generateSyncId() {
     const words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett", "Kilo", "Lima", "Mike", "November", "Oscar", "Papa", "Quebec", "Romeo", "Sierra", "Tango", "Uniform", "Victor", "Whiskey", "Xray", "Yankee", "Zulu"];
     const w1 = words[Math.floor(Math.random() * words.length)];
     const w2 = words[Math.floor(Math.random() * words.length)];
     const num = Math.floor(Math.random() * 900) + 100;
     const newId = `${w1}-${w2}-${num}`;
+    const newPin = Math.floor(Math.random() * 9000) + 1000;
+
     document.getElementById('syncIdInput').value = newId;
+    document.getElementById('syncPinInput').value = newPin;
+
     localSyncTime = 0;
     localStorage.setItem('ga_sync_time', 0);
     localStorage.setItem('ga_sync_id', newId);
+    localStorage.setItem('ga_sync_pin', newPin);
+
     const t = document.getElementById('syncToggle');
     if (t) { t.checked = true; localStorage.setItem('ga_sync_enabled', 'true'); }
-    updateSyncStatus("Neue ID generiert. Speichere...");
+    updateSyncStatus("Identität gewürfelt ✅");
     triggerCloudSave(true);
     if (typeof connectToLiveGPS === 'function') connectToLiveGPS(newId);
 }
@@ -115,9 +134,16 @@ async function triggerCloudSave(immediate = false) {
     }
     updateSyncStatus("Speichere in Cloud...");
     localStorage.setItem('ga_sync_time', localSyncTime);
-    const payload = { ...payloadToCompare, lastModified: localSyncTime };
+    const payload = { ...payloadToCompare, lastModified: localSyncTime, pin: getSyncPin() };
     try {
-        const res = await fetch(SYNC_URL + id, { method: 'POST', body: JSON.stringify(payload), keepalive: true });
+        const id = getSyncId();
+        const pin = getSyncPin();
+        const res = await fetch(SYNC_URL + id + "?pin=" + pin, { 
+            method: 'POST', 
+            headers: { 'X-Pilot-PIN': pin },
+            body: JSON.stringify(payload), 
+            keepalive: true 
+        });
         if (res.ok) {
             lastSyncedPayloadStr = currentPayloadStr;
             updateSyncStatus("Cloud: Gespeichert ✅");
@@ -126,6 +152,9 @@ async function triggerCloudSave(immediate = false) {
                 setNavComLed('navcomSaveBtn', 'success');
                 setTimeout(() => setNavComLed('navcomSaveBtn', 'off'), 3000);
             }
+        } else if (res.status === 401) {
+            updateSyncStatus("Cloud: PIN falsch! ❌", true);
+            alert("Zugriff verweigert: PIN falsch!");
         } else {
             throw new Error("Server Error");
         }
@@ -146,7 +175,16 @@ async function forceSyncLoad() {
     updateSyncStatus("Lade Daten...");
 
     try {
-        const res = await fetch(SYNC_URL + id);
+        const res = await fetch(SYNC_URL + id + "?pin=" + getSyncPin(), {
+            headers: { 'X-Pilot-PIN': getSyncPin() }
+        });
+        if (res.status === 401) {
+            alert("Zugriff verweigert: PIN falsch!");
+            updateSyncStatus("PIN falsch", true);
+            setNavComLed('navcomLoadBtn', 'error');
+            setTimeout(() => setNavComLed('navcomLoadBtn', 'off'), 3000);
+            return;
+        }
         if (res.status === 404) {
             alert("Zu dieser ID wurden keine Daten gefunden.");
             updateSyncStatus("Nicht gefunden", true);
@@ -197,7 +235,14 @@ async function silentSyncLoad() {
     const t = document.getElementById('syncToggle');
     if (!id || (t && !t.checked)) return;
     try {
-        const res = await fetch(SYNC_URL + id);
+        const res = await fetch(SYNC_URL + id + "?pin=" + getSyncPin(), {
+            headers: { 'X-Pilot-PIN': getSyncPin() }
+        });
+        if (res.status === 401) {
+            alert("Zugriff verweigert: PIN falsch!");
+            updateSyncStatus("PIN falsch", true);
+            return;
+        }
         if (!res.ok) return;
         const data = await res.json();
         if (data.lastModified && data.lastModified > localSyncTime) {
@@ -237,7 +282,14 @@ async function silentGroupSync() {
     if(!gName || isGroupSyncing) return;
 
     try {
-        const res = await fetch(SYNC_URL + "GROUP_" + gName);
+        const res = await fetch(SYNC_URL + "GROUP_" + gName + "?pin=" + getSyncPin() + "&syncId=" + getSyncId(), {
+            headers: { 'X-Pilot-PIN': getSyncPin(), 'X-Pilot-ID': getSyncId() }
+        });
+        if (res.status === 401) {
+            updateSyncStatus("Crew Auth Fehler", true);
+            leaveGroup(true);
+            return;
+        }
         if (!res.ok) return;
         const data = await res.json();
 
@@ -246,7 +298,7 @@ async function silentGroupSync() {
             let knownNotes = JSON.parse(localStorage.getItem('ga_known_group_notes')) || [];
             let newBadges = JSON.parse(localStorage.getItem('ga_group_new')) || [];
             let changed = false;
-            if (data.kicked && data.kicked.includes(gNick)) {
+            if (data.kicked && data.kicked.includes(getSyncId())) {
                 alert("❌ Du wurdest vom Admin aus der Crew entfernt.");
                 leaveGroup(true);
                 return;
@@ -284,10 +336,13 @@ async function triggerGroupSave(immediate = false) {
     const gName = getGroupName();
     const gNick = getGroupNick();
     if(!gName) return;
-
     isGroupSyncing = true;
     try {
-        const res = await fetch(SYNC_URL + "GROUP_" + gName);
+        const syncId = getSyncId();
+        const pin = getSyncPin();
+        const res = await fetch(SYNC_URL + "GROUP_" + gName + "?pin=" + pin + "&syncId=" + syncId, {
+            headers: { 'X-Pilot-PIN': pin, 'X-Pilot-ID': syncId }
+        });
         let latestData = { members: [], notes: [] };
         if (res.ok) latestData = await res.json();
 
@@ -295,14 +350,14 @@ async function triggerGroupSave(immediate = false) {
         // Veraltete Mitglieder (außer Admin) herausfiltern
         members = members.filter(m => {
             const timeoutMs = m.isAdmin ? (365 * 24 * 60 * 60 * 1000) : (28 * 24 * 60 * 60 * 1000);
-            return (Date.now() - m.lastSeen) < timeoutMs && m.nick !== gNick;
+            return (Date.now() - m.lastSeen) < timeoutMs && m.syncId !== syncId;
         });
 
         let amIAdmin = false;
-        const existingMe = (latestData.members || []).find(m => m.nick === gNick);
+        const existingMe = (latestData.members || []).find(m => m.syncId === syncId);
         if (existingMe && existingMe.isAdmin) amIAdmin = true;
         if (members.length === 0) amIAdmin = true; // Wer die Gruppe belebt, wird Admin
-        members.push({ nick: gNick, lastSeen: Date.now(), pin: getGroupPin(), isAdmin: amIAdmin });
+        members.push({ nick: gNick, syncId: syncId, lastSeen: Date.now(), isAdmin: amIAdmin });
 
         // Max 10 Mitglieder (älteste Nicht-Admins fliegen zuerst)
         if(members.length > 10) {
@@ -320,11 +375,16 @@ async function triggerGroupSave(immediate = false) {
         const theirCloudNotes = cloudNotes.filter(n => n.author !== gNick);
         let mergedNotes = [...myLocalNotes, ...theirCloudNotes];
 
-        const payload = { members: members, notes: mergedNotes, kicked: kickedList, lastModified: Date.now() };
+        const payload = { members: members, notes: mergedNotes, kicked: kickedList, lastModified: Date.now(), pin: getSyncPin(), syncId: getSyncId() };
 
         groupDataCache = payload;
         groupSyncTime = payload.lastModified;
-        await fetch(SYNC_URL + "GROUP_" + gName, { method: 'POST', body: JSON.stringify(payload), keepalive: true });
+        await fetch(SYNC_URL + "GROUP_" + gName, { 
+            method: 'POST', 
+            headers: { 'X-Pilot-PIN': getSyncPin(), 'X-Pilot-ID': getSyncId() },
+            body: JSON.stringify(payload), 
+            keepalive: true 
+        });
     } catch(e) {}
     isGroupSyncing = false;
 }
@@ -343,7 +403,14 @@ async function checkCloudAfterIdle() {
     idleCheckInProgress = true;
     updateSyncStatus("Prüfe Cloud...");
     try {
-        const res = await fetch(SYNC_URL + id);
+        const res = await fetch(SYNC_URL + id + "?pin=" + getSyncPin(), {
+            headers: { 'X-Pilot-PIN': getSyncPin() }
+        });
+        if (res.status === 401) {
+            alert("Zugriff verweigert: PIN falsch!");
+            updateSyncStatus("PIN falsch", true);
+            return;
+        }
         if (!res.ok) throw new Error("Netzwerkfehler");
         const data = await res.json();
         if (data.lastModified && data.lastModified > localSyncTime) {
@@ -439,13 +506,13 @@ window.connectToLiveGPS = function(syncId) {
     // Alte Verbindung schließen, falls wir die ID wechseln
     if (liveGpsSocket) liveGpsSocket.close();
 
-    console.log(`[GPS] 📡 Verbinde mit Live-Tracking für Raum ${syncId}...`);
+    console.log(`[GPS] 📡 Verbinde mit Live-Tracking für Pilot-ID ${syncId}...`);
     liveGpsSocket = new WebSocket(wsUrl);
 
     liveGpsSocket.onopen = () => {
         console.log(`[GPS] ✅ Verbunden! Warte auf Flugzeug-Daten...`);
-        // Dem Server mitteilen, in welchen Raum wir wollen
-        liveGpsSocket.send(JSON.stringify({ type: 'join', syncId: syncId }));
+        // Dem Server mitteilen, in welchen Raum wir wollen (mit PIN!)
+        liveGpsSocket.send(JSON.stringify({ type: 'join', syncId: syncId, pin: getSyncPin() }));
 
         const ind = document.getElementById('liveGpsIndicator');
         if (ind) { 
@@ -458,6 +525,11 @@ window.connectToLiveGPS = function(syncId) {
     liveGpsSocket.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
+            if (data.type === 'error') {
+                alert(data.message);
+                if (liveGpsSocket) liveGpsSocket.close();
+                return;
+            }
             if (data.type === 'gps') {
                 updateLivePlanePosition(data.lat, data.lon, data.alt, data.hdg);
 

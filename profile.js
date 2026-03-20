@@ -1,4 +1,4 @@
-/* === VERTICAL PROFILE & CANVAS ENGINE (v211) === */
+/* === VERTICAL PROFILE & CANVAS ENGINE (v215) === */
 if (!document.getElementById('vp-err-dot-style')) {
     const style = document.createElement('style');
     style.id = 'vp-err-dot-style';

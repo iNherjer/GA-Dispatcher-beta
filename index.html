@@ -561,7 +561,7 @@
     <div class="api-settings" style="margin-top: 15px; padding-top: 15px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
             <div style="display: flex; align-items: center; gap: 10px;">
-                <label style="margin: 0;">☁️ Cloud Sync (Pilot-ID)</label>
+                <label style="margin: 0;">🆔 Pilot Identity & Sync</label>
                 <label class="switch" style="transform: scale(0.6); margin: 0; transform-origin: left;">
                     <input type="checkbox" id="syncToggle" onchange="saveSyncToggle()">
                     <span class="slider"></span>
@@ -573,20 +573,17 @@
                 <span id="liveGpsIndicator" style="color: #666; margin-left: 10px; font-size: 14px; font-weight: bold; transition: color 0.3s;" title="Live GPS Status">🛰️ OFF</span>
             </div>
         </div>
-        <div style="display: flex; gap: 8px; align-items: center;">
-            <input type="text" id="syncIdInput" placeholder="z.B. Echo-Bravo-123" style="flex: 1; margin: 0; font-family: monospace;" onchange="saveSyncId()" autocomplete="off" spellcheck="false" data-1p-ignore>
-            <button class="btn-preset" style="flex: 0 0 auto; width: 40px; margin: 0; height: 42px;" onclick="generateSyncId()" title="Neue ID generieren">🎲</button>
-            <button class="btn-preset" style="flex: 0 0 auto; margin: 0; height: 42px; background: #333; color: #4da6ff;" onclick="triggerCloudSave('manual')" title="Daten manuell hochladen">☁️ Push</button>
-            <button class="btn-preset" style="flex: 0 0 auto; margin: 0; height: 42px; background: #333; color: #f2c12e;" onclick="forceSyncLoad()">📥 Pull</button>
+        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+            <input type="text" id="syncIdInput" placeholder="Pilot-ID (z.B. Echo-Bravo-123)" style="flex: 2; margin: 0; font-family: monospace;" onchange="saveSyncId()" autocomplete="off" spellcheck="false" data-1p-ignore>
+            <input type="text" id="syncPinInput" placeholder="PIN" maxlength="4" style="flex: 1; margin: 0; font-family: monospace; text-align: center;" onchange="saveSyncId()" autocomplete="off" spellcheck="false" data-1p-ignore>
+            <button class="btn-preset" style="flex: 0 0 auto; width: 40px; margin: 0; height: 42px;" onclick="generateSyncId()" title="Zufällige ID würfeln">🎲</button>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn-preset" style="flex: 1; margin: 0; height: 42px; background: #333; color: #4da6ff;" onclick="triggerCloudSave('manual')">☁️ Cloud Push</button>
+            <button class="btn-preset" style="flex: 1; margin: 0; height: 42px; background: #333; color: #f2c12e;" onclick="forceSyncLoad()">📥 Cloud Pull</button>
         </div>
         <div class="api-hint">
-            Sichere Flüge &amp; Pinnwand geräteübergreifend. ID eingeben und laden. Danach synct die App automatisch (Schalter = An).
-        </div>
-        <!-- Feature: Tracker Download -->
-        <div class="tracker-download" style="margin-top: 12px; display: flex; justify-content: center;">
-            <a href="https://github.com/iNherjer/GA-Dispatcher-Alpha/releases/latest/download/GA-Tracker.exe" target="_blank" class="btn-preset" style="font-size: 0.85em; display: inline-flex; align-items: center; gap: 8px; text-decoration: none; padding: 8px 16px; background: rgba(77, 166, 255, 0.1); border: 1px solid var(--blue); color: var(--blue); border-radius: 6px; font-weight: bold; transition: all 0.2s; width: 100%; justify-content: center;">
-                <span>📥</span> PC-Tracker (.exe) laden
-            </a>
+            Die Pilot-ID + PIN schützt deine Daten. Falls die ID neu ist, wird sie mit diesem PIN registriert.
         </div>
     </div>
 
@@ -597,15 +594,20 @@
         </div>
         <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
             <input type="text" id="groupNameInput" placeholder="Crew-Code (z.B. EDTK)" style="flex: 2; margin: 0; font-family: monospace;" autocomplete="off" spellcheck="false">
-            <input type="text" id="groupNickInput" placeholder="Rufname" style="flex: 2; margin: 0; font-family: monospace;" autocomplete="off" spellcheck="false">
-            <input type="text" id="groupPinInput" placeholder="PIN (Opt.)" maxlength="4" style="flex: 1; margin: 0; font-family: monospace; text-align: center;" autocomplete="off" spellcheck="false" data-1p-ignore>
+            <input type="text" id="groupNickInput" placeholder="Anzeigename (Opt.)" style="flex: 2; margin: 0; font-family: monospace;" autocomplete="off" spellcheck="false">
         </div>
         <div style="display: flex; gap: 8px;">
             <button class="btn-preset" style="flex: 1; margin: 0; height: 42px; background: #333; color: #4da6ff;" onclick="joinGroup()">🤝 Beitreten / Update</button>
             <button class="btn-preset" style="flex: 1; margin: 0; height: 42px; background: #332222; color: #ff4444; border-color: #552222;" onclick="leaveGroup()">🚪 Verlassen</button>
         </div>
         <div class="api-hint">
-            Teile Flüge und Notizen mit bis zu 10 Freunden in Echtzeit.
+            Tritt einer Gruppe bei. Dein Anzeigename (oder deine Pilot-ID) erscheint auf dem Board.
+        </div>
+        <!-- Feature: Tracker Download -->
+        <div class="tracker-download" style="margin-top: 12px; display: flex; justify-content: center;">
+            <a href="https://github.com/iNherjer/GA-Dispatcher-Alpha/releases/latest/download/GA-Tracker.exe" target="_blank" class="btn-preset" style="font-size: 0.85em; display: inline-flex; align-items: center; gap: 8px; text-decoration: none; padding: 8px 16px; background: rgba(77, 166, 255, 0.1); border: 1px solid var(--blue); color: var(--blue); border-radius: 6px; font-weight: bold; transition: all 0.2s; width: 100%; justify-content: center;">
+                <span>📥</span> PC-Tracker (.exe) laden
+            </a>
         </div>
     </div>
 
