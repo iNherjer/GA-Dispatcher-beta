@@ -1,4 +1,4 @@
-/* === VERTICAL PROFILE & CANVAS ENGINE (v208) === */
+/* === VERTICAL PROFILE & CANVAS ENGINE (v211) === */
 if (!document.getElementById('vp-err-dot-style')) {
     const style = document.createElement('style');
     style.id = 'vp-err-dot-style';
@@ -2794,11 +2794,13 @@ function initAltWaypoints() {
                 initialPinchDist = currentDist;
             }
 
-            // Y-Achse: Zwei-Finger vertikaler Wisch
+            // Y-Achse: Zwei-Finger vertikaler Wisch (Direct Manipulation des Bodens)
             const currentTwoFingerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
             const yDiff = currentTwoFingerY - initialTwoFingerY;
             if (Math.abs(yDiff) > 15) {
-                let yDelta = yDiff > 0 ? -1000 : 1000; 
+                // Wischen nach UNTEN (yDiff > 0): User drückt Boden weg -> Stauchen (MaxAlt wird GRÖSSER)
+                // Wischen nach OBEN (yDiff < 0): User zieht Boden her -> Dehnen (MaxAlt wird KLEINER)
+                let yDelta = yDiff > 0 ? 1000 : -1000; 
                 vpChangeYAxis(yDelta);
                 initialTwoFingerY = currentTwoFingerY;
             }
