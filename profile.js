@@ -3238,3 +3238,138 @@ window.promptForRate = function() {
         syncRateFromInput(val);
     }
 };
+
+/* =========================================================
+   2D SIMULATOR EXPORT (Vollständige Welt)
+   ========================================================= */
+window.exportFor2DSim = function() {
+    if (!vpElevationData || vpElevationData.length < 2) {
+        alert("Bitte generiere zuerst eine Route im Dispatcher!");
+        return;
+    }
+
+    const NM_TO_M = 1852;
+    const FT_TO_M = 0.3048;
+
+    let waypoints = [];
+    
+    // 1. Start-Landebahn generieren
+    waypoints.push({ x: 0, elevation: vpElevationData[0].elevFt * FT_TO_M, type: "runway", length: 1200 });
+    
+    // 2. Wegpunkte / Topographie
+    for (let i = 1; i < vpElevationData.length - 1; i++) {
+        waypoints.push({ x: vpElevationData[i].distNM * NM_TO_M, elevation: vpElevationData[i].elevFt * FT_TO_M, type: "terrain" });
+    }
+    
+    // 3. Ziel-Landebahn generieren
+    let totalDistM = vpElevationData[vpElevationData.length - 1].distNM * NM_TO_M;
+    waypoints.push({ x: totalDistM, elevation: vpElevationData[vpElevationData.length - 1].elevFt * FT_TO_M, type: "runway", length: 1200 });
+
+    // 4. Wetter-Zonen (Regen, Schnee, Wolken)
+    let weatherZones = [];
+    let cloudBaseMeters = 1500;
+    if (typeof vpWeatherData !== 'undefined' && vpWeatherData) {
+        if (vpWeatherData.length > 0 && vpWeatherData[0].lowestBase !== Infinity) {
+            cloudBaseMeters = vpWeatherData[0].lowestBase * FT_TO_M;
+        }
+        vpWeatherData.forEach(zone => {
+            weatherZones.push({
+                x: zone.distNM * NM_TO_M,
+                icao: zone.icao,
+                hasRain: zone.weather ? zone.weather.hasRain : false,
+                hasSnow: zone.weather ? zone.weather.hasSnow : false,
+                hasTS: zone.weather ? zone.weather.hasTS : false,
+                clouds: zone.clouds ? zone.clouds.map(c => ({
+                    type: c.type,
+                    baseM: c.baseMsl * FT_TO_M
+                })) : []
+            });
+        });
+    }
+
+    // 5. Hindernisse (Windräder, Masten)
+    let obstacles = [];
+    if (typeof vpObstacles !== 'undefined' && vpObstacles) {
+        vpObstacles.forEach(obs => {
+            obstacles.push({
+                x: obs.distNM * NM_TO_M,
+                type: obs.type, // 'wind' oder 'mast'
+                heightM: obs.hFt * FT_TO_M
+            });
+        });
+    }
+
+    // 6. Flüsse & Autobahnen
+    let linearFeatures = [];
+    if (typeof vpLinearFeatures !== 'undefined' && vpLinearFeatures) {
+        vpLinearFeatures.forEach(feat => {
+            linearFeatures.push({
+                x: feat.distNM * NM_TO_M,
+                type: feat.type, // 'river' oder 'highway'
+                name: feat.name
+            });
+        });
+    }
+
+    // 7. Städte & Flughäfen
+    let landmarks = [];
+    if (typeof vpLandmarks !== 'undefined' && vpLandmarks) {
+        vpLandmarks.forEach(lm => {
+            landmarks.push({
+                x: lm.distNM * NM_TO_M,
+                type: lm.type, // 'apt', 'city', 'town'
+                name: lm.name
+            });
+        });
+    }
+
+    // 7b. Lufträume (Airspaces) extrahieren
+    let airspaces = [];
+    if (typeof activeAirspaces !== 'undefined' && activeAirspaces.length > 0 && typeof getCachedAirspaceIntersections === 'function') {
+        let totalDistNM = vpElevationData[vpElevationData.length - 1].distNM;
+        let cachedAS = getCachedAirspaceIntersections(vpElevationData, totalDistNM);
+        
+        cachedAS.forEach(item => {
+            // Nur relevante Lufträume exportieren (z.B. keine unendlichen FIRs)
+            let asName = item.as.name || "Luftraum";
+            // Wir berechnen die absolute MSL Höhe in Metern für den Simulator
+            let lowerM = item.lowerFt * FT_TO_M;
+            let upperM = item.upperFt * FT_TO_M;
+            
+            airspaces.push({
+                name: asName,
+                type: item.as.type, 
+                isCTR: asName.includes("CTR") || asName.includes("Control Zone"),
+                startX: item.asMinDist * NM_TO_M,
+                endX: item.asMaxDist * NM_TO_M,
+                lowerM: lowerM,
+                upperM: upperM,
+                isLowerAgl: item.isLowerAgl
+            });
+        });
+    }
+
+    // 8. JSON zusammensetzen (Update!)
+    let simData = {
+        weather: { windVX: -5, windVY: 0, oat: 15, qnh: 1013, cloudBase: Math.round(cloudBaseMeters) },
+        waypoints: waypoints,
+        weatherZones: weatherZones,
+        obstacles: obstacles,
+        linearFeatures: linearFeatures,
+        landmarks: landmarks,
+        airspaces: airspaces // <--- NEU!
+    };
+
+    let jsonString = JSON.stringify(simData);
+
+    // 9. MAGIC TRANSFER: Ab in den localStorage und Simulator öffnen!
+    try {
+        localStorage.setItem('autoSimFlightPlan', jsonString);
+        // Öffnet den Simulator in einem neuen Tab (Pfad ggf. anpassen, falls game.html woanders liegt)
+        window.open('game.html', '_blank'); 
+    } catch (e) {
+        alert("Fehler beim Transfer! Bitte Cookies/Local Storage im Browser erlauben.");
+        console.error(e);
+    }
+};
+
