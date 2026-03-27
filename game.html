@@ -883,7 +883,7 @@
             elevatorInput: 0, trim: 0.05, flaps: 0, overspeedTimer: 0,
             mass: 1000, 
             inertia: 2500, wingArea: 16.2, 
-            length: 8.28, height: 3.02 
+            length: 9.936, height: 3.624
         };
 
         function initAudio() {
@@ -1032,6 +1032,7 @@
                 initAudio();
                 flightPlan = JSON.parse(jsonStr);
                 window.fpl = flightPlan.waypoints;
+                window.fplAltWaypoints = flightPlan.altWaypoints || [];
                 
                 document.getElementById('startOverlay').style.display = 'none';
                 document.getElementById('weatherMenu').style.display = 'flex';
@@ -2000,7 +2001,7 @@
             updateDisplay('stallWarn', (isStalled && plane.y > groundLevel + 2) ? 'block' : 'none');
         }
 
-        function drawWorld(targetCtx, targetWidth, targetHeight, zoomX, zoomY, screenOffsetX, screenOffsetY, screenOffsetXUnstretched, drawPlaneHighlight = false) {
+        function drawWorld(targetCtx, targetWidth, targetHeight, zoomX, zoomY, screenOffsetX, screenOffsetY, screenOffsetXUnstretched, drawPlaneHighlight = false, drawUnstretchedFPL = false) {
             let altRatio = Math.min(1, Math.max(0, plane.y / 3000));
             let bR = Math.round(224 + altRatio * (74 - 224));
             let bG = Math.round(246 + altRatio * (144 - 246));
@@ -2590,20 +2591,62 @@
 
 
             if (typeof window.fpl !== 'undefined' && window.fpl.length > 0) {
+                // Inside ctx.translate(screenOffsetX,screenOffsetY) + scale(1,-1) transform.
+                // Use pure world coordinates: ptX in visual-X * zoomX, ptY in altitude * zoomY.
+                // The transform already adds screenOffsetX/Y and flips Y — don't add them manually.
                 targetCtx.save();
-                targetCtx.strokeStyle = 'rgba(255, 50, 50, 0.4)'; // Pale red
-                targetCtx.lineWidth = 3; // Fixed pixel width, no zoom scaling
+                targetCtx.strokeStyle = 'rgba(255, 50, 50, 0.7)';
+                targetCtx.lineWidth = 2;
                 targetCtx.lineJoin = 'round';
-                targetCtx.setLineDash([12, 8]); // Fixed pixel dash pattern
+                targetCtx.setLineDash([12, 8]);
                 targetCtx.beginPath();
                 for (let i = 0; i < window.fpl.length; i++) {
-                    let ptX = (typeof getVisualX === 'function' ? getVisualX(window.fpl[i].x || window.fpl[i].dist) : window.fpl[i].x) * zoomX + screenOffsetX;
-                    let targetAltMeters = (window.fpl[i].alt || (window.fpl[i].elevation / 0.3048 + 1000)) * 0.3048;
-                    let ptY = screenOffsetY - (targetAltMeters * zoomY); 
+                    let fplRawX = window.fpl[i].x != null ? window.fpl[i].x : window.fpl[i].dist;
+                    let ptX = drawUnstretchedFPL
+                        ? fplRawX * zoomX + (screenOffsetXUnstretched - screenOffsetX)
+                        : (typeof getVisualX === 'function' ? getVisualX(fplRawX) : fplRawX) * zoomX;
+                    let wp = window.fpl[i];
+                    let targetAltMeters = wp.alt != null
+                        ? wp.alt * 0.3048
+                        : (wp.type === 'runway' ? wp.elevation : wp.elevation + 304.8);
+                    let ptY = targetAltMeters * zoomY;
                     if (i === 0) targetCtx.moveTo(ptX, ptY);
                     else targetCtx.lineTo(ptX, ptY);
                 }
                 targetCtx.stroke();
+                targetCtx.setLineDash([]);
+
+                // Dispatcher altitude waypoints als Diamant-Marker anzeigen
+                let awps = window.fplAltWaypoints;
+                if (awps && awps.length > 0) {
+                    awps.forEach(wp => {
+                        let wpX = drawUnstretchedFPL
+                            ? wp.x * zoomX + (screenOffsetXUnstretched - screenOffsetX)
+                            : (typeof getVisualX === 'function' ? getVisualX(wp.x) : wp.x) * zoomX;
+                        let wpY = wp.altFt * 0.3048 * zoomY;
+                        let s = 5 / zoomX; // Feste Pixel-Größe, unabhängig vom Zoom
+                        targetCtx.beginPath();
+                        targetCtx.moveTo(wpX, wpY + s * zoomX);
+                        targetCtx.lineTo(wpX + s * zoomX, wpY);
+                        targetCtx.lineTo(wpX, wpY - s * zoomX);
+                        targetCtx.lineTo(wpX - s * zoomX, wpY);
+                        targetCtx.closePath();
+                        targetCtx.fillStyle = 'rgba(255, 200, 0, 1)';
+                        targetCtx.fill();
+                        targetCtx.strokeStyle = 'rgba(200, 100, 0, 1)';
+                        targetCtx.lineWidth = 1.5;
+                        targetCtx.stroke();
+
+                        // Höhenangabe (Text muss Y-Flip rückgängig machen)
+                        targetCtx.save();
+                        targetCtx.scale(1, -1);
+                        targetCtx.font = 'bold 11px monospace';
+                        targetCtx.fillStyle = 'rgba(255, 220, 0, 1)';
+                        targetCtx.textAlign = 'center';
+                        targetCtx.fillText(Math.round(wp.altFt) + 'ft', wpX, -(wpY + 10 * zoomY));
+                        targetCtx.restore();
+                    });
+                }
                 targetCtx.restore();
             }
 
@@ -2703,11 +2746,17 @@
             let screenOffsetXUnstretched = canvas.width * 0.3 - (fplCamX * currentZoom);
 
             let screenOffsetX = canvas.width * 0.3 - (camX * currentZoom);
-            let planePixelY = camY * currentZoom;
             let isMobile = window.innerWidth <= 800 || window.innerHeight > window.innerWidth;
-            let maxAllowedYOnScreen = canvas.height * (isMobile ? 0.65 : 0.75);
-            let excessY = Math.max(0, planePixelY - maxAllowedYOnScreen);
-            let screenOffsetY = (canvas.height - (isMobile ? 10 : 30)) + excessY;
+
+            // Get terrain height below camera for AGL-relative camera positioning
+            let groundRef = (typeof getTerrainHeight === 'function' && typeof getFplX === 'function')
+                ? getTerrainHeight(getFplX(camX)) : 0;
+            // Position plane lower in frame when near ground, higher when cruising
+            let aglMeters = Math.max(0, camY - groundRef);
+            let t = Math.min(1, aglMeters / 300); // 0 = on ground, 1 = ≥300m AGL
+            let maxFraction = isMobile ? 0.65 : 0.75;
+            let targetFraction = maxFraction - t * 0.40; // ground: 0.75 from top → cruise: 0.35
+            let screenOffsetY = canvas.height * targetFraction + camY * currentZoom;
 
             drawWorld(ctx, canvas.width, canvas.height, currentZoom, currentZoom, screenOffsetX, screenOffsetY, screenOffsetXUnstretched, false);
 
@@ -2967,7 +3016,7 @@
             let miniOffsetY = mCanvas.height;
 
             mCtx.clearRect(0, 0, mCanvas.width, mCanvas.height);
-            drawWorld(mCtx, mCanvas.width, mCanvas.height, miniZoomX, miniZoomY, miniOffsetX, miniOffsetY, (mCanvas.width / 3) - (getFplX(plane.x) * miniZoomX), true);
+            drawWorld(mCtx, mCanvas.width, mCanvas.height, miniZoomX, miniZoomY, miniOffsetX, miniOffsetY, (mCanvas.width / 3) - (getFplX(plane.x) * miniZoomX), true, true);
 
             worldLandmarks.forEach(lm => {
                 let miniX = (getVisualX(lm.x) - plane.x) * miniZoomX + (400 / 3);

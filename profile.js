@@ -3265,6 +3265,34 @@ window.exportFor2DSim = function() {
     let totalDistM = vpElevationData[vpElevationData.length - 1].distNM * NM_TO_M;
     waypoints.push({ x: totalDistM, elevation: vpElevationData[vpElevationData.length - 1].elevFt * FT_TO_M, type: "runway", length: 1200 });
 
+    // 3b. Höhenprofil berechnen und zu jedem Wegpunkt hinzufügen
+    const _exportCruiseAlt = parseInt(document.getElementById('altMapInput')?.textContent || 4500);
+    const _exportTas = parseInt(document.getElementById('tasSlider')?.value || 115);
+    const _exportProf = typeof computeFlightProfile === 'function'
+        ? computeFlightProfile(vpElevationData, _exportCruiseAlt, vpClimbRate, vpDescentRate, _exportTas)
+        : null;
+    if (_exportProf && _exportProf.profile && _exportProf.profile.length > 0) {
+        waypoints.forEach(wp => {
+            const distNM = wp.x / NM_TO_M;
+            let altFt = _exportCruiseAlt;
+            for (let _j = 0; _j < _exportProf.profile.length - 1; _j++) {
+                const _p0 = _exportProf.profile[_j], _p1 = _exportProf.profile[_j + 1];
+                if (distNM >= _p0.distNM && distNM <= _p1.distNM) {
+                    const _f = (_p1.distNM > _p0.distNM) ? (distNM - _p0.distNM) / (_p1.distNM - _p0.distNM) : 0;
+                    altFt = _p0.altFt + _f * (_p1.altFt - _p0.altFt);
+                    break;
+                }
+            }
+            wp.alt = Math.round(altFt); // Reiseflughöhe in Fuß
+        });
+    }
+
+    // 3c. Dispatcher-Wegpunkte (gesetzt im Vertical Profile) extrahieren
+    let altWaypoints = [];
+    if (typeof vpAltWaypoints !== 'undefined' && vpAltWaypoints.length > 0) {
+        altWaypoints = vpAltWaypoints.map(wp => ({ x: wp.distNM * NM_TO_M, altFt: wp.altFt }));
+    }
+
     // 4. Wetter-Zonen (Regen, Schnee, Wolken)
     let weatherZones = [];
     let cloudBaseMeters = 1500;
@@ -3357,7 +3385,8 @@ window.exportFor2DSim = function() {
         obstacles: obstacles,
         linearFeatures: linearFeatures,
         landmarks: landmarks,
-        airspaces: airspaces // <--- NEU!
+        airspaces: airspaces,
+        altWaypoints: altWaypoints
     };
 
     let jsonString = JSON.stringify(simData);
