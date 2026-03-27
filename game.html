@@ -1803,7 +1803,7 @@
                             plane.pitch = 0;
                             if (plane.pitchRate < 0) plane.pitchRate = 0;
                         }
-                        if (plane.throttle < 0.1) { plane.vx *= 0.985; } else { plane.vx *= 0.998; }
+                        if (plane.throttle < 0.1) { plane.vx *= 0.997; } else { plane.vx *= 0.9996; }
                         if (keys['Space'] || isBraking) plane.vx *= 0.95;
                     }
                 }
