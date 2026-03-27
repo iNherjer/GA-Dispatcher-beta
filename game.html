@@ -2257,9 +2257,9 @@
                 targetCtx.save();
                 targetCtx.translate(drawX * zoomX, drawY);
                 if (ai.vx < 0) { targetCtx.scale(-1, 1); }
-                // Use planeW and planeH from earlier in drawWorld or use fixed values
-                let tW = 50 * zoomX; // Adjust as needed
-                let tH = 18 * zoomY; // Adjust as needed
+                targetCtx.scale(1, -1);
+                let tW = plane.length * zoomX;
+                let tH = plane.height * zoomY;
                 if (ai.img && ai.img.complete) {
                     targetCtx.drawImage(ai.img, -tW/2, -tH/2, tW, tH);
                 } else {
