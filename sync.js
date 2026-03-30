@@ -678,6 +678,7 @@ function updateLivePlanePosition(lat, lon, alt, hdg) {
     if (typeof map === 'undefined' || !map || typeof L === 'undefined') return;
 
     const now = Date.now();
+    window.lastLiveGpsPos = { lat, lon, alt, hdg, t: now };
 
     // --- FEATURE 1: SNAIL TRAIL ---
     if (!liveSnailTrail) {

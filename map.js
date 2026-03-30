@@ -528,7 +528,10 @@ function initMapBase() {
         return btn;
     };
     fsControl.addTo(map);
-    map.on('click', function (e) { if (!measureMode) return; addMeasurePoint(e.latlng); });
+    map.on('click', function (e) {
+        if (freeflightMode) { handleFreeflightMapClick(e); return; }
+        if (!measureMode) return; addMeasurePoint(e.latlng);
+    });
 }
 
 function updateMap(lat1, lon1, lat2, lon2, s, d) {
@@ -669,6 +672,14 @@ function updateMiniMap() {
    ========================================================= */
 let snapMode = true;
 let cachedNavData = [];
+
+/* --- DIRECT TO STATE --- */
+let freeflightMode = false;
+let ffWaypoints = [];
+let ffPolyline = null;
+let ffMarkers = [];
+let ffContextPopup = null;
+let ffNeedsStart = false;
 
 function toggleSnapMode() {
     snapMode = !snapMode;
@@ -920,3 +931,208 @@ window.renderWeatherMarkers = function() {
     }
     setTimeout(updateWeatherMarkerDodging, 50);
 };
+
+/* =========================================================
+   DIRECT TO MODUS
+   ========================================================= */
+
+const ffStartIcon = hitBoxIcon('#00e5ff');
+const ffDestIcon = L.divIcon({
+    className: 'custom-pin',
+    html: `<div class="pin-hitbox"><div class="pin-dot" style="background-color: #00e5ff; border: 2px solid #fff;"></div></div>`,
+    iconSize: [34, 34], iconAnchor: [17, 17]
+});
+
+function isGpsLive() {
+    if (!window.lastLiveGpsPos || (Date.now() - window.lastLiveGpsPos.t) > 4000) return false;
+    const ind = document.getElementById('liveGpsIndicator');
+    return ind && ind.innerHTML.includes('LIVE');
+}
+
+function toggleFreeflightMode() {
+    freeflightMode = !freeflightMode;
+    const btn = document.getElementById('freeflightBtn');
+    if (freeflightMode) {
+        btn.innerText = '✈️ Direct To (An)';
+        btn.classList.add('active');
+        if (measureMode) toggleMeasureMode();
+        document.getElementById('map').style.cursor = 'crosshair';
+        // GPS als Start?
+        if (isGpsLive()) {
+            const gps = window.lastLiveGpsPos;
+            ffWaypoints = [{ lat: gps.lat, lng: gps.lon, name: 'GPS' }];
+            showMapToast('GPS-Position als Start gesetzt');
+        } else {
+            ffNeedsStart = true;
+            showMapToast('Tippe auf einen Flugplatz oder die Karte um den Startpunkt zu setzen');
+        }
+        // Missions-Route abdimmen
+        if (polyline) polyline.setStyle({ opacity: 0.15 });
+        routeMarkers.forEach(m => { if (m.getElement) { const el = m.getElement(); if (el) el.style.opacity = '0.15'; } });
+    } else {
+        btn.innerText = '✈️ Direct To (Aus)';
+        btn.classList.remove('active');
+        btn.style.background = '#444';
+        btn.style.color = '#fff';
+        document.getElementById('map').style.cursor = '';
+        clearFreeflightRoute();
+        ffWaypoints = [];
+        ffNeedsStart = false;
+        // Missions-Route wiederherstellen
+        if (polyline) polyline.setStyle({ opacity: 1 });
+        routeMarkers.forEach(m => { if (m.getElement) { const el = m.getElement(); if (el) el.style.opacity = '1'; } });
+    }
+}
+
+function clearFreeflightRoute() {
+    if (ffPolyline) { map.removeLayer(ffPolyline); ffPolyline = null; }
+    ffMarkers.forEach(m => map.removeLayer(m));
+    ffMarkers = [];
+    if (ffContextPopup) { map.closePopup(ffContextPopup); ffContextPopup = null; }
+}
+
+function findNearestAirport(latlng, maxPixels) {
+    if (typeof maxPixels === 'undefined') maxPixels = 60;
+    if (!map) return null;
+    const tapPx = map.latLngToLayerPoint(latlng);
+    let best = null, bestDist = maxPixels + 1;
+
+    // 1. cachedNavData (OpenAIP airports)
+    cachedNavData.forEach(nav => {
+        if (!nav.name.startsWith('APT ')) return;
+        const navPx = map.latLngToLayerPoint([nav.lat, nav.lng]);
+        const d = tapPx.distanceTo(navPx);
+        if (d < bestDist) {
+            bestDist = d;
+            const parts = nav.name.replace('APT ', '').split(' (');
+            best = { icao: parts[0].trim(), name: parts[0].trim(), lat: nav.lat, lon: nav.lng };
+        }
+    });
+    if (best) return best;
+
+    // 2. globalAirports Fallback
+    if (typeof globalAirports === 'object' && globalAirports) {
+        const latF = latlng.lat, lngF = latlng.lng;
+        for (const icao in globalAirports) {
+            const apt = globalAirports[icao];
+            if (Math.abs(apt.lat - latF) > 0.5 || Math.abs(apt.lon - lngF) > 0.5) continue;
+            const aptPx = map.latLngToLayerPoint([apt.lat, apt.lon]);
+            const d = tapPx.distanceTo(aptPx);
+            if (d < bestDist) {
+                bestDist = d;
+                best = { icao: apt.icao, name: apt.name, lat: apt.lat, lon: apt.lon };
+            }
+        }
+    }
+    return best;
+}
+
+function handleFreeflightMapClick(e) {
+    if (ffContextPopup) { map.closePopup(ffContextPopup); ffContextPopup = null; }
+
+    if (ffNeedsStart) {
+        const apt = findNearestAirport(e.latlng);
+        if (apt) {
+            ffWaypoints = [{ lat: apt.lat, lng: apt.lon, name: apt.icao, icao: apt.icao }];
+            showMapToast('Start: ' + apt.icao + (apt.name && apt.name !== apt.icao ? ' — ' + apt.name : ''));
+        } else {
+            ffWaypoints = [{ lat: e.latlng.lat, lng: e.latlng.lng, name: 'Start' }];
+            showMapToast('Startpunkt gesetzt');
+        }
+        ffNeedsStart = false;
+        renderFreeflightRoute();
+        return;
+    }
+
+    if (ffWaypoints.length === 0) return;
+
+    const apt = findNearestAirport(e.latlng);
+    if (apt) {
+        freeflightDirectTo(apt.icao, apt.lat, apt.lon);
+    }
+}
+
+window.freeflightDirectTo = function(icao, lat, lon) {
+    if (ffContextPopup) { map.closePopup(ffContextPopup); ffContextPopup = null; }
+    // GPS-Start aktualisieren falls verfuegbar
+    if (isGpsLive()) {
+        const gps = window.lastLiveGpsPos;
+        ffWaypoints[0] = { lat: gps.lat, lng: gps.lon, name: 'GPS' };
+    }
+    const startWp = ffWaypoints[0];
+    const startName = startWp.icao || startWp.name || 'Start';
+
+    // FF-Route in die Hauptroute uebertragen
+    routeWaypoints = [
+        { lat: startWp.lat, lng: startWp.lng },
+        { lat: lat, lng: lon }
+    ];
+    currentSName = startName;
+    currentDName = icao;
+    if (typeof currentStartICAO !== 'undefined') currentStartICAO = startName;
+    if (typeof currentDestICAO !== 'undefined') currentDestICAO = icao;
+
+    // Freeflight-Modus sauber beenden (ohne Route wiederherzustellen)
+    clearFreeflightRoute();
+    ffWaypoints = [];
+    ffNeedsStart = false;
+    freeflightMode = false;
+    const btn = document.getElementById('freeflightBtn');
+    if (btn) { btn.innerText = '✈️ Direct To (Aus)'; btn.classList.remove('active'); btn.style.background = '#444'; btn.style.color = '#fff'; }
+    document.getElementById('map').style.cursor = '';
+
+    // Hauptroute rendern (regulaerer Bearbeitungsmodus)
+    if (polyline) polyline.setStyle({ opacity: 1 });
+    renderMainRoute();
+    updateRoutePerformance();
+
+    // Karte auf Route einpassen
+    const bounds = L.latLngBounds(routeWaypoints.map(w => [w.lat, w.lng || w.lon]));
+    map.fitBounds(bounds, { padding: [60, 60] });
+
+    showMapToast('Direct to ' + icao);
+};
+
+function renderFreeflightRoute() {
+    clearFreeflightRoute();
+    if (ffWaypoints.length === 0) return;
+
+    // Marker zeichnen
+    ffWaypoints.forEach((wp, i) => {
+        const icon = i === 0 ? ffStartIcon : ffDestIcon;
+        const marker = L.marker([wp.lat, wp.lng], { icon: icon, interactive: false, zIndexOffset: 900 }).addTo(map);
+        if (wp.name) marker.bindTooltip(wp.name, { permanent: true, direction: 'top', offset: [0, -12],
+            className: 'ff-tooltip' });
+        ffMarkers.push(marker);
+    });
+
+    // Polyline zeichnen
+    if (ffWaypoints.length >= 2) {
+        const coords = ffWaypoints.map(w => [w.lat, w.lng]);
+        ffPolyline = L.polyline(coords, {
+            color: '#00e5ff', weight: 6, dashArray: '12,8', opacity: 0.9, interactive: false
+        }).addTo(map);
+
+        // Nav-Info Tooltip am Mittelpunkt
+        const p1 = ffWaypoints[0], p2 = ffWaypoints[1];
+        const nav = calcNav(p1.lat, p1.lng, p2.lat, p2.lng);
+        const midLat = (p1.lat + p2.lat) / 2, midLng = (p1.lng + p2.lng) / 2;
+        const infoTooltip = L.tooltip({ permanent: true, direction: 'center', className: 'ff-nav-tooltip',
+            offset: [0, -15] })
+            .setLatLng([midLat, midLng])
+            .setContent(`<b>${Math.round(nav.brng)}° / ${nav.dist.toFixed(1)} NM</b>`)
+            .addTo(map);
+        ffMarkers.push(infoTooltip);
+    }
+}
+
+function showMapToast(message, durationMs) {
+    if (!durationMs) durationMs = 3000;
+    const container = document.getElementById('mapArea') || document.body;
+    const toast = document.createElement('div');
+    toast.className = 'ff-toast';
+    toast.textContent = message;
+    toast.style.animationDuration = durationMs + 'ms';
+    container.appendChild(toast);
+    setTimeout(() => { if (toast.parentNode) toast.parentNode.removeChild(toast); }, durationMs + 100);
+}
