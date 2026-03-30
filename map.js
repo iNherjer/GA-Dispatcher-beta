@@ -108,10 +108,19 @@ function renderMainRoute() {
         let marker = L.marker(latlng, { icon: icon, draggable: draggable, zIndexOffset: isPOI ? 1000 : 0 }).addTo(map);
 
         if (isStart) {
-            marker.bindPopup(`<b>DEP:</b> ${currentSName}`);
+            marker.bindPopup('');
+            marker.on('popupopen', () => {
+                marker.getPopup().setContent(_buildAptPopup('DEP', currentSName, currentDepElev));
+                marker.getPopup().update();
+            });
         } else if (isDest) {
-            // Bei einem Rundflug heißt das Ziel wieder so wie der Startplatz
-            marker.bindPopup(`<b>DEST:</b> ${currentMissionData?.poiName ? currentSName : currentDName}`);
+            marker.bindPopup('');
+            marker.on('popupopen', () => {
+                const icao = currentMissionData && currentMissionData.poiName ? currentStartICAO : currentDestICAO;
+                const elev = currentMissionData && currentMissionData.poiName ? currentDepElev : currentDestElev;
+                marker.getPopup().setContent(_buildAptPopup('DEST', currentDName, elev, icao));
+                marker.getPopup().update();
+            });
         } else if (isPOI) {
             // POIs bekommen ein spezielles lila Popup ohne Löschen-Button (da es das Missionsziel ist)
             marker.bindPopup(`<div style="text-align:center; color:#b266ff;"><b>${routeWaypoints[index].name}</b></div>`);
@@ -316,6 +325,41 @@ function renderMainRoute() {
 
     updateRoutePerformance(); updateMiniMap();
     if (typeof updateWeatherMarkerDodging === 'function') updateWeatherMarkerDodging();
+}
+
+function _buildAptPopup(label, name, elev, icaoForRunways) {
+    // icaoForRunways: optionaler ICAO-Key für runwayCache-Lookup
+    const rwCacheKey = icaoForRunways || (label === 'DEP' ? currentStartICAO : currentDestICAO);
+    let html = `<div style="font-family:'Courier New',monospace; min-width:160px; color:#111;">`;
+    html += `<b style="font-size:13px;">${label}: ${name || '–'}</b>`;
+
+    // Elevation & TPA
+    if (elev != null) {
+        const elevRnd = Math.round(elev);
+        const tpa     = elevRnd + 1000;
+        html += `<hr style="border-color:#ccc; margin:5px 0;">`;
+        html += `<div style="font-size:11px; line-height:1.7;">`;
+        html += `📍 Platz: <b>${elevRnd} ft MSL</b><br>`;
+        html += `🔄 Platzrunde: <b>~${tpa} ft MSL</b>`;
+        html += `</div>`;
+    }
+
+    // Runways aus Cache
+    if (rwCacheKey && typeof runwayCache !== 'undefined' && runwayCache[rwCacheKey] &&
+        runwayCache[rwCacheKey] !== 'Keine Daten gefunden') {
+        const rwys = runwayCache[rwCacheKey]
+            .split(/\s*(?:\||\n|<br\s*\/?>)\s*/i)
+            .filter(r => r.trim());
+        if (rwys.length > 0) {
+            html += `<hr style="border-color:#ccc; margin:5px 0;">`;
+            html += `<div style="font-size:11px; line-height:1.7;">`;
+            html += `🛫 Pisten:<br>` + rwys.map(r => `&nbsp;&nbsp;${r}`).join('<br>');
+            html += `</div>`;
+        }
+    }
+
+    html += `</div>`;
+    return html;
 }
 
 function updateRoutePerformance() {
@@ -1085,6 +1129,21 @@ window.freeflightDirectTo = function(icao, lat, lon) {
     if (polyline) polyline.setStyle({ opacity: 1 });
     renderMainRoute();
     updateRoutePerformance();
+
+    // Elevation, Frequenz & Pisten für beide Airports via OpenAIP laden
+    const startIcao = startWp.icao || null;
+    if (startIcao && startIcao !== 'GPS' && typeof fetchAirportFreq === 'function') {
+        fetchAirportFreq(startIcao, 'wikiDepFreqText', 'dep');
+    }
+    if (typeof fetchAirportFreq === 'function') {
+        fetchAirportFreq(icao, 'wikiDestFreqText', 'dest');
+    }
+    if (startIcao && startIcao !== 'GPS' && typeof fetchRunwayDetails === 'function') {
+        fetchRunwayDetails(startWp.lat, startWp.lng, 'mDepRwy', startIcao);
+    }
+    if (typeof fetchRunwayDetails === 'function') {
+        fetchRunwayDetails(lat, lon, 'mDestRwy', icao);
+    }
 
     // Karte auf Route einpassen
     const bounds = L.latLngBounds(routeWaypoints.map(w => [w.lat, w.lng || w.lon]));

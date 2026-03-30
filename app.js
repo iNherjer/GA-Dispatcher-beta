@@ -404,6 +404,8 @@ function cyclePanelColor() {
 let map, polyline, markers = [], currentStartICAO, currentDestICAO, currentMissionData = null, selectedAC = "PA-24";
 let currentDepFreq = "";
 let currentDestFreq = "";
+let currentDepElev = null;
+let currentDestElev = null;
 let globalAirports = null, runwayCache = {}, freqCache = {};
 window.drumCache = {};
 
@@ -704,6 +706,8 @@ function saveMissionState() {
         currentDName: currentDName,
         currentDepFreq: currentDepFreq,
         currentDestFreq: currentDestFreq,
+        currentDepElev: currentDepElev,
+        currentDestElev: currentDestElev,
         freqCache: freqCache,
         vpAltWaypoints: typeof vpAltWaypoints !== 'undefined' ? vpAltWaypoints : [],
         vpSegmentAlts: typeof vpSegmentAlts !== 'undefined' ? vpSegmentAlts : [],
@@ -756,6 +760,7 @@ async function restoreMissionState(state) {
     currentStartICAO = state.currentStartICAO; currentDestICAO = state.currentDestICAO;
     currentSName = state.currentSName; currentDName = state.currentDName;
     currentDepFreq = state.currentDepFreq || ""; currentDestFreq = state.currentDestFreq || "";
+    currentDepElev = state.currentDepElev ?? null; currentDestElev = state.currentDestElev ?? null;
     freqCache = state.freqCache || {};
     vpAltWaypoints = state.vpAltWaypoints || [];
     vpSegmentAlts  = state.vpSegmentAlts  || [];
@@ -1874,6 +1879,15 @@ async function fetchAirportFreq(icao, elementId, type) {
         const data = await res.json();
         if (data && data.items && data.items.length > 0) {
             const apt = data.items[0];
+
+            // Elevation aus OpenAIP (unit 0 = Meter, 1 = Fuß)
+            if (apt.elevation != null) {
+                const ev = apt.elevation.value;
+                const elevFt = apt.elevation.unit === 1 ? ev : Math.round(ev * 3.28084);
+                if (type === 'dep')  { currentDepElev  = elevFt; }
+                if (type === 'dest') { currentDestElev = elevFt; }
+            }
+
             if (apt.frequencies && apt.frequencies.length > 0) {
 
                 // Bestimme die relevanteste Frequenz (Tower > Info > Radio)
@@ -2511,6 +2525,9 @@ async function generateMission() {
     if (destLocRadioEl) destLocRadioEl.value = '';
 
     updateMap(start.lat, start.lon, dest.lat, dest.lon, currentStartICAO, dest.n);
+
+    currentDepElev  = (globalAirports && globalAirports[currentStartICAO])  ? (globalAirports[currentStartICAO].elevation  ?? null) : null;
+    currentDestElev = (globalAirports && globalAirports[currentDestICAO])   ? (globalAirports[currentDestICAO].elevation   ?? null) : null;
 
     const destLinks = document.getElementById("wikiDestLinks");
     if (destLinks) destLinks.style.display = isPOI ? "none" : "block";
