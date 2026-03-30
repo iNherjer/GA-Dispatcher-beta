@@ -112,6 +112,10 @@ function renderMainRoute() {
             marker.on('popupopen', () => {
                 marker.getPopup().setContent(_buildAptPopup('DEP', currentSName, currentDepElev));
                 marker.getPopup().update();
+                const depIcao = currentStartICAO;
+                if (depIcao && typeof loadMetarWidget === 'function') {
+                    loadMetarWidget(depIcao, 'wxPopupDep', latlng.lat, latlng.lng || latlng.lon, true);
+                }
             });
         } else if (isDest) {
             marker.bindPopup('');
@@ -120,6 +124,9 @@ function renderMainRoute() {
                 const elev = currentMissionData && currentMissionData.poiName ? currentDepElev : currentDestElev;
                 marker.getPopup().setContent(_buildAptPopup('DEST', currentDName, elev, icao));
                 marker.getPopup().update();
+                if (icao && typeof loadMetarWidget === 'function') {
+                    loadMetarWidget(icao, 'wxPopupDest', latlng.lat, latlng.lng || latlng.lon, true);
+                }
             });
         } else if (isPOI) {
             // POIs bekommen ein spezielles lila Popup ohne Löschen-Button (da es das Missionsziel ist)
@@ -330,7 +337,8 @@ function renderMainRoute() {
 function _buildAptPopup(label, name, elev, icaoForRunways) {
     // icaoForRunways: optionaler ICAO-Key für runwayCache-Lookup
     const rwCacheKey = icaoForRunways || (label === 'DEP' ? currentStartICAO : currentDestICAO);
-    let html = `<div style="font-family:'Courier New',monospace; min-width:160px; color:#111;">`;
+    const wxContainerId = label === 'DEP' ? 'wxPopupDep' : 'wxPopupDest';
+    let html = `<div style="font-family:'Courier New',monospace; min-width:190px; color:#111;">`;
     html += `<b style="font-size:13px;">${label}: ${name || '–'}</b>`;
 
     // Elevation & TPA
@@ -357,6 +365,12 @@ function _buildAptPopup(label, name, elev, icaoForRunways) {
             html += `</div>`;
         }
     }
+
+    // Wetter-Widget Platzhalter
+    html += `<hr style="border-color:#ccc; margin:5px 0;">`;
+    html += `<div id="${wxContainerId}" style="min-height:36px;">`;
+    html += `<div style="font-size:10px; color:#aaa; text-align:center; padding:8px 0;">Wetter lädt…</div>`;
+    html += `</div>`;
 
     html += `</div>`;
     return html;
