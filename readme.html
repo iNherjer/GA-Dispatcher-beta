@@ -180,131 +180,129 @@
     <div class="readme-content">
 
         <h1 style="border-bottom:none; margin-bottom:0;">VFR Multitool</h1>
-        <p style="margin-top:2px; font-style:italic; opacity:0.75;">Electronic Flight Bag für Microsoft Flight Simulator · Dokumentation</p>
+        <p style="margin-top:2px; font-style:italic; opacity:0.75;">Digitales Kartenbrett für Microsoft Flight Simulator</p>
 
-        <p>Das <strong>VFR Multitool</strong> ist ein vollständiges, webbasiertes EFB (Electronic Flight Bag) für General-Aviation-Piloten in <strong>Microsoft Flight Simulator (MSFS)</strong>. Es vereint Missionsplanung, Moving Map, Terrain-Awareness (TAWS), Live-Tracking, KI-Briefings und Crew-Funktionen in einer einzigen Progressive Web App – optimiert für iPad, Tablet und Desktop.</p>
+        <p>Das <strong>VFR Multitool</strong> ist ein digitales Kartenbrett für VFR-Piloten im <strong>Microsoft Flight Simulator (MSFS 2020 / 2024)</strong>. Es hilft dir beim Planen von Flügen, zeigt dir eine Karte mit deiner Position, warnt vor Gelände und Lufträumen und kann deinen Flug live auf ein Tablet übertragen. Du kannst es im Browser auf dem PC, Tablet oder iPad nutzen.</p>
 
         <hr class="section">
 
-        <h2>✈️ Übersicht aller Features</h2>
+        <h2>✈️ Was kann das VFR Multitool?</h2>
 
         <div class="feature-grid">
             <div class="feature-card">
-                <strong>🗺️ Moving Map</strong>
-                Interaktive Leaflet-Karte mit Flugzeug-Icon, Snail Trail, Prediction-Vektor und konfigurierbaren Overlay-Ebenen (Lufträume, Flughäfen, POIs, Traffic).
+                <strong>🗺️ Karte mit Flugposition</strong>
+                Eine Karte zeigt dein Flugzeug in Echtzeit, deine bisherige Flugspur, deine voraussichtliche Flugrichtung und Lufträume, Flughäfen und andere Punkte in deiner Umgebung.
             </div>
             <div class="feature-card">
-                <strong>📊 Vertikales Höhenprofil</strong>
-                Terrain-Canvas mit Terrarium-Tiles (TAWS), Luftraum-Bändern, Hindernissen (Masten/Windkraft), Wetter-Wolken, linearen Features (Flüsse, Autobahnen) und animiertem Flugzeug-Icon mit Pitch.
+                <strong>📊 Höhenprofil</strong>
+                Ein Seitenblick auf deine Route: Du siehst das Gelände unter dir, Lufträume, Hindernisse wie Masten oder Windräder, Wolken und markante Punkte wie Flüsse oder Autobahnen.
             </div>
             <div class="feature-card">
-                <strong>📡 Live-GPS (MSFS)</strong>
-                SimConnect-basierter Tracker-Client sendet per WebSocket Lat/Lon/Alt/HDG in Echtzeit. Automatische Wiederverbindung, PIN-Auth, kein LAN nötig.
+                <strong>📡 Live-Tracking</strong>
+                Überträgt deine Flugposition vom PC (MSFS) auf ein Tablet oder iPad – ganz ohne Netzwerk-Einrichtung. Einfach ein kleines Programm starten, ID und PIN eingeben, fertig.
             </div>
             <div class="feature-card">
-                <strong>✈️ AI Traffic Anzeige</strong>
-                MSFS-Verkehr wird via SimConnect erfasst und im 2-Sekunden-Intervall eingebettet übertragen. Auf der Karte: Cyan-Icons mit relativer Höhenangabe. Im Profil: Seitenriss-Silhouetten.
+                <strong>✈️ Verkehr auf der Karte</strong>
+                Andere Flugzeuge im Simulator werden auf der Karte und im Höhenprofil angezeigt, mit Höhenunterschied und Kennung.
             </div>
             <div class="feature-card">
-                <strong>🧭 HDG-Modus (Heading Profile)</strong>
-                Das Höhenprofil zeigt automatisch 15 Minuten voraus entlang deines aktuellen Kurses – unabhängig von der geplanten Route. Terrain, Lufträume, Hindernisse, Städte und Flughäfen werden in Echtzeit berechnet.
+                <strong>🧭 Vorausschau (HDG-Modus)</strong>
+                Während des Flugs zeigt das Höhenprofil automatisch, was in den nächsten 15 Minuten vor dir liegt – Gelände, Lufträume, Hindernisse und Ortschaften entlang deines aktuellen Kurses.
             </div>
             <div class="feature-card">
-                <strong>🎯 Missions-Generator</strong>
-                Generiert realistische A→B-Flüge oder Sightseeing-Rundflüge (POIs) auf Basis echter Flughäfen und geografischer Daten. Mit Gemini-KI für Story-Briefings.
+                <strong>🎯 Auftragsgenerator</strong>
+                Generiert Flüge mit zufälligem Ziel oder Sightseeing-Rundflüge. Auf Wunsch erstellt eine KI dazu eine kleine Geschichte mit Passagieren, Fracht und Hintergrund.
             </div>
             <div class="feature-card">
                 <strong>☁️ Cloud Sync</strong>
-                Sichert deine komplette Konfiguration, Route und Einstellungen geräteübergreifend über eine eindeutige Pilot-ID. Auto-Sync optional aktivierbar.
+                Speichert deine Einstellungen und Routen in der Cloud, damit du auf verschiedenen Geräten den gleichen Stand hast.
             </div>
             <div class="feature-card">
                 <strong>👥 Crew Board</strong>
-                Multiplayer-Ansicht für Fluggemeinschaften. Teile Flüge in Echtzeit, vergib Rufnamen, PIN-Schutz, Admin-Krone für den Ersteller.
+                Eine gemeinsame Tafel für Fluggruppen. Jeder sieht, wer gerade welchen Flug plant oder unterwegs ist.
             </div>
             <div class="feature-card">
-                <strong>🌤️ METAR &amp; Wetter</strong>
-                Live-METAR-Abruf mit visueller Darstellung: animierter Windkompass, Pisten-Crosswind-Anzeige, Sichtigkeits- und Wolkenauswertung.
+                <strong>🌤️ Wetter (METAR)</strong>
+                Zeigt das aktuelle Wetter am Abflug- und Zielflughafen an: Wind mit Richtung, Seitenwind pro Piste, Sicht und Wolken.
             </div>
             <div class="feature-card">
-                <strong>🤖 Gemini KI</strong>
-                Erstellt kreative, geografisch fundierte Story-Briefings (Passagiere, Fracht, Hintergrundgeschichten) mit echten Wikipedia-Daten als Kontext.
+                <strong>🤖 KI-Briefings</strong>
+                Eine KI erstellt auf Wunsch ein Missions-Briefing mit einer kleinen Geschichte zu deinem Flug – basierend auf echten Infos zur Region.
             </div>
         </div>
 
         <hr class="section">
 
-        <h2>📡 Live-Tracking – Einrichtung</h2>
+        <h2>📡 Live-Tracking einrichten</h2>
 
-        <p>Das Live-Tracking verbindet deinen PC (mit MSFS) über einen Cloud-Relay-Server mit dem VFR Multitool auf iPad oder Browser – ohne LAN-Konfiguration. Der Tracker nutzt <strong>SimConnect</strong> und funktioniert daher ausschließlich mit <strong>Microsoft Flight Simulator (MSFS 2020 / 2024)</strong>.</p>
+        <p>Mit dem Live-Tracking kannst du deine Flugposition vom PC auf ein Tablet oder einen anderen Browser übertragen. Du brauchst dafür keine Netzwerk-Einstellungen zu ändern – alles läuft über das Internet.</p>
 
-        <h3>Schritt 1 – Tracker starten</h3>
+        <h3>Am PC (wo MSFS läuft)</h3>
         <ol>
-            <li>Installiere <a href="https://nodejs.org" target="_blank">Node.js</a> auf deinem Simulations-PC.</li>
-            <li>Navigiere in den Ordner <code>ga-tracker-client</code> und führe <code>npm install</code> aus.</li>
-            <li>Starte den Tracker mit <code>node tracker.js</code> (oder dem mitgelieferten <code>.command</code>-Script auf macOS).</li>
-            <li>Beim ersten Start: Sync-ID und 4-stelligen PIN eingeben. Danach Autostart nach 5 Sekunden.</li>
-            <li><strong>Reihenfolge egal:</strong> Tracker und MSFS können in beliebiger Reihenfolge gestartet werden. Läuft MSFS noch nicht, wartet der Tracker automatisch und verbindet sich, sobald der Simulator bereit ist.</li>
+            <li>Lade die Datei <code>VFR-Multitool-Tracker.exe</code> herunter und starte sie.</li>
+            <li>Gib deine <strong>Sync-ID</strong> und einen <strong>4-stelligen PIN</strong> ein.</li>
+            <li>Das war's – der Tracker verbindet sich von alleine mit dem Flugsimulator.</li>
         </ol>
+        <p><strong>Hinweis:</strong> Die Reihenfolge ist egal. Du kannst den Tracker vor oder nach dem Flugsimulator starten. Er wartet automatisch, bis MSFS bereit ist.</p>
 
-        <h3>Schritt 2 – VFR Multitool verbinden</h3>
+        <h3>Am Tablet / iPad / zweiten PC</h3>
         <ol>
-            <li>Öffne im Tool den Sync-Bereich (unten).</li>
+            <li>Öffne das VFR Multitool im Browser.</li>
+            <li>Gehe zum Sync-Bereich (unten auf der Seite).</li>
             <li>Trage dieselbe <strong>Sync-ID</strong> und denselben <strong>PIN</strong> ein.</li>
-            <li>Klicke auf <span class="key-badge">🔴 Live</span> – das Flugzeug erscheint auf der Karte, sobald du im Cockpit sitzt.</li>
+            <li>Klicke auf <span class="key-badge">🔴 Live</span> – dein Flugzeug erscheint auf der Karte, sobald du im Cockpit sitzt.</li>
         </ol>
 
         <h3>Was wird übertragen?</h3>
         <ul>
-            <li><strong>Position:</strong> Lat, Lon, Altitude (ft MSL), Heading (°)</li>
-            <li><strong>AI Traffic:</strong> Alle MSFS-Flugzeuge im 100 NM Radius (alle 2 Sekunden, eingebettet ins GPS-Paket)</li>
-            <li><strong>Nichts weiter</strong> – kein Audio, kein Video, keine Sim-Events</li>
+            <li>Deine Flugposition (Koordinaten, Höhe, Kurs)</li>
+            <li>Andere Flugzeuge in deiner Nähe (im Umkreis von 100 NM)</li>
+            <li>Sonst nichts – kein Ton, kein Bild</li>
         </ul>
 
         <hr class="section">
 
-        <h2>🧭 HDG-Modus (Heading Profile)</h2>
+        <h2>🧭 Vorausschau (HDG-Modus)</h2>
 
-        <p>Sobald du mit dem Tracker verbunden bist und eine Groundspeed &gt; 20 kts erreicht hast, aktiviert sich das Höhenprofil <strong>automatisch</strong> im HDG-Modus. Statt der geplanten Route siehst du dann 15 Minuten Terrain voraus entlang deines aktuellen Kurses.</p>
+        <p>Sobald du mit dem Tracker verbunden bist und eine gewisse Geschwindigkeit erreicht hast, wechselt das Höhenprofil automatisch in den HDG-Modus. Statt der geplanten Route siehst du dann, was in den nächsten 15 Minuten vor dir liegt – entlang deines aktuellen Kurses.</p>
 
         <ul>
-            <li><strong>Toggle:</strong> Klicke auf den <span class="key-badge">HDG</span>/<span class="key-badge">RTE</span>-Button oben im Profil-Bereich, um manuell zwischen den Modi zu wechseln.</li>
-            <li><strong>Automatisch:</strong> Bei GPS-Verbindung → HDG; bei GPS-Trennung → zurück zu RTE.</li>
-            <li><strong>X-Achse:</strong> Zeigt Minuten voraus (z.B. 2m, 5m, 10m, 15m) statt Strecken-NM.</li>
-            <li><strong>Datenquellen ohne API:</strong> Terrain via Terrarium-Tiles (gecacht), Lufträume aus dem RAM, Städte/Airports aus lokaler Datenbank, Hindernisse aus dem Cache.</li>
-            <li><strong>Aktualisierung:</strong> 1× pro Sekunde, nur wenn sich Kurs (&gt;2°) oder Position (&gt;0.2 NM) geändert haben.</li>
+            <li><strong>Umschalten:</strong> Mit dem <span class="key-badge">HDG</span>/<span class="key-badge">RTE</span>-Button oben im Profil kannst du manuell zwischen den Modi wechseln.</li>
+            <li><strong>Automatisch:</strong> Bei aktiver GPS-Verbindung → HDG-Modus. Bei Trennung → zurück zur geplanten Route.</li>
+            <li>Die Zeitachse zeigt Minuten voraus (z.B. 2 Min, 5 Min, 10 Min, 15 Min).</li>
+            <li>Gelände, Lufträume, Hindernisse, Ortschaften und Flughäfen werden laufend aktualisiert.</li>
         </ul>
 
         <hr class="section">
 
-        <h2>✈️ AI Traffic</h2>
+        <h2>✈️ Verkehr</h2>
 
-        <p>Der Tracker erfasst alle MSFS-KI-Flugzeuge im 100 NM Radius über SimConnect und sendet sie alle 2 Sekunden eingebettet in das GPS-Paket.</p>
+        <p>Wenn Live-Tracking aktiv ist, werden auch die anderen Flugzeuge im Simulator übertragen und angezeigt.</p>
 
-        <h3>Karte</h3>
+        <h3>Auf der Karte</h3>
         <ul>
-            <li>Kleine Cyan-Icons (Top-Down-Silhouette) mit Heading-Rotation</li>
-            <li>Relative Höhenanzeige: <span style="color:#ff8c00;">■ orange</span> (&lt;300 ft Trennung), <span style="color:#00c851;">■ grün</span> (höher), <span style="color:#aaa;">■ grau</span> (tiefer)</li>
-            <li>Callsign oder Object-ID als Label</li>
-            <li>Toggle: <span class="key-badge">✈ Traffic</span>-Button in der Karten-Toolbar</li>
+            <li>Kleine blaue Symbole zeigen die anderen Flugzeuge von oben, mit Flugrichtung</li>
+            <li>Farbiger Höhenunterschied: <span style="color:#ff8c00;">■ orange</span> (nah an deiner Höhe), <span style="color:#00c851;">■ grün</span> (höher), <span style="color:#aaa;">■ grau</span> (tiefer)</li>
+            <li>Kennung als Beschriftung</li>
+            <li>Ein-/ausblenden: <span class="key-badge">✈ Traffic</span>-Button in der Karten-Leiste</li>
         </ul>
 
-        <h3>Höhenprofil</h3>
+        <h3>Im Höhenprofil</h3>
         <ul>
-            <li>Seitenriss-Silhouette (Ellipse + Flügel + Leitwerk) an der berechneten Position</li>
-            <li>Callsign und relative Höhe (&Delta;ft) als Label</li>
-            <li>Funktioniert in beiden Modi: RTE und HDG</li>
-            <li>Toggle: <span class="key-badge">✈ Traffic</span>-Button in der Profil-Toolbar</li>
+            <li>Flugzeug-Silhouette von der Seite an der passenden Stelle im Profil</li>
+            <li>Kennung und Höhenunterschied als Beschriftung</li>
+            <li>Ein-/ausblenden: <span class="key-badge">✈ Traffic</span>-Button in der Profil-Leiste</li>
         </ul>
 
         <hr class="section">
 
-        <h2>🗺️ Kartentisch</h2>
+        <h2>🗺️ Karte</h2>
 
         <ul>
-            <li><strong>Wegpunkte:</strong> Tippe auf die Karte, um Waypoints zu setzen. Per Drag verschieben, Doppeltipp zum Löschen.</li>
-            <li><strong>Snapping:</strong> Aktiviere 🧲 – Waypoints rasten automatisch an VORs, NDBs, Fixes oder Flughäfen ein.</li>
-            <li><strong>Lufträume:</strong> Overlay zeigt alle relevanten VFR-Lufträume mit Farb-Codierung nach Klasse (A–G).</li>
-            <li><strong>Kacheln:</strong> Standard OpenStreetMap. Kacheln werden im Service Worker gecacht für Offline-Nutzung.</li>
+            <li><strong>Wegpunkte setzen:</strong> Tippe auf die Karte, um Punkte auf deiner Route zu setzen. Verschieben per Drag, Doppeltipp zum Löschen.</li>
+            <li><strong>Einrasten:</strong> Aktiviere 🧲 – Wegpunkte rasten automatisch an Funkfeuern (VOR, NDB), Meldepunkten oder Flughäfen ein.</li>
+            <li><strong>Lufträume:</strong> Farbige Flächen zeigen die verschiedenen Luftraumklassen an.</li>
+            <li><strong>Offline:</strong> Bereits geladene Kartenausschnitte bleiben auch ohne Internet verfügbar.</li>
         </ul>
 
         <hr class="section">
@@ -312,24 +310,24 @@
         <h2>📊 Höhenprofil – Bedienung</h2>
 
         <ul>
-            <li><strong>Scrubben:</strong> Tippe/Klicke auf das Profil, um die Magenta-Markierung zu setzen und Höhen/Koordinaten einzublenden.</li>
-            <li><strong>Zoom:</strong> Pinch-to-Zoom oder Mausrad für horizontales Reinzoomen in die Route.</li>
-            <li><strong>Cruise-Höhe:</strong> Ziehe die rote Linie vertikal, um die Reiseflughöhe anzupassen (nur RTE-Modus).</li>
-            <li><strong>Airspaces:</strong> Luftraum-Bänder werden farbig im Profil eingeblendet. Klicke für Bezeichnung und Grenzen.</li>
-            <li><strong>Hindernisse:</strong> Masten (rot) und Windkraftanlagen (cyan) mit Höhe in ft.</li>
-            <li><strong>Wetter-Wolken:</strong> Wolkenbasis und -decke aus METAR als transparente Bänder (RTE-Modus).</li>
-            <li><strong>Lineare Features:</strong> Flüsse und Autobahnen werden als vertikale Linien im Profil angezeigt, in beiden Modi.</li>
+            <li><strong>Markierung setzen:</strong> Tippe oder klicke ins Profil, um an einer Stelle Höhe und Koordinaten einzublenden.</li>
+            <li><strong>Zoomen:</strong> Zwei Finger zusammenziehen (Pinch) oder Mausrad drehen, um in die Route hineinzuzoomen.</li>
+            <li><strong>Reiseflughöhe:</strong> Ziehe die rote Linie nach oben oder unten, um deine gewünschte Flughöhe einzustellen (nur im Routen-Modus).</li>
+            <li><strong>Lufträume:</strong> Farbige Bänder zeigen Lufträume im Profil. Antippen für Details.</li>
+            <li><strong>Hindernisse:</strong> Masten (rot) und Windräder (blau) mit Höhe in Fuß.</li>
+            <li><strong>Wolken:</strong> Aus den Wetterdaten werden Wolkenschichten als Bänder eingeblendet (im Routen-Modus).</li>
+            <li><strong>Flüsse &amp; Autobahnen:</strong> Werden als Linien im Profil angezeigt – in beiden Modi.</li>
         </ul>
 
         <hr class="section">
 
-        <h2>🎯 Missions-Generator</h2>
+        <h2>🎯 Auftragsgenerator</h2>
 
         <ol>
             <li>Gib deinen Startflughafen unter <span class="key-badge">DEP</span> ein (ICAO-Code, z.B. <code>EDTW</code>).</li>
-            <li>Wähle dein Flugzeug-Preset (C172, PA24 usw.) oder stelle TAS &amp; GPH manuell ein.</li>
-            <li>Wähle Auftragstyp (<em>Flugplatz</em> oder <em>POI-Rundflug</em>), Distanz und Region.</li>
-            <li>Klicke <span class="key-badge">DISPATCH</span> – das Tool wählt einen passenden Zielflughafen und generiert optional ein KI-Briefing.</li>
+            <li>Wähle dein Flugzeug (z.B. C172, PA24) oder stelle Geschwindigkeit und Verbrauch selbst ein.</li>
+            <li>Wähle die Art des Flugs (<em>Flugplatz</em> oder <em>Rundflug über Sehenswürdigkeiten</em>), Entfernung und Region.</li>
+            <li>Klicke <span class="key-badge">DISPATCH</span> – das Tool sucht ein passendes Ziel und erstellt auf Wunsch ein KI-Briefing dazu.</li>
         </ol>
 
         <hr class="section">
@@ -337,11 +335,11 @@
         <h2>☁️ Cloud Sync</h2>
 
         <ul>
-            <li>Klicke auf 🎲 im Sync-Bereich, um eine eindeutige Pilot-ID zu generieren.</li>
-            <li><span class="key-badge">☁️ SAVE</span> – Sichert den aktuellen Stand manuell in der Cloud.</li>
-            <li><span class="key-badge">📥 LOAD</span> – Lädt den Cloud-Stand auf dieses Gerät.</li>
-            <li><strong>Auto-Sync:</strong> Aktiviere den Schalter – App lädt beim Öffnen und speichert beim Schließen automatisch.</li>
-            <li>Alle Geräte mit derselben Pilot-ID teilen denselben Speicherstand.</li>
+            <li>Klicke auf 🎲 im Sync-Bereich, um eine eigene Pilot-ID zu erstellen.</li>
+            <li><span class="key-badge">☁️ SAVE</span> – Speichert deinen aktuellen Stand in der Cloud.</li>
+            <li><span class="key-badge">📥 LOAD</span> – Lädt den gespeicherten Stand auf dieses Gerät.</li>
+            <li><strong>Automatisch:</strong> Schalte Auto-Sync ein – dann wird beim Öffnen geladen und beim Schließen gespeichert.</li>
+            <li>Alle Geräte mit derselben Pilot-ID teilen den gleichen Speicherstand.</li>
         </ul>
 
         <hr class="section">
@@ -349,46 +347,41 @@
         <h2>👥 Crew Board</h2>
 
         <ul>
-            <li>Erstelle eine Gruppe (z.B. <code>EDTK-Crew</code>) mit optionalem 4-stelligem PIN.</li>
+            <li>Erstelle eine Gruppe (z.B. <code>EDTK-Crew</code>), optional mit einem 4-stelligen PIN.</li>
             <li>Gib dir einen Rufnamen (z.B. <code>Papa-Golf</code>).</li>
-            <li>Der erste Teilnehmer erhält die Admin-Krone 👑 und kann Mitglieder kicken 👢.</li>
-            <li>Im Briefing auf 📌 klicken, um den aktuellen Flug live ans Crew-Brett zu heften.</li>
-            <li>Alle Mitglieder sehen in Echtzeit, wer welchen Flug plant oder gerade fliegt.</li>
+            <li>Wer die Gruppe erstellt, wird zum Admin 👑 und kann Mitglieder entfernen.</li>
+            <li>Im Briefing auf 📌 klicken, um deinen Flug ans Crew-Brett zu heften.</li>
+            <li>Alle Mitglieder sehen, wer gerade welchen Flug plant oder unterwegs ist.</li>
         </ul>
 
         <hr class="section">
 
-        <h2>🌤️ METAR &amp; Wetter</h2>
+        <h2>🌤️ Wetter (METAR)</h2>
 
         <ul>
-            <li>METAR wird automatisch für den Abflug- und Zielflughafen abgerufen.</li>
-            <li>Visueller Windkompass mit animierten Pfeilen zeigt Richtung und Stärke.</li>
-            <li>Crosswind-Komponente für jede Piste wird berechnet und farbig markiert.</li>
-            <li>Sichtigkeit, Wolkenbasis, Temperatur und Taupunkt werden aufbereitet dargestellt.</li>
-            <li>Wolkenbasis fließt automatisch ins Höhenprofil ein (RTE-Modus).</li>
+            <li>Das Wetter wird automatisch für den Abflug- und Zielflughafen abgerufen.</li>
+            <li>Ein Windkompass zeigt Richtung und Stärke des Windes an.</li>
+            <li>Für jede Piste wird der Seitenwind berechnet und farbig dargestellt.</li>
+            <li>Sicht, Wolken, Temperatur und Taupunkt werden übersichtlich angezeigt.</li>
         </ul>
 
         <hr class="section">
 
-        <h2>🤖 KI-Integration (Gemini)</h2>
+        <h2>🤖 KI-Briefings einrichten (Gemini)</h2>
 
         <ol>
-            <li>Hole dir einen kostenlosen API-Key im <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>.</li>
-            <li>Füge ihn unter <strong>KI-Dispatcher</strong> im Einstellungsbereich ein.</li>
-            <li>Beim Dispatchen generiert die KI ein kreatives Story-Briefing auf Basis echter Wikipedia-Daten zur Region.</li>
+            <li>Erstelle dir einen kostenlosen Schlüssel im <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>.</li>
+            <li>Füge den Schlüssel im VFR Multitool unter <strong>KI-Dispatcher</strong> ein.</li>
+            <li>Ab jetzt erstellt die KI beim Dispatchen ein kleines Briefing mit einer Geschichte zu deinem Flug.</li>
         </ol>
 
         <hr class="section">
 
-        <h2>🔧 Technische Details</h2>
+        <h2>💡 Tipps</h2>
 
         <ul>
-            <li><strong>PWA:</strong> Installierbar auf iOS (Safari → Zum Home-Bildschirm) und Android/Desktop. Läuft offline für gecachte Routen.</li>
-            <li><strong>Service Worker:</strong> Cacht alle statischen Assets. API-Calls (Wetter, Lufträume) immer live.</li>
-            <li><strong>Terrain:</strong> Terrarium RGB-Tiles (Mapzen) – kostenlos, unbegrenzt, global, gecacht im Browser.</li>
-            <li><strong>Lufträume:</strong> OpenAIP via CORS-Proxy, nach Abruf für Session gecacht.</li>
-            <li><strong>Traffic-Relay:</strong> WebSocket-Server bei <code>websocketrelais.onrender.com</code> – Traffic wird als Feld im GPS-Paket eingebettet (kein separater Channel).</li>
-            <li><strong>SimConnect-Name:</strong> <code>VFR-Multitool-v206</code> (MSFS muss laufen, bevor der Tracker startet).</li>
+            <li><strong>Auf dem iPad installieren:</strong> Öffne die Seite in Safari, tippe auf das Teilen-Symbol und wähle „Zum Home-Bildschirm". Dann verhält sich das Tool wie eine App.</li>
+            <li><strong>Offline nutzen:</strong> Bereits geladene Karten und Routen bleiben verfügbar, auch ohne Internetverbindung. Wetter und Lufträume brauchen aber eine Verbindung.</li>
         </ul>
 
         <div style="text-align:center; margin-top:40px; font-size:0.8em; opacity:0.5;">
