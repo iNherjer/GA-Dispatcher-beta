@@ -2024,11 +2024,17 @@ function toggleAirspaceHighlight(idx) {
     vpStartHighlightPulse();
 }
 
+// Erkennt Fallschirmsprunggebiete an Namen wie "PARA SCHWENNINGEN", "PARA ROTTWEIL"
+function isParaAirspace(a) {
+    return /\bPARA\b/i.test(a.name || '');
+}
+
 function getAirspaceDisplayName(a) {
     const style = getAirspaceStyle(a);
     let name = a.name || 'Unbekannt';
     // Entferne überflüssige Begriffe, ABER behalte die Klassen-Buchstaben (wie C oder D) bei!
     name = name.replace(/\b(TMA|CTR|CTA|TMZ|RMZ|FIS)\b/ig, '');
+    if (isParaAirspace(a)) name = name.replace(/\bPARA\b/ig, '').trim();
     return `${name.trim()} [${style.category}]`;
 }
 
@@ -2053,10 +2059,14 @@ function getAirspaceFreqInfo(a) {
         }
     }
     // For RMZ (type 6 or 28) and FIS (type 33): show freq
+    // Para-Zonen (PARA-RMZ): orangene Farbe + 🪂 Icon
     if ([6, 28, 33].includes(t)) {
         const primary = a.frequencies.find(f => f.primary) || a.frequencies[0];
         if (primary) {
-            return `<span style="color:#66cccc; font-weight:bold; font-size:10px;">📻 ${primary.name || 'INFO'}: ${primary.value}</span>`;
+            const isPara = isParaAirspace(a);
+            const col  = isPara ? '#ffaa00' : '#66cccc';
+            const icon = isPara ? '🪂' : '📻';
+            return `<span style="color:${col}; font-weight:bold; font-size:10px;">${icon} ${primary.name || 'INFO'}: ${primary.value}</span>`;
         }
     }
 
@@ -2082,6 +2092,7 @@ function getAirspaceStyle(a) {
     if (t === 7) return { color: '#4da6ff', icon: '⚠️', mapColor: '#4da6ff', category: `TMA${cls}` };
     if (t === 26) return { color: '#4da6ff', icon: '⚠️', mapColor: '#4da6ff', category: `CTA${cls}` };
     if (t === 5 || t === 27) return { color: '#9966ff', icon: '📡', mapColor: '#9966ff', category: 'TMZ' };
+    if ((t === 6 || t === 28) && isParaAirspace(a)) return { color: '#ffaa00', icon: '🪂', mapColor: '#ffaa00', category: 'Para' };
     if (t === 6 || t === 28) return { color: '#66cccc', icon: '📡', mapColor: '#66cccc', category: 'RMZ' };
     if (t === 33) return { color: '#888', icon: '🌐', mapColor: '#888', category: 'FIS' };
     
