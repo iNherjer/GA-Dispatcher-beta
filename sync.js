@@ -870,6 +870,30 @@ function updateLivePlanePosition(lat, lon, alt, hdg) {
             }
         }
 
+        // Hindernisse + Städte positions-basiert laden wenn kein Flugplan gesetzt oder HDG-Modus
+        const _needsGpsData = _isHdgModeNow || !_hasRoute;
+        if (_needsGpsData) {
+            // Hindernisse: max. alle 2 Minuten UND bei Positionsänderung >~6km
+            const _obsKey = `${lat.toFixed(1)}_${lon.toFixed(1)}`;
+            const _obsNow = Date.now();
+            if ((window._lastGpsObsKey !== _obsKey || !window._lastGpsObsTime || (_obsNow - window._lastGpsObsTime) > 120000)
+                && typeof window.fetchGpsObstacles === 'function') {
+                window._lastGpsObsKey = _obsKey;
+                window._lastGpsObsTime = _obsNow;
+                window.fetchGpsObstacles(lat, lon);
+            }
+            // Städte: bei Positionsänderung >~700m (RAM-only, kein API-Limit)
+            const _cityKey = `${lat.toFixed(2)}_${lon.toFixed(2)}`;
+            if (window._lastGpsCityKey !== _cityKey && typeof window.updateGpsCities === 'function') {
+                window._lastGpsCityKey = _cityKey;
+                window.updateGpsCities(lat, lon);
+            }
+        } else {
+            // Zurücksetzen damit beim nächsten Eintritt in GPS-Modus sofort geladen wird
+            window._lastGpsObsKey = null;
+            window._lastGpsCityKey = null;
+        }
+
         // Airspace-Warnungen prüfen (Sprach-Alerts via AWM)
         if (typeof checkAirspaceWarnings === 'function') checkAirspaceWarnings(_awmPredPoints);
 

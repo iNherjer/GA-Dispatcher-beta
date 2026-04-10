@@ -184,21 +184,30 @@ function _awDrainQueue() {
     _awQueueBusy = true;
     const keys = _awQueue.shift();
     if (!_tawsAudioCtx || !_awLoaded) { _awDrainQueue(); return; }
+
+    // Null-Keys (kein Luftraumtyp) herausfiltern; fehlende Buffer warnen
+    const valid = keys.filter(k => {
+        if (!k) return false;
+        if (!_awBuffers[k]) { console.warn('[AWM] Buffer fehlt:', k); return false; }
+        return true;
+    });
+    if (!valid.length) { setTimeout(_awDrainQueue, 0); return; }
+
+    // Clips via onended ketten statt mit fixen Timestamps vorausplanen.
+    // Das verhindert dass Chrome/Quest-3 Clips verwirft wenn der AudioContext
+    // kurz suspended war und der geplante Startzeitpunkt bereits vergangen ist.
     _tawsResumeThen(() => {
-        let t = _tawsAudioCtx.currentTime + 0.15;
-        let totalDur = 0;
-        for (const key of keys) {
-            const buf = _awBuffers[key];
-            if (!buf) { console.warn('[AWM] Buffer fehlt:', key); continue; }
+        let i = 0;
+        function next() {
+            if (i >= valid.length) { _awDrainQueue(); return; }
+            const buf = _awBuffers[valid[i++]];
             const src = _tawsAudioCtx.createBufferSource();
             src.buffer = buf;
             src.connect(_awmMasterGain || _tawsAudioCtx.destination);
-            src.start(t);
-            totalDur += buf.duration + 0.08;
-            t += buf.duration + 0.08;
+            src.onended = () => setTimeout(next, 80);
+            src.start(_tawsAudioCtx.currentTime + 0.05);
         }
-        // Nächste Ansage erst nach Ende dieser starten
-        setTimeout(_awDrainQueue, Math.max(0, totalDur * 1000));
+        next();
     });
 }
 

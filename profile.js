@@ -107,6 +107,33 @@ async function fetchProfileLandmarks(elevData) {
     return landmarks.sort((a,b) => b.pop - a.pop);
 }
 
+// GPS-zentrierte Städte/Airports laden (ohne Flugplan, aus RAM)
+async function updateGpsCities(lat, lon) {
+    await loadGlobalCities();
+    await loadGlobalAirports();
+    let landmarks = [];
+
+    if (globalCities && globalCities.length > 0) {
+        globalCities.forEach(c => {
+            if (Math.abs(c.lat - lat) > 0.22 || Math.abs(c.lon - lon) > 0.33) return;
+            const nav = calcNav(lat, lon, c.lat, c.lon);
+            if (nav.dist > 15) return;
+            landmarks.push({ name: c.name, type: c.pop >= 15000 ? 'city' : 'town', pop: c.pop || 5000, distNM: nav.dist });
+        });
+    }
+    if (typeof globalAirports !== 'undefined' && globalAirports) {
+        for (let k in globalAirports) {
+            const a = globalAirports[k];
+            const nav = calcNav(lat, lon, a.lat, a.lon);
+            if (nav.dist <= 10) landmarks.push({ name: a.icao, type: 'apt', pop: 100000000, distNM: nav.dist });
+        }
+    }
+
+    vpLandmarks = landmarks.sort((a, b) => b.pop - a.pop);
+    window.vpBgNeedsUpdate = true;
+    if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
+}
+window.updateGpsCities = updateGpsCities;
 
 
 // Helfer zum Entdoppeln von Hindernissen (nimmt das höchste in einem 0.5 NM Fenster)
@@ -328,6 +355,77 @@ async function fetchProfileObstacles(elevData, signal) {
     console.log(`[Overpass] Alle Segmente verarbeitet.`);
     return { obs: vpObstacles, lin: vpLinearFeatures };
 }
+
+// GPS-zentrierte Hindernisse laden (ohne Flugplan, 30×30 km Box, max. alle 2 Minuten)
+async function fetchGpsObstacles(lat, lon) {
+    const cacheKey = `ga_gps_obs_${lat.toFixed(1)}_${lon.toFixed(1)}`;
+    try {
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+        if (cached && (Date.now() - cached.ts) < 30 * 60 * 1000) {
+            vpObstacles = cached.obs;
+            window.vpBgNeedsUpdate = true;
+            if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
+            return;
+        }
+    } catch(e) {}
+
+    const minLat = (lat - 0.135).toFixed(4), maxLat = (lat + 0.135).toFixed(4);
+    const minLon = (lon - 0.20).toFixed(4),  maxLon = (lon + 0.20).toFixed(4);
+    const bbox = `${minLat},${minLon},${maxLat},${maxLon}`;
+    const query = `[out:json][timeout:30][bbox:${bbox}];(node["generator:source"="wind"];node["man_made"~"mast|tower"]["height"];);out body qt;`;
+
+    const overpassServers = [
+        'https://overpass-api.de/api/interpreter',
+        'https://lz4.overpass-api.de/api/interpreter',
+        'https://z.overpass-api.de/api/interpreter'
+    ];
+    window.vpServerOffset = (window.vpServerOffset || 0) + 1;
+    const serverUrl = overpassServers[window.vpServerOffset % overpassServers.length];
+
+    try {
+        const res = await fetch(serverUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `data=${encodeURIComponent(query)}`
+        });
+        if (!res.ok) return;
+        const json = await res.json();
+        if (!json.elements) return;
+
+        let rawObs = [];
+        json.elements.forEach(e => {
+            if (e.type !== 'node' || !e.lat || !e.lon) return;
+            const hFt = parseFloat(e.tags?.height || 0) * 3.28084;
+            if (hFt < 50) return;
+            const nav = calcNav(lat, lon, e.lat, e.lon);
+            const isWind = e.tags?.['generator:source'] === 'wind';
+            rawObs.push({ type: isWind ? 'windrad' : 'mast', hFt, distNM: nav.dist, elevFt: 0, groundElevFt: 0, lat: e.lat, lon: e.lon });
+        });
+
+        let buckets = {};
+        rawObs.forEach(obs => {
+            let bIdx = Math.floor(obs.distNM / 0.5);
+            if (!buckets[bIdx]) buckets[bIdx] = [];
+            buckets[bIdx].push(obs);
+        });
+        let finalObs = [];
+        for (let k in buckets) {
+            let group = buckets[k].sort((a,b) => b.hFt - a.hFt);
+            let rep = group[0]; rep.count = group.length;
+            finalObs.push(rep);
+        }
+
+        vpObstacles = finalObs;
+        window.vpBgNeedsUpdate = true;
+        if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
+
+        try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), obs: finalObs })); } catch(e) {}
+        console.log(`[GPS-Obs] ${finalObs.length} Hindernisse im 30km-Umkreis geladen.`);
+    } catch(e) {
+        console.warn('[GPS-Obs] Overpass-Fehler:', e);
+    }
+}
+window.fetchGpsObstacles = fetchGpsObstacles;
 
 function triggerVerticalProfileUpdate() {
     if (vpProfileFastTimeout) clearTimeout(vpProfileFastTimeout);
