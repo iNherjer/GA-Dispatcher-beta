@@ -4124,6 +4124,28 @@ body.theme-navcom .btn-menu:active {
     pointer-events: none;
     min-width: 100px;
 }
+.next-leg-nav-btn {
+    border: 1px solid rgba(255,255,255,0.22);
+    background: rgba(255,255,255,0.1);
+    color: #d8eaff;
+    width: 17px;
+    height: 17px;
+    line-height: 14px;
+    border-radius: 4px;
+    font-size: 10px;
+    padding: 0;
+    cursor: pointer;
+}
+.next-leg-nav-btn:hover {
+    background: rgba(255,255,255,0.17);
+}
+.next-leg-nav-btn:active {
+    background: rgba(255,255,255,0.22);
+}
+.next-leg-nav-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
 .tele-val {
     font-weight: bold;
     font-size: 16px;
@@ -4137,11 +4159,40 @@ body.theme-navcom .btn-menu:active {
 }
 
 @media (max-width: 900px) {
-    #liveNextWpBox {
+    #liveTelemetryBox {
+        top: 10px !important;
         left: 50% !important;
-        top: 98px !important;
-        transform: translateX(-50%) !important;
-        min-width: 180px !important;
+        right: auto !important;
+        transform: translateX(-103%) !important;
+        min-width: 102px !important;
+        padding: 8px 9px !important;
+        font-size: 12px !important;
+    }
+    #liveTelemetryBox .tele-val {
+        font-size: 14px !important;
+        letter-spacing: 0.2px !important;
+    }
+    #liveTelemetryBox .tele-unit {
+        font-size: 9px !important;
+        margin-left: 2px !important;
+    }
+    #liveNextWpBox {
+        top: 10px !important;
+        left: 50% !important;
+        right: auto !important;
+        transform: translateX(3%) !important;
+        width: 112px !important;
+        min-width: 112px !important;
+        padding: 7px 7px !important;
+    }
+    #liveNextWpBox .tele-val {
+        font-size: 12px !important;
+        letter-spacing: 0.2px !important;
+    }
+    #liveNextWpBox .next-leg-nav-btn {
+        width: 16px !important;
+        height: 16px !important;
+        font-size: 9px !important;
     }
 }
 

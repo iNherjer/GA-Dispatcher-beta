@@ -36,11 +36,24 @@ let predictionMarkers = [];
 let lastPredictionUpdate = 0;
 let smoothedGS = 0;
 let smoothedVS = 0;
+let liveToWpLine = null;
 
 // --- LIVE TRAFFIC ---
 let liveTrafficMarkers = {}; // key → { marker }
 window.vpTrafficData = [];
 window.vpTrafficMapVisible = true;
+
+function isMapHintOn(key, fallback = true) {
+    if (typeof window.isMapHintEnabled === 'function') return window.isMapHintEnabled(key);
+    return fallback;
+}
+
+window.clearLiveToWpLine = function() {
+    if (liveToWpLine) {
+        try { liveToWpLine.remove(); } catch (e) {}
+        liveToWpLine = null;
+    }
+};
 
 function toggleAutoFollow() {
     isAutoFollow = !isAutoFollow;
@@ -605,10 +618,52 @@ let gpsWatchdog;
 let gpsReconnectDelay = 2000; // Start: 2s, wächst bei wiederholtem Fehlschlag
 let liveNextLegIndex = 0;
 let liveNextRouteKey = '';
+let liveActiveWpIndex = null; // null = automatisch (aus Leg), sonst manuell gewählter Ziel-Wegpunkt
+const liveFreqLookupPending = {};
+
+function clampLiveLegIndex(idx) {
+    if (typeof routeWaypoints === 'undefined' || !Array.isArray(routeWaypoints) || routeWaypoints.length < 2) return 0;
+    const maxLeg = routeWaypoints.length - 2;
+    return Math.max(0, Math.min(Number(idx) || 0, maxLeg));
+}
+
+function clampLiveWpIndex(idx) {
+    if (typeof routeWaypoints === 'undefined' || !Array.isArray(routeWaypoints) || routeWaypoints.length < 1) return 0;
+    const maxWp = routeWaypoints.length - 1;
+    return Math.max(0, Math.min(Number(idx) || 0, maxWp));
+}
+
+function setNextLegButtonStates(activeWp, maxWp) {
+    const prevBtn = document.getElementById('nextLegPrevBtn');
+    const nextBtn = document.getElementById('nextLegNextBtn');
+    if (prevBtn) prevBtn.disabled = activeWp <= 0;
+    if (nextBtn) nextBtn.disabled = activeWp >= maxWp;
+}
+
+window.stepLiveNextLegPreview = function(delta, ev) {
+    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation();
+    if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
+    if (typeof routeWaypoints === 'undefined' || !Array.isArray(routeWaypoints) || routeWaypoints.length < 2) return;
+
+    const autoWpIdx = clampLiveWpIndex(liveNextLegIndex + 1);
+    const currentWpIdx = (liveActiveWpIndex == null) ? autoWpIdx : liveActiveWpIndex;
+    liveActiveWpIndex = clampLiveWpIndex(currentWpIdx + (delta < 0 ? -1 : 1));
+
+    const pos = window.lastLiveGpsPos;
+    if (pos && Number.isFinite(pos.lat) && Number.isFinite(pos.lon)) {
+        updateNextWpTelemetry(pos.lat, pos.lon);
+    }
+};
 
 function hideNextWpTelemetry() {
     const box = document.getElementById('liveNextWpBox');
     if (box) box.style.display = 'none';
+    setNextLegButtonStates(0, 0);
+    if (liveToWpLine) {
+        try { liveToWpLine.remove(); } catch (e) {}
+        liveToWpLine = null;
+    }
+    liveActiveWpIndex = null;
 }
 
 function routeKeyForLiveNav() {
@@ -660,6 +715,141 @@ function getWpDisplayName(idx) {
     return routeWaypoints[idx].name || `WP ${idx}`;
 }
 
+function getExplicitFrequencyFromText(txt) {
+    if (!txt) return '';
+    const m = String(txt).match(/\((\d{3}\.\d{2,3}|\d{3}\.\d{1}|\d{3})\)/);
+    return m ? m[1] : '';
+}
+
+function getPrimaryAirportFrequency(icao, typeHint = null) {
+    if (!icao || typeof freqCache === 'undefined') return '';
+    const cached = freqCache[icao];
+    if (Array.isArray(cached) && cached.length > 0) {
+        const pref = cached.find(f => /turm|tower|info|radio|ctaf|unicom/i.test(String(f.label || '')));
+        const best = pref || cached[0];
+        return best?.value || '';
+    }
+
+    if (typeof fetchAirportFreq === 'function' && !liveFreqLookupPending[icao]) {
+        liveFreqLookupPending[icao] = true;
+        Promise.resolve(fetchAirportFreq(icao, null, typeHint)).finally(() => {
+            liveFreqLookupPending[icao] = false;
+        });
+    }
+    return '';
+}
+
+function getRegionalFisFrequency(lat, lon) {
+    if (typeof activeAirspaces === 'undefined' || !Array.isArray(activeAirspaces) || activeAirspaces.length === 0) return '';
+    const withFreq = activeAirspaces.filter(as => as?.type === 33 && Array.isArray(as.frequencies) && as.frequencies.length > 0);
+    if (withFreq.length === 0) return '';
+
+    // 1) Erst: Punkt-in-Polygon, falls Geometrie verfügbar
+    if (typeof vpPointInPoly === 'function') {
+        for (const as of withFreq) {
+            if (!as.geometry) continue;
+            const polys = [];
+            if (as.geometry.type === 'Polygon') polys.push(as.geometry.coordinates[0]);
+            else if (as.geometry.type === 'MultiPolygon') as.geometry.coordinates.forEach(mc => polys.push(mc[0]));
+            for (const poly of polys) {
+                if (vpPointInPoly({ lat, lon }, poly)) {
+                    const primary = as.frequencies.find(f => f.primary) || as.frequencies[0];
+                    if (primary?.value) return `${primary.value}`;
+                }
+            }
+        }
+    }
+
+    // 2) Fallback: nächstgelegene FIS-Zone über groben Schwerpunkt
+    let best = null;
+    let bestNm = Infinity;
+    for (const as of withFreq) {
+        if (!as.geometry) continue;
+        let ring = null;
+        if (as.geometry.type === 'Polygon') ring = as.geometry.coordinates[0];
+        else if (as.geometry.type === 'MultiPolygon' && as.geometry.coordinates[0]) ring = as.geometry.coordinates[0][0];
+        if (!ring || ring.length < 3) continue;
+        let sumLat = 0, sumLon = 0;
+        ring.forEach(c => { sumLon += c[0]; sumLat += c[1]; });
+        const cLat = sumLat / ring.length;
+        const cLon = sumLon / ring.length;
+        if (typeof calcNav !== 'function') continue;
+        const d = calcNav(lat, lon, cLat, cLon).dist;
+        if (d < bestNm) {
+            bestNm = d;
+            best = as;
+        }
+    }
+    if (best) {
+        const primary = best.frequencies.find(f => f.primary) || best.frequencies[0];
+        if (primary?.value) return `${primary.value}`;
+    }
+    return '';
+}
+
+function getWpFrequencyText(wpIdx) {
+    if (typeof routeWaypoints === 'undefined' || !Array.isArray(routeWaypoints) || !routeWaypoints[wpIdx]) return '';
+    const wp = routeWaypoints[wpIdx];
+    const lastIdx = routeWaypoints.length - 1;
+    const wpName = String(getWpDisplayName(wpIdx) || '');
+
+    // Wenn im Namen bereits eine Frequenz steckt (z.B. gesnappter APT-WP), nichts doppeln.
+    if (getExplicitFrequencyFromText(wpName)) return '';
+
+    if (wpIdx === 0) {
+        const icao = (typeof currentStartICAO !== 'undefined') ? currentStartICAO : '';
+        const f = (typeof currentDepFreq !== 'undefined' && currentDepFreq) ? currentDepFreq : getPrimaryAirportFrequency(icao, 'dep');
+        return f ? `📻 ${f}` : '';
+    }
+    if (wpIdx === lastIdx) {
+        const icao = (typeof currentDestICAO !== 'undefined') ? currentDestICAO : '';
+        const f = (typeof currentDestFreq !== 'undefined' && currentDestFreq) ? currentDestFreq : getPrimaryAirportFrequency(icao, 'dest');
+        return f ? `📻 ${f}` : '';
+    }
+
+    const fis = getRegionalFisFrequency(wp.lat, wp.lng || wp.lon);
+    return fis ? `🌐 FIS ${fis}` : '';
+}
+
+function escapeHtmlLite(s) {
+    return String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function updateLiveToActiveWpLine(lat, lon, activeWpIdx = null) {
+    if (typeof map === 'undefined' || !map || typeof L === 'undefined') return;
+    if (!isMapHintOn('magentaLine', true)) {
+        if (liveToWpLine) { try { liveToWpLine.remove(); } catch (e) {} liveToWpLine = null; }
+        return;
+    }
+    if (typeof routeWaypoints === 'undefined' || !Array.isArray(routeWaypoints) || routeWaypoints.length < 2) {
+        if (liveToWpLine) { try { liveToWpLine.remove(); } catch (e) {} liveToWpLine = null; }
+        return;
+    }
+    const autoWpIdx = clampLiveWpIndex(liveNextLegIndex + 1);
+    const wpIdx = (activeWpIdx == null) ? ((liveActiveWpIndex == null) ? autoWpIdx : clampLiveWpIndex(liveActiveWpIndex)) : clampLiveWpIndex(activeWpIdx);
+    const wp = routeWaypoints[wpIdx];
+    const wpLon = wp.lng || wp.lon;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !wp || !Number.isFinite(wp.lat) || !Number.isFinite(wpLon)) {
+        if (liveToWpLine) { try { liveToWpLine.remove(); } catch (e) {} liveToWpLine = null; }
+        return;
+    }
+
+    const pts = [[lat, lon], [wp.lat, wpLon]];
+    if (!liveToWpLine) {
+        liveToWpLine = L.polyline(pts, {
+            color: '#ff3fd9',
+            weight: 2,
+            opacity: 0.9,
+            interactive: false
+        }).addTo(map);
+    } else {
+        liveToWpLine.setLatLngs(pts);
+    }
+}
+
 function updateNextWpTelemetry(lat, lon) {
     const box = document.getElementById('liveNextWpBox');
     const nameEl = document.getElementById('nextWpName');
@@ -668,6 +858,10 @@ function updateNextWpTelemetry(lat, lon) {
     if (!box || !nameEl || !courseEl || !distEl) return;
     if (typeof routeWaypoints === 'undefined' || !Array.isArray(routeWaypoints) || routeWaypoints.length < 2 || typeof calcNav !== 'function') {
         box.style.display = 'none';
+        if (liveToWpLine) {
+            try { liveToWpLine.remove(); } catch (e) {}
+            liveToWpLine = null;
+        }
         return;
     }
 
@@ -675,45 +869,41 @@ function updateNextWpTelemetry(lat, lon) {
     if (key !== liveNextRouteKey) {
         liveNextRouteKey = key;
         liveNextLegIndex = nearestLegIndexBySegment(lat, lon);
+        liveActiveWpIndex = null;
     }
 
     const maxLeg = routeWaypoints.length - 2;
     let legIdx = Math.max(0, Math.min(liveNextLegIndex, maxLeg));
+    const maxWp = routeWaypoints.length - 1;
+    let wpIdx = (liveActiveWpIndex == null) ? Math.min(legIdx + 1, maxWp) : clampLiveWpIndex(liveActiveWpIndex);
 
-    // Auto-Advance:
-    // 1) Ziel-WP in 5 NM Radius
-    // 2) Näher an nächstem Leg als am aktuellen Leg (Shortcut/Umweg-Erkennung)
-    for (let guard = 0; guard < routeWaypoints.length; guard++) {
-        const target = routeWaypoints[legIdx + 1];
-        const navToTarget = calcNav(lat, lon, target.lat, target.lng || target.lon);
-        const inFiveNm = navToTarget.dist <= 5;
-        if (inFiveNm && legIdx < maxLeg) {
-            legIdx++;
-            continue;
-        }
-
-        if (legIdx < maxLeg) {
-            const dCurrent = legDistanceToSegmentNm(lat, lon, routeWaypoints[legIdx], routeWaypoints[legIdx + 1]);
-            const dNext = legDistanceToSegmentNm(lat, lon, routeWaypoints[legIdx + 1], routeWaypoints[legIdx + 2]);
-            if (dNext + 0.25 < dCurrent) {
-                legIdx++;
-                continue;
-            }
-        }
-        break;
+    // Auto-Advance nur bei Überflug des AKTIVEN Ziel-Wegpunkts (<= 5 NM)
+    const target = routeWaypoints[wpIdx];
+    const navToTarget = calcNav(lat, lon, target.lat, target.lng || target.lon);
+    if (navToTarget.dist <= 5 && wpIdx < maxWp) {
+        wpIdx += 1;
+        if (liveActiveWpIndex == null) legIdx = Math.max(0, wpIdx - 1);
+        else liveActiveWpIndex = wpIdx;
     }
     liveNextLegIndex = legIdx;
 
-    const wpIdx = Math.min(legIdx + 1, routeWaypoints.length - 1);
     const wp = routeWaypoints[wpIdx];
     const nav = calcNav(lat, lon, wp.lat, wp.lng || wp.lon);
     const crs = `${String(nav.brng).padStart(3, '0')}°`;
     const dist = nav.dist.toFixed(1);
 
-    nameEl.textContent = getWpDisplayName(wpIdx);
+    const wpName = getWpDisplayName(wpIdx);
+    const freqInfo = getWpFrequencyText(wpIdx);
+    if (freqInfo) {
+        nameEl.innerHTML = `${escapeHtmlLite(wpName)}<div style="font-size:11px; color:#9fd3ff; margin-top:1px; line-height:1.1;">${escapeHtmlLite(freqInfo)}</div>`;
+    } else {
+        nameEl.textContent = wpName;
+    }
     courseEl.textContent = crs;
     distEl.textContent = dist;
-    box.style.display = 'block';
+    box.style.display = isMapHintOn('nextLeg', true) ? 'block' : 'none';
+    setNextLegButtonStates(wpIdx, maxWp);
+    updateLiveToActiveWpLine(lat, lon, wpIdx);
 }
 
 // Diese Funktion aufrufen, sobald eine Route per Sync ID geladen wurde (z.B. connectToLiveGPS("4815"))
@@ -878,7 +1068,7 @@ function updateLivePlanePosition(lat, lon, alt, hdg) {
 
             const box = document.getElementById('liveTelemetryBox');
             if (box) {
-                box.style.display = 'block';
+                box.style.display = isMapHintOn('telemetry', true) ? 'block' : 'none';
                 const gsEl = document.getElementById('teleGS');
                 const vsEl = document.getElementById('teleVS');
                 if (gsEl) gsEl.textContent = gs.toFixed(1);
@@ -1100,10 +1290,16 @@ function updateLivePlanePosition(lat, lon, alt, hdg) {
             iconSize: [0, 0],
             iconAnchor: [0, 0]     // Geo-Koordinate = top-left des Divs; inner div verschiebt sich per translate(-50%,-37%)
         });
-        liveGpsMarker = L.marker([lat, lon], { icon: planeIcon, zIndexOffset: 9999 }).addTo(map);
+        liveGpsMarker = L.marker([lat, lon], {
+            icon: planeIcon,
+            zIndexOffset: 9999,
+            interactive: !(typeof measureMode !== 'undefined' && measureMode)
+        }).addTo(map);
         // Initiale Rotation setzen
         const svgEl = liveGpsMarker.getElement()?.querySelector('svg');
         if (svgEl) svgEl.style.transform = `rotate(${hdg}deg)`;
+        const planeEl = liveGpsMarker.getElement();
+        if (planeEl) planeEl.style.pointerEvents = (typeof measureMode !== 'undefined' && measureMode) ? 'none' : 'auto';
 
         map.on('dragstart', () => { if (isAutoFollow) toggleAutoFollow(); });
 
@@ -1126,6 +1322,8 @@ function updateLivePlanePosition(lat, lon, alt, hdg) {
         // Nur CSS-Transform updaten statt innerHTML neu zu bauen → GPU-beschleunigt, kein Reflow
         const svgEl = liveGpsMarker.getElement()?.querySelector('svg');
         if (svgEl) svgEl.style.transform = `rotate(${hdg}deg)`;
+        const planeEl = liveGpsMarker.getElement();
+        if (planeEl) planeEl.style.pointerEvents = (typeof measureMode !== 'undefined' && measureMode) ? 'none' : 'auto';
     }
 
     // --- ICON B: HÖHENPROFIL ---
@@ -1206,6 +1404,11 @@ function _trafficIconHtml(hdg, relAltStr, relAltColor, callsign) {
 
 function updateTrafficOnMap(aircraft, ownAlt) {
     if (typeof map === 'undefined' || !map || typeof L === 'undefined') return;
+    if (!isMapHintOn('traffic', true) || !window.vpTrafficMapVisible) {
+        Object.values(liveTrafficMarkers).forEach(t => t.marker.remove());
+        liveTrafficMarkers = {};
+        return;
+    }
 
     const claimedKeys = new Set(); // Marker die in diesem Update bereits belegt wurden
 
@@ -1266,22 +1469,32 @@ function updateTrafficOnMap(aircraft, ownAlt) {
     }
 }
 
-window.toggleTrafficMap = function() {
-    window.vpTrafficMapVisible = !window.vpTrafficMapVisible;
-    const btn = document.getElementById('btnToggleTrafficMap');
-    if (btn) btn.classList.toggle('active', window.vpTrafficMapVisible);
-    if (!window.vpTrafficMapVisible) {
+window.applyTrafficVisibility = function() {
+    if (!isMapHintOn('traffic', true) || !window.vpTrafficMapVisible) {
         Object.values(liveTrafficMarkers).forEach(t => t.marker.remove());
         liveTrafficMarkers = {};
-    } else if (window.vpTrafficData?.length) {
-        updateTrafficOnMap(window.vpTrafficData, window.lastLiveGpsPos?.alt);
+        return;
     }
+    if (window.vpTrafficData?.length) updateTrafficOnMap(window.vpTrafficData, window.lastLiveGpsPos?.alt);
+};
+
+window.toggleTrafficMap = function(forceState = null) {
+    window.vpTrafficMapVisible = (typeof forceState === 'boolean') ? forceState : !window.vpTrafficMapVisible;
+    if (window.mapHints && typeof window.mapHints === 'object') {
+        window.mapHints.traffic = window.vpTrafficMapVisible;
+        localStorage.setItem('ga_map_hint_traffic', String(window.vpTrafficMapVisible));
+        if (typeof refreshMapHintMenuUi === 'function') refreshMapHintMenuUi();
+    }
+    const btn = document.getElementById('btnToggleTrafficMap');
+    if (btn) btn.classList.toggle('active', window.vpTrafficMapVisible);
+    window.applyTrafficVisibility();
 };
 
 // Sim-Modus: Flugzeug-Icon, Trail und Profil zurücksetzen
 window.hideLivePlane = function () {
     if (liveGpsMarker) { liveGpsMarker.remove(); liveGpsMarker = null; }
     if (liveSnailTrail) { liveSnailTrail.setLatLngs([]); }
+    if (liveToWpLine) { liveToWpLine.remove(); liveToWpLine = null; }
     // Prediction-Vektoren entfernen
     if (predictionLine) { predictionLine.setLatLngs([]); }
     predictionMarkers.forEach(m => { try { m.remove(); } catch(e) {} });
@@ -1315,5 +1528,14 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log("[Sync] Starte Auto-Login...");
             triggerLoginFlow(true); 
         }, 800);
+    }
+
+    const nextBox = document.getElementById('liveNextWpBox');
+    if (nextBox) {
+        ['pointerdown', 'click', 'touchstart', 'mousedown'].forEach(evt => {
+            nextBox.addEventListener(evt, e => {
+                if (typeof e.stopPropagation === 'function') e.stopPropagation();
+            }, { passive: false });
+        });
     }
 });

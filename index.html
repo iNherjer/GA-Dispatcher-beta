@@ -678,9 +678,17 @@
             <button class="pb-btn" id="measureBtn" onclick="toggleMeasureMode()">📏 Messen (Aus)</button>
             <button class="pb-btn" onclick="clearMeasure()">🗑️ Zirkel löschen</button>
             <button class="pb-btn" onclick="resetMainRoute()">🔄 Route Reset</button>
-            <button class="pb-btn" id="mapMetarBtn" onclick="toggleMapMetars()" style="background:#4da6ff; color:#111; font-weight:bold;">🌤️ METARs (An)</button>
-            <button class="pb-btn" id="btnToggleTrafficMap" onclick="window.toggleTrafficMap && toggleTrafficMap()" style="background:#1a3a2a; color:#6f6;">✈️ Traffic (Aus)</button>
             <button class="pb-btn" id="vpToggleBtn" onclick="toggleMapProfile()" style="background:#2E8B57; color:#fff; font-weight:bold;">📊 Profil (An)</button>
+            <div style="position:relative; display:inline-block;">
+                <button class="pb-btn" id="mapHintsBtn" onclick="window.toggleMapHintsMenu && toggleMapHintsMenu()">⚙️ Hinweise</button>
+                <div id="mapHintsMenu" style="display:none; position:absolute; top:38px; right:0; min-width:210px; background:#121212; border:1px solid #555; border-radius:8px; padding:8px; box-shadow:0 8px 24px rgba(0,0,0,0.45); z-index:10020;">
+                    <button id="hintToggleMagentaLine" class="pb-btn" style="display:block; width:100%; margin:0 0 6px 0; text-align:left;" onclick="window.toggleMapHint && toggleMapHint('magentaLine')">🟣 Direkt-Linie (An)</button>
+                    <button id="hintToggleWeather" class="pb-btn" style="display:block; width:100%; margin:0 0 6px 0; text-align:left;" onclick="window.toggleMapHint && toggleMapHint('weather')">🌤️ Wetter (An)</button>
+                    <button id="hintToggleTraffic" class="pb-btn" style="display:block; width:100%; margin:0 0 6px 0; text-align:left;" onclick="window.toggleMapHint && toggleMapHint('traffic')">✈️ Traffic (An)</button>
+                    <button id="hintToggleTelemetry" class="pb-btn" style="display:block; width:100%; margin:0 0 6px 0; text-align:left;" onclick="window.toggleMapHint && toggleMapHint('telemetry')">📟 Telemetrie (An)</button>
+                    <button id="hintToggleNextLeg" class="pb-btn" style="display:block; width:100%; margin:0; text-align:left;" onclick="window.toggleMapHint && toggleMapHint('nextLeg')">🧭 Wegpunkt-Info (An)</button>
+                </div>
+            </div>
             <button class="pb-btn" id="freeflightBtn" onclick="toggleFreeflightMode()" style="background:#444; color:#fff;">✈️ Direct To (Aus)</button>
             <button class="pb-btn close" onclick="toggleMapTable()">❌ Schließen</button>
         </div>
@@ -707,8 +715,14 @@
                         <span>AGL:</span><span><span id="teleAGL" class="tele-val" style="color:#ffcc44;">—</span> <span class="tele-unit">FT</span></span>
                     </div>
                 </div>
-                <div id="liveNextWpBox" class="telemetry-box" style="display:none; top:10px; left:calc(50% + 145px); transform:none; right:auto; min-width:165px; pointer-events:none; padding:10px 12px;">
-                    <div style="font-size:11px; color:#8ec5ff; margin-bottom:2px; letter-spacing:0.4px;">NEXT LEG</div>
+                <div id="liveNextWpBox" class="telemetry-box" style="display:none; top:10px; left:calc(50% + 128px); transform:none; right:auto; width:138px; min-width:138px; pointer-events:auto; padding:8px 9px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:2px;">
+                        <div style="font-size:11px; color:#8ec5ff; letter-spacing:0.4px;">NEXT LEG</div>
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <button id="nextLegPrevBtn" class="next-leg-nav-btn" type="button" title="Vorheriger Wegpunkt" onclick="window.stepLiveNextLegPreview && stepLiveNextLegPreview(-1, event)">◀</button>
+                            <button id="nextLegNextBtn" class="next-leg-nav-btn" type="button" title="Nächster Wegpunkt" onclick="window.stepLiveNextLegPreview && stepLiveNextLegPreview(1, event)">▶</button>
+                        </div>
+                    </div>
                     <div id="nextWpName" class="tele-val" style="font-size:14px; color:#fff; margin-bottom:4px;">—</div>
                     <div style="display:flex; justify-content:space-between; gap:10px;">
                         <span style="font-size:11px; color:#aaa;">BRG</span>

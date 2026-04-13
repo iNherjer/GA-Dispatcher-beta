@@ -1590,6 +1590,7 @@ function renderVerticalProfile(canvasId) {
     skyGrad.addColorStop(1, '#e8f4f8');
     ctx.fillStyle = skyGrad;
     ctx.fillRect(padLeft, padTop, plotW, plotH);
+    if (vpShowClouds) vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, typeof zoomFactor !== 'undefined', typeof elevData !== 'undefined' ? elevData : vpElevationData);
 
     // Airspace blocks
     let occupiedASLabels = [];
@@ -1700,7 +1701,6 @@ function renderVerticalProfile(canvasId) {
     ctx.stroke();
 
     if (vpShowLandmarks) vpDrawLandmarks(ctx, xOf, yOf, typeof elevData !== 'undefined' ? elevData : vpElevationData, totalDist, typeof zoomFactor !== 'undefined', typeof zoomFactor !== 'undefined' ? zoomFactor : 1.0, maxAlt);
-    if (vpShowClouds) vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, typeof zoomFactor !== 'undefined', typeof elevData !== 'undefined' ? elevData : vpElevationData);
     if (vpShowObstacles) vpDrawObstacles(ctx, xOf, yOf, totalDist, typeof zoomFactor !== 'undefined' ? zoomFactor : 1.0, typeof elevData !== 'undefined' ? elevData : vpElevationData);
 
     // Flight profile
@@ -2313,6 +2313,10 @@ function renderMapProfileFrames(timeMs) {
         bgCtx.fillStyle = skyGrad; 
         bgCtx.fillRect(viewX, padTop, baseWidth, plotH);
 
+        // Wolken explizit weit nach hinten: direkt nach dem Himmel zeichnen,
+        // damit Landschaft, Landmarken und Hindernisse klar davor liegen.
+        if (vpShowClouds && !isHdgMode) vpDrawClouds(bgCtx, xOf, yOf, padTop, plotH, totalDist, true, elevData);
+
         // Aufruf für Layer 1 (Statischer Hintergrund)
         if (vpAirspaceMode === 1) {
             drawAirspaces(bgCtx, false);
@@ -2346,7 +2350,6 @@ function renderMapProfileFrames(timeMs) {
             const lmOverride = isHdgMode ? vpHdgLandmarks : null;
             vpDrawLandmarks(bgCtx, xOf, yOf, elevData, totalDist, true, zoomFactor, maxAlt, lmOverride);
         }
-        if (vpShowClouds && !isHdgMode) vpDrawClouds(bgCtx, xOf, yOf, padTop, plotH, totalDist, true, elevData);
 
         bgCtx.textAlign = 'right';
         const altStep = maxAlt > 6000 ? 2000 : (maxAlt > 3000 ? 1000 : 500);
@@ -4115,4 +4118,3 @@ function computeHdgLinearFeatures(lat, lon, hdg, gs) {
         vpHdgLinearFeatures.push({ ...lin, distNM: timeMin });
     }
 }
-

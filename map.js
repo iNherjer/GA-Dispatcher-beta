@@ -17,6 +17,190 @@ const wpIcon = L.divIcon({ className: 'custom-pin', html: `<div class="pin-hitbo
 const poiIcon = L.divIcon({ className: 'custom-pin', html: `<div class="pin-hitbox" style="cursor: move;"><div class="pin-dot" style="background-color: #b266ff; border: 2px solid #fff;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
 const measureIcon = L.divIcon({ className: 'custom-pin', html: `<div class="pin-hitbox" style="cursor: move;"><div class="pin-dot" style="background-color: #fff; width: 12px; height: 12px; min-width: 12px; min-height: 12px;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
 let routeLegLabelMarkers = [];
+const AIP_POPUP_ROUTES = {
+    AT: '/at/en/vfr/',
+    DE: '/de/en/vfr/',
+    FR: '/fr/aeroports/',
+    GB: '/uk/vfr/',
+    NL: '/nl/en/vfr/'
+};
+const MAP_HINT_DEFAULTS = {
+    magentaLine: true,
+    weather: true,
+    traffic: true,
+    telemetry: true,
+    nextLeg: true
+};
+window.mapHints = window.mapHints || { ...MAP_HINT_DEFAULTS };
+
+function loadMapHintSettings() {
+    Object.keys(MAP_HINT_DEFAULTS).forEach(key => {
+        const saved = localStorage.getItem(`ga_map_hint_${key}`);
+        if (saved === null) window.mapHints[key] = MAP_HINT_DEFAULTS[key];
+        else window.mapHints[key] = saved !== 'false';
+    });
+    // Wetter-/Traffic-Flags mit bestehenden Zuständen synchronisieren
+    if (typeof window.vpShowMapMetar === 'boolean') window.mapHints.weather = window.vpShowMapMetar;
+    if (typeof window.vpTrafficMapVisible === 'boolean') window.mapHints.traffic = window.vpTrafficMapVisible;
+}
+
+function saveMapHintSetting(key) {
+    if (!(key in MAP_HINT_DEFAULTS)) return;
+    localStorage.setItem(`ga_map_hint_${key}`, String(Boolean(window.mapHints[key])));
+}
+
+window.isMapHintEnabled = function(key) {
+    if (!(key in MAP_HINT_DEFAULTS)) return true;
+    return window.mapHints[key] !== false;
+};
+
+function applyMapHintEffects(key) {
+    if (key === 'weather') {
+        window.vpShowMapMetar = window.mapHints.weather !== false;
+        localStorage.setItem('ga_show_map_metar', window.vpShowMapMetar);
+        if (typeof renderWeatherMarkers === 'function') renderWeatherMarkers();
+    }
+    if (key === 'traffic') {
+        window.vpTrafficMapVisible = window.mapHints.traffic !== false;
+        if (typeof window.applyTrafficVisibility === 'function') window.applyTrafficVisibility();
+    }
+    if (key === 'telemetry') {
+        const box = document.getElementById('liveTelemetryBox');
+        if (box && !window.mapHints.telemetry) box.style.display = 'none';
+    }
+    if (key === 'nextLeg') {
+        const box = document.getElementById('liveNextWpBox');
+        if (box && !window.mapHints.nextLeg) box.style.display = 'none';
+    }
+    if (key === 'magentaLine' && window.mapHints.magentaLine === false) {
+        if (typeof window.clearLiveToWpLine === 'function') window.clearLiveToWpLine();
+    }
+}
+
+function refreshMapHintMenuUi() {
+    const labels = {
+        magentaLine: '🟣 Direkt-Linie',
+        weather: '🌤️ Wetter',
+        traffic: '✈️ Traffic',
+        telemetry: '📟 Telemetrie',
+        nextLeg: '🧭 Wegpunkt-Info'
+    };
+    const ids = {
+        magentaLine: 'hintToggleMagentaLine',
+        weather: 'hintToggleWeather',
+        traffic: 'hintToggleTraffic',
+        telemetry: 'hintToggleTelemetry',
+        nextLeg: 'hintToggleNextLeg'
+    };
+    Object.keys(ids).forEach(key => {
+        const btn = document.getElementById(ids[key]);
+        if (!btn) return;
+        const on = window.mapHints[key] !== false;
+        btn.textContent = `${labels[key]} (${on ? 'An' : 'Aus'})`;
+        btn.style.background = on ? '#2E8B57' : '#444';
+        btn.style.color = '#fff';
+    });
+}
+
+window.toggleMapHint = function(key) {
+    if (!(key in MAP_HINT_DEFAULTS)) return;
+    window.mapHints[key] = !(window.mapHints[key] !== false);
+    saveMapHintSetting(key);
+    applyMapHintEffects(key);
+    refreshMapHintMenuUi();
+};
+
+window.toggleMapHintsMenu = function(force) {
+    const menu = document.getElementById('mapHintsMenu');
+    if (!menu) return;
+    const isOpen = menu.style.display === 'block';
+    const nextOpen = typeof force === 'boolean' ? force : !isOpen;
+    menu.style.display = nextOpen ? 'block' : 'none';
+    if (nextOpen) refreshMapHintMenuUi();
+};
+
+function escapePopupText(v) {
+    return String(v ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getAirportCountryCode(icao, fallbackCountry = '') {
+    const cc = String(fallbackCountry || globalAirports?.[icao]?.country || '').trim().toUpperCase();
+    return /^[A-Z]{2}$/.test(cc) ? cc : '';
+}
+
+function hasAipCoverageForAirport(icao, fallbackCountry = '') {
+    if (!icao || icao === 'GPS' || icao === 'POI') return false;
+    return Boolean(resolveAipCountryCode(icao, fallbackCountry));
+}
+
+function resolveAipCountryCode(icao, fallbackCountry = '') {
+    const cc = getAirportCountryCode(icao, fallbackCountry);
+    if (cc && AIP_POPUP_ROUTES[cc]) return cc;
+
+    const code = String(icao || '').trim().toUpperCase();
+    if (code.startsWith('LO')) return 'AT';
+    if (code.startsWith('LF')) return 'FR';
+    if (code.startsWith('EH')) return 'NL';
+    if (code.startsWith('EG')) return 'GB';
+    if (code.startsWith('ED') || code.startsWith('ET')) return 'DE';
+    return null;
+}
+
+function getAipPopupUrl(icao, fallbackCountry = '') {
+    const cc = resolveAipCountryCode(icao, fallbackCountry);
+    if (!cc) return null;
+    const route = AIP_POPUP_ROUTES[cc];
+    return `https://aip.aero${route}?${encodeURIComponent(String(icao).trim().toUpperCase())}=`;
+}
+
+function buildPopupFrequencyLines(icao) {
+    if (!icao || typeof freqCache === 'undefined' || !Array.isArray(freqCache[icao])) {
+        return '<span style="color:#666;">Frequenzen laden…</span>';
+    }
+    if (freqCache[icao].length === 0) {
+        return '<span style="color:#666;">Keine Frequenzen verfügbar</span>';
+    }
+    return freqCache[icao]
+        .slice(0, 6)
+        .map(f => `📻 ${escapePopupText(f.label || 'Freq')}: ${escapePopupText(f.value || '--')}`)
+        .join('<br>');
+}
+
+function updatePopupFrequencyBlock(containerId, icao) {
+    if (!containerId || !icao) return;
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = buildPopupFrequencyLines(icao);
+}
+
+function getAirportTapRadiusPx(basePx = 34) {
+    if (!map || !map.getZoom) return basePx;
+    const z = map.getZoom();
+    // Beim Rauszoomen deutlich kleinerer Clickspot, beim Reinzoomen komfortabel.
+    // z=7 -> ~10px, z=10 -> ~19px, z=14 -> ~34px
+    const scaled = 10 + ((z - 7) / 7) * (basePx - 10);
+    return Math.max(8, Math.min(basePx, Math.round(scaled)));
+}
+
+function isMapUiClickTarget(evt) {
+    const t = evt && evt.target;
+    if (!t || !t.closest) return false;
+    return Boolean(
+        t.closest('.leaflet-control') ||
+        t.closest('.map-overlay-btn') ||
+        t.closest('.pb-btn') ||
+        t.closest('#vpSettingsMenu') ||
+        t.closest('#awmFreqBanner') ||
+        t.closest('.telemetry-box') ||
+        t.closest('.leaflet-popup') ||
+        t.closest('.leaflet-tooltip')
+    );
+}
 
 function ensureRouteLegLabelPane() {
     if (!map) return;
@@ -91,6 +275,16 @@ function toggleMeasureMode() {
         btn.innerText = '📏 Messen (Aus)'; btn.style.background = '#444'; btn.style.color = '#fff';
         document.getElementById('map').style.cursor = '';
     }
+    if (map && typeof map.closePopup === 'function') map.closePopup();
+    if (typeof renderMainRoute === 'function' && routeWaypoints && routeWaypoints.length > 0) renderMainRoute();
+    if (typeof renderWeatherMarkers === 'function') renderWeatherMarkers();
+    if (typeof liveGpsMarker !== 'undefined' && liveGpsMarker) {
+        try {
+            if (typeof liveGpsMarker.closePopup === 'function') liveGpsMarker.closePopup();
+            const el = liveGpsMarker.getElement && liveGpsMarker.getElement();
+            if (el) el.style.pointerEvents = measureMode ? 'none' : 'auto';
+        } catch (e) { }
+    }
 }
 
 function addMeasurePoint(latlng) {
@@ -150,6 +344,7 @@ function renderMainRoute() {
     if (!window.hitBoxPolyline) {
         window.hitBoxPolyline = L.polyline(routeWaypoints, { color: 'transparent', weight: 45, opacity: 0, className: 'interactive-route' }).addTo(map);
         window.hitBoxPolyline.on('click', function (e) {
+            if (measureMode) return;
             let bestIndex = 1, minDiff = Infinity;
             for (let i = 0; i < routeWaypoints.length - 1; i++) {
                 let p1 = L.latLng(routeWaypoints[i].lat, routeWaypoints[i].lng || routeWaypoints[i].lon);
@@ -169,15 +364,18 @@ function renderMainRoute() {
         
         let icon = isStart ? startIcon : (isDest ? destIcon : (isPOI ? poiIcon : wpIcon));
         // Wir erlauben das Draggen von POIs und Wegpunkten. Start/Dest bleiben fix.
-        let draggable = (!isStart && !isDest);
+        let draggable = (!isStart && !isDest && !measureMode);
         // POI Marker immer nach vorne holen (Z-Index), damit er nicht hinter der Linie verschwindet
-        let marker = L.marker(latlng, { icon: icon, draggable: draggable, zIndexOffset: isPOI ? 1000 : 0 }).addTo(map);
+        let marker = L.marker(latlng, { icon: icon, draggable: draggable, interactive: !measureMode, zIndexOffset: isPOI ? 1000 : 0 }).addTo(map);
 
         if (isStart) {
             marker.bindPopup('');
             marker.on('popupopen', () => {
+                const depCountry = getAirportCountryCode(currentStartICAO);
                 marker.getPopup().setContent(_buildAptPopup('DEP', currentSName, currentDepElev, currentStartICAO, {
                     runwayContainerId: 'wxPopupDepRwy',
+                    freqContainerId: 'wxPopupDepFreq',
+                    countryCode: depCountry,
                     showDirectTo: currentStartICAO && currentStartICAO !== 'GPS' && currentStartICAO !== currentDestICAO,
                     directToName: currentSName,
                     lat: latlng.lat,
@@ -188,6 +386,10 @@ function renderMainRoute() {
                 if (depIcao && depIcao !== 'GPS' && typeof fetchRunwayDetails === 'function') {
                     fetchRunwayDetails(latlng.lat, latlng.lng || latlng.lon, 'wxPopupDepRwy', depIcao);
                 }
+                if (depIcao && depIcao !== 'GPS' && typeof fetchAirportFreq === 'function') {
+                    updatePopupFrequencyBlock('wxPopupDepFreq', depIcao);
+                    fetchAirportFreq(depIcao, null, null).finally(() => updatePopupFrequencyBlock('wxPopupDepFreq', depIcao));
+                }
                 if (depIcao && typeof loadMetarWidget === 'function') {
                     loadMetarWidget(depIcao, 'wxPopupDep', latlng.lat, latlng.lng || latlng.lon, true);
                 }
@@ -197,8 +399,11 @@ function renderMainRoute() {
             marker.on('popupopen', () => {
                 const icao = currentMissionData && currentMissionData.poiName ? currentStartICAO : currentDestICAO;
                 const elev = currentMissionData && currentMissionData.poiName ? currentDepElev : currentDestElev;
+                const destCountry = getAirportCountryCode(icao);
                 marker.getPopup().setContent(_buildAptPopup('DEST', currentDName, elev, icao, {
                     runwayContainerId: 'wxPopupDestRwy',
+                    freqContainerId: 'wxPopupDestFreq',
+                    countryCode: destCountry,
                     showDirectTo: Boolean(icao && icao !== currentDestICAO),
                     directToName: currentDName,
                     lat: latlng.lat,
@@ -207,6 +412,10 @@ function renderMainRoute() {
                 marker.getPopup().update();
                 if (icao && typeof fetchRunwayDetails === 'function') {
                     fetchRunwayDetails(latlng.lat, latlng.lng || latlng.lon, 'wxPopupDestRwy', icao);
+                }
+                if (icao && icao !== 'GPS' && typeof fetchAirportFreq === 'function') {
+                    updatePopupFrequencyBlock('wxPopupDestFreq', icao);
+                    fetchAirportFreq(icao, null, null).finally(() => updatePopupFrequencyBlock('wxPopupDestFreq', icao));
                 }
                 if (icao && typeof loadMetarWidget === 'function') {
                     loadMetarWidget(icao, 'wxPopupDest', latlng.lat, latlng.lng || latlng.lon, true);
@@ -423,8 +632,12 @@ function _buildAptPopup(label, name, elev, icaoForRunways, options = {}) {
     const rwCacheKey = icaoForRunways || (label === 'DEP' ? currentStartICAO : currentDestICAO);
     const wxContainerId = options.wxContainerId || (label === 'DEP' ? 'wxPopupDep' : 'wxPopupDest');
     const runwayContainerId = options.runwayContainerId || null;
+    const freqContainerId = options.freqContainerId || null;
+    const countryCode = options.countryCode || '';
     const titleHtml = options.title || `<b style="font-size:13px;">${label}: ${name || '–'}</b>`;
     const showDirectTo = Boolean(options.showDirectTo && icaoForRunways && Number.isFinite(options.lat) && Number.isFinite(options.lon));
+    const aipUrl = icaoForRunways ? getAipPopupUrl(icaoForRunways, countryCode) : null;
+    const showAip = Boolean(aipUrl);
     let html = `<div style="font-family:'Courier New',monospace; min-width:190px; color:#111;">`;
     html += titleHtml;
 
@@ -461,6 +674,19 @@ function _buildAptPopup(label, name, elev, icaoForRunways, options = {}) {
         html += runwayHtml;
     }
 
+    if (icaoForRunways) {
+        html += `<hr style="border-color:#ccc; margin:5px 0;">`;
+        const freqBody = buildPopupFrequencyLines(icaoForRunways);
+        html += freqContainerId
+            ? `<div id="${freqContainerId}" style="font-size:11px; line-height:1.6;">${freqBody}</div>`
+            : `<div style="font-size:11px; line-height:1.6;">${freqBody}</div>`;
+    }
+
+    if (showAip) {
+        html += `<hr style="border-color:#ccc; margin:5px 0;">`;
+        html += `<a href="${aipUrl}" target="_blank" rel="noopener noreferrer" style="display:block; font-size:11px; text-decoration:none; color:#0b1f65; font-weight:bold;">📄 AIP VFR öffnen ↗</a>`;
+    }
+
     html += `<hr style="border-color:#ccc; margin:5px 0;">`;
     html += `<div id="${wxContainerId}" style="min-height:36px;">`;
     html += `<div style="font-size:10px; color:#aaa; text-align:center; padding:8px 0;">Wetter lädt…</div>`;
@@ -486,7 +712,8 @@ function normalizeAirportForMap(apt) {
         name: getAirportDisplayName(apt),
         lat: Number(apt.lat),
         lon: Number(apt.lon ?? apt.lng),
-        elevation: apt.elevation ?? null
+        elevation: apt.elevation ?? null,
+        country: apt.country || apt.iso_country || apt.cc || ''
     };
 }
 
@@ -498,15 +725,19 @@ function openAirportInfoPopup(airport, latlng = null) {
     const popupLatLng = latlng || [apt.lat, apt.lon];
     const popupIdSafe = apt.icao.replace(/[^a-zA-Z0-9_-]/g, '_');
     const runwayId = `wxRwy_${popupIdSafe}`;
+    const freqId = `wxFreq_${popupIdSafe}`;
     // Prefix "wxPopup" erzwingt im Widget die gleiche kompakte Start/Ziel-Darstellung
     const wxId = `wxPopupApt_${popupIdSafe}`;
     const elev = apt.elevation ?? (globalAirports?.[apt.icao]?.elevation ?? null);
+    const countryCode = getAirportCountryCode(apt.icao, apt.country);
     const title = `<b style="font-size:13px;">${apt.icao}</b><div style="font-size:11px; color:#555; margin-top:2px;">${apt.name}</div>`;
 
     const html = _buildAptPopup('APT', apt.name, elev, apt.icao, {
         title,
         wxContainerId: wxId,
         runwayContainerId: runwayId,
+        freqContainerId: freqId,
+        countryCode,
         showDirectTo: true,
         directToName: apt.name,
         lat: apt.lat,
@@ -520,6 +751,10 @@ function openAirportInfoPopup(airport, latlng = null) {
 
     if (typeof fetchRunwayDetails === 'function') {
         fetchRunwayDetails(apt.lat, apt.lon, runwayId, apt.icao);
+    }
+    if (typeof fetchAirportFreq === 'function') {
+        updatePopupFrequencyBlock(freqId, apt.icao);
+        fetchAirportFreq(apt.icao, null, null).finally(() => updatePopupFrequencyBlock(freqId, apt.icao));
     }
     if (typeof loadMetarWidget === 'function') {
         loadMetarWidget(apt.icao, wxId, apt.lat, apt.lon, true);
@@ -913,10 +1148,11 @@ function initMapBase() {
     };
     fsControl.addTo(map);
     map.on('click', function (e) {
+        if (isMapUiClickTarget(e.originalEvent)) return;
         if (freeflightMode) { handleFreeflightMapClick(e); return; }
         if (measureMode) { addMeasurePoint(e.latlng); return; }
 
-        const apt = findNearestAirport(e.latlng, 34);
+        const apt = findNearestAirport(e.latlng, getAirportTapRadiusPx(34));
         if (apt) openAirportInfoPopup(apt, e.latlng);
     });
     if (!map._routeLegLabelsBound) {
@@ -1161,14 +1397,18 @@ async function fetchOpenAIPData() {
 window.vpShowMapMetar = localStorage.getItem('ga_show_map_metar') !== 'false';
 
 window.toggleMapMetars = function() {
-    window.vpShowMapMetar = !window.vpShowMapMetar;
+    const next = !window.vpShowMapMetar;
+    window.vpShowMapMetar = next;
+    window.mapHints.weather = next;
     localStorage.setItem('ga_show_map_metar', window.vpShowMapMetar);
+    saveMapHintSetting('weather');
     const btn = document.getElementById('mapMetarBtn');
     if (btn) {
         btn.innerText = window.vpShowMapMetar ? '🌤️ METARs (An)' : '🌤️ METARs (Aus)';
         btn.style.background = window.vpShowMapMetar ? '#4da6ff' : '#444';
         btn.style.color = window.vpShowMapMetar ? '#111' : '#fff';
     }
+    refreshMapHintMenuUi();
     // API triggern falls Wetter gebraucht wird, ansonsten nur Marker neu rendern
     if (window.vpShowMapMetar && typeof window._lastVpRouteKey !== 'undefined') {
         if (typeof triggerVerticalProfileUpdate === 'function') triggerVerticalProfileUpdate();
@@ -1178,12 +1418,22 @@ window.toggleMapMetars = function() {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    const btn = document.getElementById('mapMetarBtn');
-    if (btn) {
-        btn.innerText = window.vpShowMapMetar ? '🌤️ METARs (An)' : '🌤️ METARs (Aus)';
-        btn.style.background = window.vpShowMapMetar ? '#4da6ff' : '#444';
-        btn.style.color = window.vpShowMapMetar ? '#111' : '#fff';
-    }
+    loadMapHintSettings();
+    // Bestehenden Wetter-Status übernehmen, falls vorhanden
+    window.vpShowMapMetar = window.mapHints.weather !== false;
+    // Traffic-Status übernehmen
+    window.vpTrafficMapVisible = window.mapHints.traffic !== false;
+    refreshMapHintMenuUi();
+    applyMapHintEffects('weather');
+    applyMapHintEffects('traffic');
+
+    document.addEventListener('click', (e) => {
+        const menu = document.getElementById('mapHintsMenu');
+        if (!menu || menu.style.display !== 'block') return;
+        const t = e.target;
+        if (t && t.closest && (t.closest('#mapHintsMenu') || t.closest('#mapHintsBtn'))) return;
+        window.toggleMapHintsMenu(false);
+    }, true);
 });
 
 let wxMapMarkers = [];
@@ -1302,7 +1552,7 @@ window.renderWeatherMarkers = function() {
         `;
 
         const icon = L.divIcon({ className: 'custom-pin', html: html, iconSize: [80, 45], iconAnchor: [40, 15] });
-        const marker = L.marker([zone.stnLat, zone.stnLon], { icon: icon, interactive: true }).addTo(map);
+        const marker = L.marker([zone.stnLat, zone.stnLon], { icon: icon, interactive: !measureMode }).addTo(map);
         
         // Kompaktes Popup-Container
         const popupId = `wxPopup_${zone.icao}`;
@@ -1310,6 +1560,10 @@ window.renderWeatherMarkers = function() {
         
         // Rendert das moderne, kompakte Widget (forceModern=true) beim Klick
         marker.on('popupopen', () => {
+            if (measureMode) {
+                marker.closePopup();
+                return;
+            }
             if (typeof loadMetarWidget === 'function') {
                 loadMetarWidget(zone.icao, popupId, zone.stnLat, zone.stnLon, true);
             }
@@ -1431,10 +1685,11 @@ function findNearestAirport(latlng, maxPixels) {
 }
 
 function handleFreeflightMapClick(e) {
+    if (isMapUiClickTarget(e.originalEvent)) return;
     if (ffContextPopup) { map.closePopup(ffContextPopup); ffContextPopup = null; }
 
     if (ffNeedsStart) {
-        const apt = findNearestAirport(e.latlng);
+        const apt = findNearestAirport(e.latlng, getAirportTapRadiusPx(34));
         if (apt) {
             ffWaypoints = [{ lat: apt.lat, lng: apt.lon, name: apt.icao, icao: apt.icao }];
             showMapToast('Start: ' + apt.icao + (apt.name && apt.name !== apt.icao ? ' — ' + apt.name : ''));
@@ -1449,7 +1704,7 @@ function handleFreeflightMapClick(e) {
 
     if (ffWaypoints.length === 0) return;
 
-    const apt = findNearestAirport(e.latlng);
+    const apt = findNearestAirport(e.latlng, getAirportTapRadiusPx(34));
     if (apt) {
         freeflightDirectTo(apt.icao, apt.lat, apt.lon);
     }

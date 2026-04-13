@@ -1133,15 +1133,22 @@ async function loadMetarWidget(icao, containerId, lat, lon, forceModern = false)
                     try {
                         const fbData = JSON.parse(fbText);
                         if (fbData && fbData.length > 0) {
-                            let closest = fbData[0];
-                            let minDist = calcNav(lat, lon, closest.lat, closest.lon).dist;
-                            for (let i = 1; i < fbData.length; i++) {
-                                let d = calcNav(lat, lon, fbData[i].lat, fbData[i].lon).dist;
-                                if (d < minDist) { minDist = d; closest = fbData[i]; }
+                            const candidates = fbData.filter(m =>
+                                m &&
+                                Number.isFinite(Number(m.lat)) &&
+                                Number.isFinite(Number(m.lon))
+                            );
+                            if (candidates.length > 0) {
+                                let closest = candidates[0];
+                                let minDist = calcNav(lat, lon, Number(closest.lat), Number(closest.lon)).dist;
+                                for (let i = 1; i < candidates.length; i++) {
+                                    let d = calcNav(lat, lon, Number(candidates[i].lat), Number(candidates[i].lon)).dist;
+                                    if (d < minDist) { minDist = d; closest = candidates[i]; }
+                                }
+                                metarDataList = [closest];
+                                foundIcao = closest.icaoId || icao;
+                                isFallback = true;
                             }
-                            metarDataList = [closest];
-                            foundIcao = closest.icaoId;
-                            isFallback = true;
                         }
                     } catch (parseErr) {
                         console.error("Failed to parse fallback JSON", parseErr);
@@ -1153,6 +1160,9 @@ async function loadMetarWidget(icao, containerId, lat, lon, forceModern = false)
             gpsState.metarCache[cacheKey] = { data: metarDataList, isFallback, foundIcao };
 
         } // Ende der Cache-Else-Bedingung
+
+        if (!Array.isArray(metarDataList)) metarDataList = [];
+        metarDataList = metarDataList.filter(m => m && typeof m === 'object');
 
         if (!metarDataList || metarDataList.length === 0) {
             if (isRetro) {
@@ -1174,9 +1184,15 @@ async function loadMetarWidget(icao, containerId, lat, lon, forceModern = false)
         }
 
         const metar = metarDataList[0];
-        const raw = metar.rawOb || "";
-        const temp = metar.temp !== null ? metar.temp + '°C' : '--';
-        const dewp = metar.dewp !== null ? metar.dewp + '°C' : '--';
+        if (!metar || typeof metar !== 'object') {
+            container.innerHTML = `<div style="padding:10px; text-align:center; color:#d93829; font-size:12px; background:#1a1a1a;">Kein verwertbares METAR für ${icao} gefunden.</div>`;
+            return;
+        }
+        const raw = typeof metar.rawOb === 'string'
+            ? metar.rawOb
+            : (typeof metar.raw === 'string' ? metar.raw : "");
+        const temp = metar.temp != null ? metar.temp + '°C' : '--';
+        const dewp = metar.dewp != null ? metar.dewp + '°C' : '--';
         let catColor = "#fff";
         let catText = metar.fltCat || "N/A";
         if (catText === "VFR") catColor = "#33ff33";
@@ -2626,7 +2642,14 @@ async function generateMission() {
 /* =========================================================
    9. EXTERNE LINKS & LOGBUCH
    ========================================================= */
-function openAIP(t) { window.open(`https://aip.aero/de/vfr/?${t === 'dep' ? currentStartICAO : currentDestICAO}`, '_blank'); }
+function openAIP(t) {
+    const icao = t === 'dep' ? currentStartICAO : currentDestICAO;
+    const url = (typeof getAipPopupUrl === 'function')
+        ? getAipPopupUrl(icao, globalAirports?.[icao]?.country || '')
+        : null;
+    if (!url) return;
+    window.open(url, '_blank');
+}
 function openMetar(t) { window.open(`https://metar-taf.com/de/${t === 'dep' ? currentStartICAO : currentDestICAO}`, '_blank'); }
 
 function logCurrentFlight() {
@@ -2731,11 +2754,17 @@ function initGPSButtons() {
 
             if (targetMode === 'AIP') {
                 if (gpsState.mode === 'DEP' && currentStartICAO) {
-                    window.open(`https://aip.aero/de/vfr/?${currentStartICAO}`, '_blank');
+                    const depUrl = (typeof getAipPopupUrl === 'function')
+                        ? getAipPopupUrl(currentStartICAO, globalAirports?.[currentStartICAO]?.country || '')
+                        : null;
+                    if (depUrl) window.open(depUrl, '_blank');
                     return;
                 }
                 if (gpsState.mode === 'DEST' && currentDestICAO) {
-                    window.open(`https://aip.aero/de/vfr/?${currentDestICAO}`, '_blank');
+                    const destUrl = (typeof getAipPopupUrl === 'function')
+                        ? getAipPopupUrl(currentDestICAO, globalAirports?.[currentDestICAO]?.country || '')
+                        : null;
+                    if (destUrl) window.open(destUrl, '_blank');
                     return;
                 }
             }
@@ -3109,10 +3138,14 @@ function renderAIP(left, right) {
         `<div class="kln90b-line dim" style="font-size:9px; white-space:normal;">${name || ''}</div>`;
 
     if (!icao) { right.innerHTML = '<div class="kln90b-line dim">NO DATA</div>'; return; }
+    const aipUrl = (typeof getAipPopupUrl === 'function')
+        ? getAipPopupUrl(icao, globalAirports?.[icao]?.country || '')
+        : null;
+    if (!aipUrl) { right.innerHTML = '<div class="kln90b-line dim">AIP N/A</div>'; return; }
 
     right.innerHTML =
         `<div class="kln90b-line dim">AIP VFR</div>` +
-        `<div class="kln90b-line highlight" style="cursor:pointer;" onclick="window.open('https://aip.aero/de/vfr/?${icao}','_blank')">OPEN ▸</div>` +
+        `<div class="kln90b-line highlight" style="cursor:pointer;" onclick="window.open('${aipUrl}','_blank')">OPEN ▸</div>` +
         `<div class="kln90b-line dim" style="font-size:9px;">aip.aero</div>`;
 }
 
