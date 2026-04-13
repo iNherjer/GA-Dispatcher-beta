@@ -1098,7 +1098,74 @@ function initMapBase() {
         "🌧️ Wetterradar (Niederschlag)": radarOverlay
     };
     
-    L.control.layers(baseMaps, overlayMaps).addTo(map);
+    const layerControl = L.control.layers(baseMaps, overlayMaps, { collapsed: true }).addTo(map);
+    if (layerControl && layerControl._container) {
+        const lc = layerControl._container;
+        // Hover-Verhalten robust deaktivieren: Leaflet nutzt je nach Version
+        // mouseover/mouseout oder mouseenter/mouseleave.
+        const expandFn = (typeof layerControl.expand === 'function') ? layerControl.expand
+            : ((typeof layerControl._expand === 'function') ? layerControl._expand : null);
+        const collapseFn = (typeof layerControl.collapse === 'function') ? layerControl.collapse
+            : ((typeof layerControl._collapse === 'function') ? layerControl._collapse : null);
+        const origExpand = expandFn ? expandFn.bind(layerControl) : null;
+        const origCollapse = collapseFn ? collapseFn.bind(layerControl) : null;
+
+        // Harte Absicherung: Expand nur aus unserem Klick-Flow erlauben.
+        layerControl._allowManualExpand = false;
+        if (origExpand) {
+            layerControl.expand = function() {
+                if (!this._allowManualExpand) return this;
+                return origExpand();
+            };
+            layerControl._expand = layerControl.expand;
+        }
+        if (origCollapse) {
+            layerControl.collapse = function() {
+                return origCollapse();
+            };
+            layerControl._collapse = layerControl.collapse;
+        }
+        if (expandFn) {
+            L.DomEvent.off(lc, 'mouseover', expandFn, layerControl);
+            L.DomEvent.off(lc, 'mouseenter', expandFn, layerControl);
+            L.DomEvent.off(lc, 'pointerenter', expandFn, layerControl);
+        }
+        if (collapseFn) {
+            L.DomEvent.off(lc, 'mouseout', collapseFn, layerControl);
+            L.DomEvent.off(lc, 'mouseleave', collapseFn, layerControl);
+            L.DomEvent.off(lc, 'pointerleave', collapseFn, layerControl);
+        }
+
+        const toggle = lc.querySelector('.leaflet-control-layers-toggle');
+        if (toggle) {
+            // Falls Touch-Click expand bereits von Leaflet gebunden ist, entfernen
+            if (expandFn) {
+                L.DomEvent.off(toggle, 'click', expandFn, layerControl);
+                L.DomEvent.off(toggle, 'focus', expandFn, layerControl);
+            }
+            L.DomEvent.on(toggle, 'click', L.DomEvent.stop);
+            L.DomEvent.on(toggle, 'click', () => {
+                const isOpen = L.DomUtil.hasClass(lc, 'leaflet-control-layers-expanded');
+                if (isOpen && typeof layerControl.collapse === 'function') {
+                    layerControl.collapse();
+                } else if (!isOpen && typeof layerControl.expand === 'function') {
+                    layerControl._allowManualExpand = true;
+                    layerControl.expand();
+                    layerControl._allowManualExpand = false;
+                }
+            });
+        }
+
+        if (!map._layersOutsideCloseBound) {
+            document.addEventListener('click', (e) => {
+                const isOpen = L.DomUtil.hasClass(lc, 'leaflet-control-layers-expanded');
+                if (!isOpen) return;
+                if (lc.contains(e.target)) return;
+                if (typeof layerControl.collapse === 'function') layerControl.collapse();
+            }, true);
+            map._layersOutsideCloseBound = true;
+        }
+    }
     
     map.on('overlayadd', function (e) {
         // Schaltet DFS ab, wenn VFR-Lufträume aktiviert werden
@@ -1238,6 +1305,7 @@ function toggleMapTable() {
     const board = document.getElementById('mapTableOverlay'), pinBoard = document.getElementById('pinboardOverlay');
     if (pinBoard.classList.contains('active')) { togglePinboard(); }
     board.classList.toggle('active'); document.body.classList.toggle('maptable-open');
+    if (typeof _closeFloatingMenus === 'function') _closeFloatingMenus();
 
     if (board.classList.contains('active')) {
         lockBodyScroll();
@@ -1258,6 +1326,7 @@ function toggleMapTable() {
     } else {
         unlockBodyScroll();
         document.body.classList.remove('map-is-fullscreen');
+        if (typeof _closeFloatingMenus === 'function') _closeFloatingMenus();
     }
 }
 

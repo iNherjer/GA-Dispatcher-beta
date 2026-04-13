@@ -877,17 +877,39 @@ function updateNextWpTelemetry(lat, lon) {
     const maxWp = routeWaypoints.length - 1;
     let wpIdx = (liveActiveWpIndex == null) ? Math.min(legIdx + 1, maxWp) : clampLiveWpIndex(liveActiveWpIndex);
 
-    // Auto-Advance nur bei Überflug des AKTIVEN Ziel-Wegpunkts (<= 5 NM)
-    const target = routeWaypoints[wpIdx];
+    // Auto-Advance: senkrechte Triggerlinie 0.5 NM vor Wegpunkt, 5 NM breit
+    const target    = routeWaypoints[wpIdx];
     const navToTarget = calcNav(lat, lon, target.lat, target.lng || target.lon);
-    if (navToTarget.dist <= 5 && wpIdx < maxWp) {
+
+    // Anflugkurs vom vorherigen Wegpunkt (oder aktueller Bearing wenn erster WP)
+    let inboundBrng = navToTarget.brng;
+    if (wpIdx > 0) {
+        const prev = routeWaypoints[wpIdx - 1];
+        inboundBrng = calcNav(prev.lat, prev.lng || prev.lon, target.lat, target.lng || target.lon).brng;
+    }
+
+    // Projektion auf Anflugachse: entlang = Abstand bis WP, quer = seitliche Abweichung
+    const angleDiffRad = ((navToTarget.brng - inboundBrng + 540) % 360 - 180) * Math.PI / 180;
+    const alongTrack   = navToTarget.dist * Math.cos(angleDiffRad); // positiv = noch vor WP
+    const crossTrack   = Math.abs(navToTarget.dist * Math.sin(angleDiffRad));
+
+    // Linie überflogen wenn: ≤ 0.5 NM vor (oder bis 0.5 NM nach) dem WP, max. 2.5 NM seitlich
+    if (alongTrack <= 0.5 && alongTrack >= -0.5 && crossTrack <= 2.5 && wpIdx < maxWp) {
+        const isAutoAdvance = (liveActiveWpIndex == null);
         wpIdx += 1;
         if (liveActiveWpIndex == null) legIdx = Math.max(0, wpIdx - 1);
         else liveActiveWpIndex = wpIdx;
+
+        // Ansage nur bei automatischem Advance, nicht bei manuellem Wegpunktwechsel
+        if (isAutoAdvance && typeof window.awmAnnounceWpAdvance === 'function') {
+            const nextWp    = routeWaypoints[wpIdx];
+            const navToNext = calcNav(lat, lon, nextWp.lat, nextWp.lng || nextWp.lon);
+            window.awmAnnounceWpAdvance(navToNext.brng, navToNext.dist);
+        }
     }
     liveNextLegIndex = legIdx;
 
-    const wp = routeWaypoints[wpIdx];
+    const wp  = routeWaypoints[wpIdx];
     const nav = calcNav(lat, lon, wp.lat, wp.lng || wp.lon);
     const crs = `${String(nav.brng).padStart(3, '0')}°`;
     const dist = nav.dist.toFixed(1);

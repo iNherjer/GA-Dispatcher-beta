@@ -1641,6 +1641,17 @@ body.theme-retro .api-fuel-meter .api-scale {
     font-family: monospace;
 }
 
+/* Kartentisch-Header: alle Aktionsbuttons exakt gleich hoch */
+#mapTableOverlay .pinboard-header .pb-btn {
+    height: 30px;
+    min-height: 30px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
 .pb-btn.add {
     background: var(--green);
     color: #000;

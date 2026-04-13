@@ -1407,7 +1407,7 @@ async function loadMetarWidget(icao, containerId, lat, lon, forceModern = false)
 function calcNav(lat1, lon1, lat2, lon2) {
     const R = 3440, dLat = (lat2 - lat1) * Math.PI / 180, dLon = (lon2 - lon1) * Math.PI / 180;
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const dist = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+    const dist = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
     const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180), x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) - Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon);
     return { dist, brng: Math.round((Math.atan2(y, x) * 180 / Math.PI + 360) % 360) };
 }
@@ -1434,7 +1434,6 @@ async function getAirportData(icao) {
         const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${icao}+airport`); const data = await res.json();
         if (data && data.length > 0) return { icao: icao, n: data[0].display_name.split(',')[0], lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
     } catch (e) { }
-    if (typeof coreDB !== 'undefined' && coreDB[icao]) return coreDB[icao];
     return null;
 }
 
@@ -1889,6 +1888,7 @@ async function fetchAirportFreq(icao, elementId, type) {
     const el = document.getElementById(elementId);
     if (el) el.innerText = '📻 Sucht Frequenz...';
     const proxy = 'https://ga-proxy.einherjer.workers.dev';
+    const icaoQuery = String(icao || '').trim().toUpperCase();
 
     const freqLabelMap = {
         'TWR': 'Turm', 'TOWER': 'Turm',
@@ -1901,10 +1901,29 @@ async function fetchAirportFreq(icao, elementId, type) {
     };
 
     try {
-        const res = await fetch(`${proxy}/api/airports?search=${icao}&limit=1&t=${Date.now()}`);
+        const res = await fetch(`${proxy}/api/airports?search=${encodeURIComponent(icaoQuery)}&limit=25&t=${Date.now()}`);
         const data = await res.json();
         if (data && data.items && data.items.length > 0) {
-            const apt = data.items[0];
+            const items = Array.isArray(data.items) ? data.items : [];
+            const pickIcao = (apt) => String(
+                apt?.icao ||
+                apt?.icaoCode ||
+                apt?.ident ||
+                apt?.code ||
+                apt?.designator ||
+                apt?.gpsCode ||
+                apt?.localCode ||
+                ''
+            ).trim().toUpperCase();
+            const exact = items.find(apt => pickIcao(apt) === icaoQuery);
+            // Für 4-stellige ICAO-Abfragen nur exakte Treffer zulassen
+            const strictIcaoSearch = /^[A-Z0-9]{4}$/.test(icaoQuery);
+            const apt = exact || (!strictIcaoSearch ? items[0] : null);
+            if (!apt) {
+                if (el) el.innerText = '';
+                freqCache[icaoQuery] = [];
+                return null;
+            }
 
             // Elevation aus OpenAIP (unit 0 = Meter, 1 = Fuß)
             if (apt.elevation != null) {
@@ -1942,15 +1961,15 @@ async function fetchAirportFreq(icao, elementId, type) {
                 const lines = labeledFreqs.map(lf => `📻 ${lf.label}: ${lf.value}`);
                 if (el) el.innerHTML = lines.join('<br>');
 
-                freqCache[icao] = labeledFreqs;
+                freqCache[icaoQuery] = labeledFreqs;
                 return bestFreqValue;
             }
         }
         if (el) el.innerText = '';
-        freqCache[icao] = []; // Mark as fetched but empty
+        freqCache[icaoQuery] = []; // Mark as fetched but empty
     } catch (e) {
         if (el) el.innerText = '';
-        freqCache[icao] = []; // Mark as fetched but empty
+        freqCache[icaoQuery] = []; // Mark as fetched but empty
     }
     return null;
 }
@@ -2465,22 +2484,12 @@ async function generateMission() {
         else { dest = await findWikipediaPOI(start.lat, start.lon, searchMin, searchMax, dirPref); }
     }
 
-    if (!dest && !targetDest && typeof coreDB !== 'undefined') {
-        if (effectiveType === "apt") {
-            dataSource = "Core DB (Fallback)";
-            let keys = Object.keys(coreDB).filter(k => k !== currentStartICAO);
-            if (regionPref === "de") keys = keys.filter(k => k.startsWith('ED') || k.startsWith('ET'));
-            if (regionPref === "int") keys = keys.filter(k => !k.startsWith('ED') && !k.startsWith('ET'));
-            let dirFilteredKeys = keys.filter(k => checkBearing(calcNav(start.lat, start.lon, coreDB[k].lat, coreDB[k].lon).brng, dirPref));
-            if (dirFilteredKeys.length > 0) keys = dirFilteredKeys;
-            if (keys.length === 0) keys = Object.keys(coreDB).filter(k => k !== currentStartICAO);
-            dest = coreDB[keys[Math.floor(Math.random() * keys.length)]];
-        } else if (effectiveType === "poi" && typeof fallbackPOIs !== 'undefined') {
-            dataSource = "Fallback POIs";
-            let validPOIs = fallbackPOIs.filter(p => checkBearing(calcNav(start.lat, start.lon, p.lat, p.lon).brng, dirPref));
-            if (validPOIs.length === 0) validPOIs = fallbackPOIs;
-            dest = validPOIs[Math.floor(Math.random() * validPOIs.length)]; dest.icao = "POI";
-        }
+    if (!dest && !targetDest && effectiveType === "poi" && typeof fallbackPOIs !== 'undefined') {
+        dataSource = "Fallback POIs";
+        let validPOIs = fallbackPOIs.filter(p => checkBearing(calcNav(start.lat, start.lon, p.lat, p.lon).brng, dirPref));
+        if (validPOIs.length === 0) validPOIs = fallbackPOIs;
+        dest = validPOIs[Math.floor(Math.random() * validPOIs.length)];
+        dest.icao = "POI";
     }
 
     if (!dest) {
