@@ -2338,6 +2338,52 @@ body.map-is-fullscreen .pb-btn.close {
     cursor: pointer;
 }
 
+.route-leg-label-icon {
+    background: transparent !important;
+    border: none !important;
+}
+
+.route-leg-label {
+    position: relative;
+    pointer-events: none;
+    font-family: Arial, sans-serif;
+    font-weight: 400;
+    letter-spacing: 0.2px;
+    color: #111;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    border-radius: 4px;
+    box-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.18);
+    padding: 1px 4px;
+    white-space: nowrap;
+    line-height: 1.1;
+    min-width: 50px;
+    height: calc(var(--leg-fz, 11px) * 2 + var(--leg-gap, 7px) * 2 + 4px);
+}
+
+.route-leg-course {
+    position: absolute;
+    left: 50%;
+    top: calc(50% - var(--leg-gap, 7px));
+    transform: translate(-50%, -100%);
+    font-size: var(--leg-fz, 11px);
+}
+
+.route-leg-dist {
+    position: absolute;
+    left: 50%;
+    top: calc(50% + var(--leg-gap, 7px));
+    transform: translate(-50%, 0);
+    font-size: var(--leg-fz, 11px);
+}
+
+body.theme-retro .route-leg-label {
+    font-family: Arial, sans-serif;
+    color: #111;
+}
+
 /* Airspace List Rows (NavLog) */
 .as-row {
     border-radius: 3px;
@@ -4088,6 +4134,15 @@ body.theme-navcom .btn-menu:active {
     color: #888;
     margin-left: 4px;
     text-transform: uppercase;
+}
+
+@media (max-width: 900px) {
+    #liveNextWpBox {
+        left: 50% !important;
+        top: 98px !important;
+        transform: translateX(-50%) !important;
+        min-width: 180px !important;
+    }
 }
 
 /* ==========================================================================

@@ -16,6 +16,71 @@ const startIcon = hitBoxIcon('#44ff44'), destIcon = hitBoxIcon('#ff4444');
 const wpIcon = L.divIcon({ className: 'custom-pin', html: `<div class="pin-hitbox" style="cursor: move;"><div class="pin-dot" style="background-color: #fdfd86;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
 const poiIcon = L.divIcon({ className: 'custom-pin', html: `<div class="pin-hitbox" style="cursor: move;"><div class="pin-dot" style="background-color: #b266ff; border: 2px solid #fff;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
 const measureIcon = L.divIcon({ className: 'custom-pin', html: `<div class="pin-hitbox" style="cursor: move;"><div class="pin-dot" style="background-color: #fff; width: 12px; height: 12px; min-width: 12px; min-height: 12px;"></div></div>`, iconSize: [34, 34], iconAnchor: [17, 17] });
+let routeLegLabelMarkers = [];
+
+function ensureRouteLegLabelPane() {
+    if (!map) return;
+    if (map.getPane('routeLegLabelPane')) return;
+    const pane = map.createPane('routeLegLabelPane');
+    pane.style.zIndex = '350'; // Unter der Route (Overlay-Pane ~400)
+    pane.style.pointerEvents = 'none';
+}
+
+function clearRouteLegLabels() {
+    if (!map || !routeLegLabelMarkers.length) return;
+    routeLegLabelMarkers.forEach(m => map.removeLayer(m));
+    routeLegLabelMarkers = [];
+}
+
+function getLegScreenAngle(p1, p2) {
+    const a = map.latLngToLayerPoint([p1.lat, p1.lng || p1.lon]);
+    const b = map.latLngToLayerPoint([p2.lat, p2.lng || p2.lon]);
+    let angle = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+    if (angle > 90) angle -= 180;
+    if (angle < -90) angle += 180;
+    return angle;
+}
+
+function renderRouteLegLabels() {
+    clearRouteLegLabels();
+    if (!map || !routeWaypoints || routeWaypoints.length < 2) return;
+    ensureRouteLegLabelPane();
+    const zoom = map.getZoom ? map.getZoom() : 10;
+    const fontSize = Math.max(9, Math.min(14, Math.round(9 + ((zoom - 6) / 7) * 5)));
+    const gap = Math.max(7, Math.round(fontSize * 0.4) + 4);
+
+    for (let i = 0; i < routeWaypoints.length - 1; i++) {
+        const p1 = routeWaypoints[i];
+        const p2 = routeWaypoints[i + 1];
+        const nav = calcNav(p1.lat, p1.lng || p1.lon, p2.lat, p2.lng || p2.lon);
+
+        const midLat = (p1.lat + p2.lat) / 2;
+        const midLng = ((p1.lng || p1.lon) + (p2.lng || p2.lon)) / 2;
+        const angle = getLegScreenAngle(p1, p2).toFixed(1);
+
+        const html = `
+            <div class="route-leg-label" style="transform: translate(-50%, -50%) rotate(${angle}deg); --leg-fz:${fontSize}px; --leg-gap:${gap}px;">
+                <div class="route-leg-course">${nav.brng}°</div>
+                <div class="route-leg-dist">${nav.dist} NM</div>
+            </div>
+        `;
+
+        const labelIcon = L.divIcon({
+            className: 'route-leg-label-icon',
+            html,
+            iconSize: [0, 0],
+            iconAnchor: [0, 0]
+        });
+
+        const marker = L.marker([midLat, midLng], {
+            icon: labelIcon,
+            interactive: false,
+            pane: 'routeLegLabelPane'
+        }).addTo(map);
+
+        routeLegLabelMarkers.push(marker);
+    }
+}
 
 function toggleMeasureMode() {
     measureMode = !measureMode; const btn = document.getElementById('measureBtn');
@@ -68,6 +133,7 @@ function renderMainRoute() {
     if (!map) initMapBase();
     routeMarkers.forEach(m => map.removeLayer(m));
     routeMarkers = [];
+    clearRouteLegLabels();
 
     if (routeWaypoints.length === 0) {
         if (polyline) { map.removeLayer(polyline); polyline = null; }
@@ -110,9 +176,18 @@ function renderMainRoute() {
         if (isStart) {
             marker.bindPopup('');
             marker.on('popupopen', () => {
-                marker.getPopup().setContent(_buildAptPopup('DEP', currentSName, currentDepElev));
+                marker.getPopup().setContent(_buildAptPopup('DEP', currentSName, currentDepElev, currentStartICAO, {
+                    runwayContainerId: 'wxPopupDepRwy',
+                    showDirectTo: currentStartICAO && currentStartICAO !== 'GPS' && currentStartICAO !== currentDestICAO,
+                    directToName: currentSName,
+                    lat: latlng.lat,
+                    lon: latlng.lng || latlng.lon
+                }));
                 marker.getPopup().update();
                 const depIcao = currentStartICAO;
+                if (depIcao && depIcao !== 'GPS' && typeof fetchRunwayDetails === 'function') {
+                    fetchRunwayDetails(latlng.lat, latlng.lng || latlng.lon, 'wxPopupDepRwy', depIcao);
+                }
                 if (depIcao && typeof loadMetarWidget === 'function') {
                     loadMetarWidget(depIcao, 'wxPopupDep', latlng.lat, latlng.lng || latlng.lon, true);
                 }
@@ -122,8 +197,17 @@ function renderMainRoute() {
             marker.on('popupopen', () => {
                 const icao = currentMissionData && currentMissionData.poiName ? currentStartICAO : currentDestICAO;
                 const elev = currentMissionData && currentMissionData.poiName ? currentDepElev : currentDestElev;
-                marker.getPopup().setContent(_buildAptPopup('DEST', currentDName, elev, icao));
+                marker.getPopup().setContent(_buildAptPopup('DEST', currentDName, elev, icao, {
+                    runwayContainerId: 'wxPopupDestRwy',
+                    showDirectTo: Boolean(icao && icao !== currentDestICAO),
+                    directToName: currentDName,
+                    lat: latlng.lat,
+                    lon: latlng.lng || latlng.lon
+                }));
                 marker.getPopup().update();
+                if (icao && typeof fetchRunwayDetails === 'function') {
+                    fetchRunwayDetails(latlng.lat, latlng.lng || latlng.lon, 'wxPopupDestRwy', icao);
+                }
                 if (icao && typeof loadMetarWidget === 'function') {
                     loadMetarWidget(icao, 'wxPopupDest', latlng.lat, latlng.lng || latlng.lon, true);
                 }
@@ -330,21 +414,23 @@ function renderMainRoute() {
         routeMarkers.push(marker);
     });
 
+    renderRouteLegLabels();
     updateRoutePerformance(); updateMiniMap();
     if (typeof updateWeatherMarkerDodging === 'function') updateWeatherMarkerDodging();
 }
 
-function _buildAptPopup(label, name, elev, icaoForRunways) {
-    // icaoForRunways: optionaler ICAO-Key für runwayCache-Lookup
+function _buildAptPopup(label, name, elev, icaoForRunways, options = {}) {
     const rwCacheKey = icaoForRunways || (label === 'DEP' ? currentStartICAO : currentDestICAO);
-    const wxContainerId = label === 'DEP' ? 'wxPopupDep' : 'wxPopupDest';
+    const wxContainerId = options.wxContainerId || (label === 'DEP' ? 'wxPopupDep' : 'wxPopupDest');
+    const runwayContainerId = options.runwayContainerId || null;
+    const titleHtml = options.title || `<b style="font-size:13px;">${label}: ${name || '–'}</b>`;
+    const showDirectTo = Boolean(options.showDirectTo && icaoForRunways && Number.isFinite(options.lat) && Number.isFinite(options.lon));
     let html = `<div style="font-family:'Courier New',monospace; min-width:190px; color:#111;">`;
-    html += `<b style="font-size:13px;">${label}: ${name || '–'}</b>`;
+    html += titleHtml;
 
-    // Elevation & TPA
     if (elev != null) {
         const elevRnd = Math.round(elev);
-        const tpa     = elevRnd + 1000;
+        const tpa = elevRnd + 1000;
         html += `<hr style="border-color:#ccc; margin:5px 0;">`;
         html += `<div style="font-size:11px; line-height:1.7;">`;
         html += `📍 Platz: <b>${elevRnd} ft MSL</b><br>`;
@@ -352,29 +438,269 @@ function _buildAptPopup(label, name, elev, icaoForRunways) {
         html += `</div>`;
     }
 
-    // Runways aus Cache
-    if (rwCacheKey && typeof runwayCache !== 'undefined' && runwayCache[rwCacheKey] &&
-        runwayCache[rwCacheKey] !== 'Keine Daten gefunden') {
+    const runwayHtml = (() => {
+        if (!rwCacheKey || typeof runwayCache === 'undefined' || !runwayCache[rwCacheKey] || runwayCache[rwCacheKey] === 'Keine Daten gefunden') {
+            return runwayContainerId
+                ? `<div id="${runwayContainerId}" style="font-size:11px; line-height:1.7; color:#666;">Pisten laden…</div>`
+                : '';
+        }
+
         const rwys = runwayCache[rwCacheKey]
             .split(/\s*(?:\||\n|<br\s*\/?>)\s*/i)
             .filter(r => r.trim());
-        if (rwys.length > 0) {
-            html += `<hr style="border-color:#ccc; margin:5px 0;">`;
-            html += `<div style="font-size:11px; line-height:1.7;">`;
-            html += `🛫 Pisten:<br>` + rwys.map(r => `&nbsp;&nbsp;${r}`).join('<br>');
-            html += `</div>`;
-        }
+
+        if (rwys.length === 0) return '';
+        const lines = `🛫 Pisten:<br>` + rwys.map(r => `&nbsp;&nbsp;${r}`).join('<br>');
+        return runwayContainerId
+            ? `<div id="${runwayContainerId}" style="font-size:11px; line-height:1.7;">${lines}</div>`
+            : `<div style="font-size:11px; line-height:1.7;">${lines}</div>`;
+    })();
+
+    if (runwayHtml) {
+        html += `<hr style="border-color:#ccc; margin:5px 0;">`;
+        html += runwayHtml;
     }
 
-    // Wetter-Widget Platzhalter
     html += `<hr style="border-color:#ccc; margin:5px 0;">`;
     html += `<div id="${wxContainerId}" style="min-height:36px;">`;
     html += `<div style="font-size:10px; color:#aaa; text-align:center; padding:8px 0;">Wetter lädt…</div>`;
     html += `</div>`;
 
+    if (showDirectTo) {
+        const encodedName = encodeURIComponent(options.directToName || name || icaoForRunways);
+        html += `<button onclick="window.confirmAirportDirectTo('${icaoForRunways}', ${Number(options.lat)}, ${Number(options.lon)}, '${encodedName}')" style="margin-top:8px; width:100%; background:#1f7a45; color:#fff; border:none; padding:8px 10px; cursor:pointer; border-radius:4px; font-weight:bold;">✈️ Direct To</button>`;
+    }
+
     html += `</div>`;
     return html;
 }
+
+function getAirportDisplayName(apt) {
+    return apt?.name || apt?.n || apt?.city || apt?.icao || 'Flugplatz';
+}
+
+function normalizeAirportForMap(apt) {
+    if (!apt) return null;
+    return {
+        icao: apt.icao || apt.ident || '',
+        name: getAirportDisplayName(apt),
+        lat: Number(apt.lat),
+        lon: Number(apt.lon ?? apt.lng),
+        elevation: apt.elevation ?? null
+    };
+}
+
+function openAirportInfoPopup(airport, latlng = null) {
+    if (!map) return;
+    const apt = normalizeAirportForMap(airport);
+    if (!apt || !apt.icao || !Number.isFinite(apt.lat) || !Number.isFinite(apt.lon)) return;
+
+    const popupLatLng = latlng || [apt.lat, apt.lon];
+    const popupIdSafe = apt.icao.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const runwayId = `wxRwy_${popupIdSafe}`;
+    // Prefix "wxPopup" erzwingt im Widget die gleiche kompakte Start/Ziel-Darstellung
+    const wxId = `wxPopupApt_${popupIdSafe}`;
+    const elev = apt.elevation ?? (globalAirports?.[apt.icao]?.elevation ?? null);
+    const title = `<b style="font-size:13px;">${apt.icao}</b><div style="font-size:11px; color:#555; margin-top:2px;">${apt.name}</div>`;
+
+    const html = _buildAptPopup('APT', apt.name, elev, apt.icao, {
+        title,
+        wxContainerId: wxId,
+        runwayContainerId: runwayId,
+        showDirectTo: true,
+        directToName: apt.name,
+        lat: apt.lat,
+        lon: apt.lon
+    });
+
+    L.popup({ maxWidth: 290 })
+        .setLatLng(popupLatLng)
+        .setContent(html)
+        .openOn(map);
+
+    if (typeof fetchRunwayDetails === 'function') {
+        fetchRunwayDetails(apt.lat, apt.lon, runwayId, apt.icao);
+    }
+    if (typeof loadMetarWidget === 'function') {
+        loadMetarWidget(apt.icao, wxId, apt.lat, apt.lon, true);
+    }
+}
+
+function hasActiveBriefingRoute() {
+    const briefingBox = document.getElementById('briefingBox');
+    return Boolean(briefingBox && briefingBox.style.display === 'block' && routeWaypoints && routeWaypoints.length > 0);
+}
+
+function getTasForRouteEstimate() {
+    return parseInt(document.getElementById('tasSlider')?.value || 160, 10) || 160;
+}
+
+function renderGpsStartBriefing(destAirport, startPoint) {
+    const nav = calcNav(startPoint.lat, startPoint.lng, destAirport.lat, destAirport.lon);
+    const tas = getTasForRouteEstimate();
+    const eteMinutes = Math.max(1, Math.round((nav.dist / Math.max(1, tas)) * 60));
+    const depLinks = document.getElementById('wikiDepLinks');
+    const destLinks = document.getElementById('wikiDestLinks');
+    const destSwitchRow = document.getElementById('destSwitchRow');
+
+    document.getElementById('mTitle').innerHTML = '🧭 Direct To';
+    document.getElementById('mStory').innerText = `Direktflug per Karte zu ${destAirport.icao}${destAirport.name ? ' – ' + destAirport.name : ''}. Start ist die aktuelle GPS-Position des Trackers.`;
+    document.getElementById('mDepICAO').innerText = 'GPS';
+    document.getElementById('mDepName').innerText = 'Live GPS Position';
+    document.getElementById('mDepCoords').innerText = `${startPoint.lat.toFixed(4)}, ${startPoint.lng.toFixed(4)}`;
+    document.getElementById('mDepRwy').innerText = 'Live-Start';
+    document.getElementById('destIcon').innerText = '🛬';
+    document.getElementById('mDestICAO').innerText = destAirport.icao;
+    document.getElementById('mDestName').innerText = destAirport.name;
+    document.getElementById('mDestCoords').innerText = `${destAirport.lat.toFixed(4)}, ${destAirport.lon.toFixed(4)}`;
+    document.getElementById('mPay').innerText = 'N/A';
+    document.getElementById('mWeight').innerText = 'N/A';
+    document.getElementById('mDistNote').innerText = `${nav.dist} NM`;
+    document.getElementById('mHeadingNote').innerText = `${nav.brng}°`;
+    document.getElementById('mETENote').innerText = `${eteMinutes} min`;
+    if (typeof setDrumCounter === 'function') setDrumCounter('distDrum', nav.dist);
+    if (typeof recalculatePerformance === 'function') recalculatePerformance();
+    const indicator = document.getElementById('searchIndicator');
+    if (indicator) indicator.innerText = 'Direct-To Flug bereit.';
+    document.getElementById('briefingBox').style.display = 'block';
+    document.getElementById('destRwyContainer').style.display = 'block';
+    if (document.getElementById('wikiDestRwyText')) document.getElementById('wikiDestRwyText').style.display = 'block';
+    if (destSwitchRow) destSwitchRow.style.display = 'flex';
+    if (depLinks) depLinks.style.display = 'none';
+    if (destLinks) destLinks.style.display = 'block';
+
+    const wikiDepNameEl = document.getElementById('wikiDepNameDisplay');
+    const wikiDestNameEl = document.getElementById('wikiDestNameDisplay');
+    if (wikiDepNameEl) wikiDepNameEl.innerText = 'GPS – Live Position';
+    if (wikiDestNameEl) wikiDestNameEl.innerText = `${destAirport.icao} – ${destAirport.name}`;
+
+    const depFreq = document.getElementById('wikiDepFreqText');
+    const destFreq = document.getElementById('wikiDestFreqText');
+    if (depFreq) depFreq.innerHTML = '<span style="color:#888;">Live GPS Start</span>';
+    if (destFreq) destFreq.innerHTML = 'Lade Frequenzen...';
+
+    const depDesc = document.getElementById('wikiDepDescText');
+    const destDesc = document.getElementById('wikiDestDescText');
+    if (depDesc) depDesc.innerText = 'Live-Startpunkt vom Tracker. Umgebung wird geladen...';
+    if (destDesc) destDesc.innerText = 'Ziel-Informationen werden geladen...';
+
+    if (typeof fetchAreaDescription === 'function') {
+        fetchAreaDescription(startPoint.lat, startPoint.lng, 'wikiDepDescText', 'Live GPS Position', null, 'wikiDepImageContainer', 'wikiDepImage');
+        fetchAreaDescription(destAirport.lat, destAirport.lon, 'wikiDestDescText', null, destAirport.icao, 'wikiDestImageContainer', 'wikiDestImage');
+    }
+    if (typeof fetchAirportFreq === 'function') {
+        fetchAirportFreq(destAirport.icao, 'wikiDestFreqText', 'dest');
+    }
+    if (typeof fetchRunwayDetails === 'function') {
+        fetchRunwayDetails(destAirport.lat, destAirport.lon, 'mDestRwy', destAirport.icao);
+    }
+    if (typeof loadMetarWidget === 'function') {
+        loadMetarWidget(null, 'metarContainerDep', startPoint.lat, startPoint.lng);
+        loadMetarWidget(destAirport.icao, 'metarContainerDest', destAirport.lat, destAirport.lon);
+    }
+}
+
+async function applyAirportDirectTo(airport, options = {}) {
+    const destAirport = normalizeAirportForMap(airport);
+    if (!destAirport || !destAirport.icao || !Number.isFinite(destAirport.lat) || !Number.isFinite(destAirport.lon)) return false;
+
+    const forceGpsStart = Boolean(options.forceGpsStart);
+    const hadFlightPlan = hasActiveBriefingRoute();
+    const useExistingStart = hadFlightPlan && !forceGpsStart;
+    const gpsLive = isGpsLive();
+    let startPoint = null;
+    let startData = null;
+
+    if (useExistingStart) {
+        const firstWp = routeWaypoints[0];
+        startPoint = { lat: firstWp.lat, lng: firstWp.lng || firstWp.lon };
+        if (currentStartICAO && currentStartICAO !== 'GPS' && typeof getAirportData === 'function') {
+            startData = await getAirportData(currentStartICAO);
+        }
+    } else if (gpsLive && window.lastLiveGpsPos) {
+        startPoint = { lat: window.lastLiveGpsPos.lat, lng: window.lastLiveGpsPos.lon };
+    } else {
+        alert('Ohne bestehenden Flugplan brauche ich eine aktive Tracker-Verbindung, damit die aktuelle GPS-Position als Start gesetzt werden kann.');
+        return false;
+    }
+
+    const nav = calcNav(startPoint.lat, startPoint.lng, destAirport.lat, destAirport.lon);
+    routeWaypoints = [
+        { lat: startPoint.lat, lng: startPoint.lng },
+        { lat: destAirport.lat, lng: destAirport.lon }
+    ];
+
+    currentDestICAO = destAirport.icao;
+    currentDName = destAirport.name;
+    currentDestElev = destAirport.elevation ?? (globalAirports?.[destAirport.icao]?.elevation ?? null);
+
+    if (useExistingStart) {
+        currentSName = startData?.n || currentSName || currentStartICAO || 'Start';
+        currentDepElev = currentStartICAO && globalAirports?.[currentStartICAO]
+            ? (globalAirports[currentStartICAO].elevation ?? null)
+            : currentDepElev;
+    } else {
+        currentStartICAO = 'GPS';
+        currentSName = 'Live GPS Position';
+        currentDepElev = null;
+    }
+
+    currentMissionData = {
+        start: currentStartICAO || 'GPS',
+        dest: currentDestICAO,
+        poiName: null,
+        mission: 'Direct To',
+        dist: nav.dist,
+        ac: typeof selectedAC !== 'undefined' ? selectedAC : 'N/A',
+        heading: nav.brng
+    };
+    currentDepFreq = '';
+    currentDestFreq = '';
+
+    const startLocEl = document.getElementById('startLoc');
+    const startLocRadioEl = document.getElementById('startLocRadio');
+    const destLocEl = document.getElementById('destLoc');
+    const destLocRadioEl = document.getElementById('destLocRadio');
+    if (startLocEl) startLocEl.value = currentStartICAO === 'GPS' ? '' : (currentStartICAO || '');
+    if (startLocRadioEl) startLocRadioEl.value = currentStartICAO === 'GPS' ? 'GPS' : (currentStartICAO || '');
+    if (destLocEl) destLocEl.value = currentDestICAO || '';
+    if (destLocRadioEl) destLocRadioEl.value = currentDestICAO || '';
+
+    if (useExistingStart && typeof populateBriefingUI === 'function') {
+        const title = '🧭 Ziel geändert';
+        const story = `Das Ziel wurde per Karte auf ${destAirport.icao}${destAirport.name ? ' – ' + destAirport.name : ''} gesetzt. Der bisherige Startplatz bleibt erhalten.`;
+        const pax = document.getElementById('mPay')?.innerText || 'N/A';
+        const cargo = document.getElementById('mWeight')?.innerText || 'N/A';
+        const destData = { icao: destAirport.icao, n: destAirport.name, lat: destAirport.lat, lon: destAirport.lon };
+        currentMissionData.mission = 'Ziel geändert';
+        populateBriefingUI(title, story, pax, cargo, false, routeWaypoints, startData, destData);
+    } else {
+        renderGpsStartBriefing(destAirport, startPoint);
+        renderMainRoute();
+        if (map) {
+            const bounds = L.latLngBounds(routeWaypoints.map(w => [w.lat, w.lng || w.lon]));
+            map.fitBounds(bounds, { padding: [60, 60] });
+        }
+        if (typeof updateMiniMap === 'function') updateMiniMap();
+        if (typeof triggerVerticalProfileUpdate === 'function') triggerVerticalProfileUpdate();
+        if (typeof refreshGPSAfterDispatch === 'function') refreshGPSAfterDispatch();
+        if (typeof window.debouncedSaveMissionState === 'function') window.debouncedSaveMissionState();
+    }
+
+    if (useExistingStart && typeof refreshGPSAfterDispatch === 'function') refreshGPSAfterDispatch();
+
+    showMapToast('Direct to ' + destAirport.icao);
+    return true;
+}
+
+window.confirmAirportDirectTo = async function(icao, lat, lon, encodedName = '') {
+    const name = encodedName ? decodeURIComponent(encodedName) : icao;
+    if (!confirm(`${icao} als Ziel übernehmen?`)) return false;
+
+    // Wenn Live-GPS vorhanden ist, wird automatisch GPS als Start priorisiert.
+    const forceGpsStart = isGpsLive();
+    return applyAirportDirectTo({ icao, name, lat, lon }, { forceGpsStart });
+};
 
 function updateRoutePerformance() {
     if (routeWaypoints.length < 2 || !currentMissionData) return;
@@ -588,8 +914,17 @@ function initMapBase() {
     fsControl.addTo(map);
     map.on('click', function (e) {
         if (freeflightMode) { handleFreeflightMapClick(e); return; }
-        if (!measureMode) return; addMeasurePoint(e.latlng);
+        if (measureMode) { addMeasurePoint(e.latlng); return; }
+
+        const apt = findNearestAirport(e.latlng, 34);
+        if (apt) openAirportInfoPopup(apt, e.latlng);
     });
+    if (!map._routeLegLabelsBound) {
+        map.on('zoomend moveend', () => {
+            if (routeWaypoints && routeWaypoints.length >= 2) renderRouteLegLabels();
+        });
+        map._routeLegLabelsBound = true;
+    }
 }
 
 function updateMap(lat1, lon1, lat2, lon2, s, d) {
@@ -1001,10 +1336,20 @@ const ffDestIcon = L.divIcon({
     iconSize: [34, 34], iconAnchor: [17, 17]
 });
 
-function isGpsLive() {
-    if (!window.lastLiveGpsPos || (Date.now() - window.lastLiveGpsPos.t) > 4000) return false;
+function isGpsLive(maxAgeMs = 15000) {
+    const pos = window.lastLiveGpsPos;
+    if (!pos) return false;
+    if (!Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) return false;
+
+    const ts = Number(pos.t) || 0;
+    if (!ts || (Date.now() - ts) > maxAgeMs) return false;
+
+    // Indicator kann zeitweise auf WAIT/WAKE stehen, obwohl wir eine frische Position haben.
+    // Nur bei explizitem OFF blockieren wir den GPS-Start.
     const ind = document.getElementById('liveGpsIndicator');
-    return ind && ind.innerHTML.includes('LIVE');
+    if (ind && typeof ind.innerHTML === 'string' && ind.innerHTML.includes('OFF')) return false;
+
+    return true;
 }
 
 function toggleFreeflightMode() {
@@ -1078,7 +1423,7 @@ function findNearestAirport(latlng, maxPixels) {
             const d = tapPx.distanceTo(aptPx);
             if (d < bestDist) {
                 bestDist = d;
-                best = { icao: apt.icao, name: apt.name, lat: apt.lat, lon: apt.lon };
+                best = { icao: apt.icao, name: apt.name || apt.city || apt.icao, lat: apt.lat, lon: apt.lon, elevation: apt.elevation ?? null };
             }
         }
     }

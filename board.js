@@ -1336,6 +1336,7 @@ window.executeMSFSImport = async function(mode) {
 };
 
 function populateBriefingUI(mTitle, mStory, mPax, mCargo, isPOI, newRoute, sData, dData) {
+    const isGpsStart = currentStartICAO === 'GPS';
     document.getElementById("mTitle").innerHTML = mTitle;
     document.getElementById("mStory").innerText = mStory;
     
@@ -1359,22 +1360,32 @@ function populateBriefingUI(mTitle, mStory, mPax, mCargo, isPOI, newRoute, sData
     
     document.getElementById("destRwyContainer").style.display = isPOI ? "none" : "block";
     if (document.getElementById("wikiDestRwyText")) document.getElementById("wikiDestRwyText").style.display = isPOI ? "none" : "block";
+    const depLinks = document.getElementById("wikiDepLinks"); if (depLinks) depLinks.style.display = isGpsStart ? "none" : "block";
     const destSwitchRow = document.getElementById("destSwitchRow"); if (destSwitchRow) destSwitchRow.style.display = isPOI ? "none" : "flex";
     const destLinks = document.getElementById("wikiDestLinks"); if (destLinks) destLinks.style.display = isPOI ? "none" : "block";
 
     document.getElementById("briefingBox").style.display = "block";
     
-    fetchRunwayDetails(newRoute[0].lat, newRoute[0].lng, 'mDepRwy', currentStartICAO);
+    if (isGpsStart) {
+        document.getElementById("mDepRwy").innerText = "Live-Start";
+    } else {
+        fetchRunwayDetails(newRoute[0].lat, newRoute[0].lng, 'mDepRwy', currentStartICAO);
+    }
     if (!isPOI) fetchRunwayDetails(newRoute[newRoute.length-1].lat, newRoute[newRoute.length-1].lng, 'mDestRwy', currentDestICAO);
     
-    fetchAreaDescription(newRoute[0].lat, newRoute[0].lng, 'wikiDepDescText', null, currentStartICAO, 'wikiDepImageContainer', 'wikiDepImage');
+    fetchAreaDescription(newRoute[0].lat, newRoute[0].lng, 'wikiDepDescText', isGpsStart ? 'Live GPS Position' : null, isGpsStart ? null : currentStartICAO, 'wikiDepImageContainer', 'wikiDepImage');
     fetchAreaDescription(newRoute[newRoute.length-1].lat, newRoute[newRoute.length-1].lng, 'wikiDestDescText', isPOI ? currentDName : null, isPOI ? null : currentDestICAO, 'wikiDestImageContainer', 'wikiDestImage');
 
     currentDepFreq = ""; currentDestFreq = "";
-    fetchAirportFreq(currentStartICAO, 'wikiDepFreqText', 'dep');
+    if (isGpsStart) {
+        const depFreqEl = document.getElementById('wikiDepFreqText');
+        if (depFreqEl) depFreqEl.innerHTML = '<span style="color:#888;">Live GPS Start</span>';
+    } else {
+        fetchAirportFreq(currentStartICAO, 'wikiDepFreqText', 'dep');
+    }
     if (!isPOI) fetchAirportFreq(currentDestICAO, 'wikiDestFreqText', 'dest');
     
-    loadMetarWidget(currentStartICAO, 'metarContainerDep', newRoute[0].lat, newRoute[0].lng);
+    loadMetarWidget(isGpsStart ? null : currentStartICAO, 'metarContainerDep', newRoute[0].lat, newRoute[0].lng);
     loadMetarWidget(isPOI ? null : currentDestICAO, 'metarContainerDest', newRoute[newRoute.length-1].lat, newRoute[newRoute.length-1].lng);
 
     document.getElementById('searchIndicator').innerText = "Flugplan bereit.";

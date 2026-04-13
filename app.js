@@ -753,6 +753,7 @@ async function restoreMissionState(state) {
 
     document.getElementById("destRwyContainer").style.display = state.isPOI ? "none" : "block";
     if (document.getElementById("wikiDestRwyText")) document.getElementById("wikiDestRwyText").style.display = state.isPOI ? "none" : "block";
+    const depLinks = document.getElementById("wikiDepLinks"); if (depLinks) depLinks.style.display = currentStartICAO === 'GPS' ? "none" : "block";
     const destSwitchRow = document.getElementById("destSwitchRow"); if (destSwitchRow) destSwitchRow.style.display = "flex";
     const destLinks = document.getElementById("wikiDestLinks"); if (destLinks) destLinks.style.display = state.isPOI ? "none" : "block";
 
@@ -774,8 +775,10 @@ async function restoreMissionState(state) {
     }
 
     // Fallback: Wenn Frequenzen im Briefing fehlen (z.B. alte Pinnwand-Daten), neu laden
-    if (!state.wikiDepFreqText && currentStartICAO) {
+    if (!state.wikiDepFreqText && currentStartICAO && currentStartICAO !== 'GPS') {
         fetchAirportFreq(currentStartICAO, 'wikiDepFreqText', 'dep');
+    } else if (currentStartICAO === 'GPS' && document.getElementById("wikiDepFreqText")) {
+        document.getElementById("wikiDepFreqText").innerHTML = '<span style="color:#888;">Live GPS Start</span>';
     }
     if (!state.wikiDestFreqText && currentDestICAO && !state.isPOI) {
         fetchAirportFreq(currentDestICAO, 'wikiDestFreqText', 'dest');
@@ -807,10 +810,12 @@ async function restoreMissionState(state) {
         vpUpdatePosition(0);
     }, 200);
 
-    if (currentStartICAO) {
+    if (currentStartICAO && currentStartICAO !== 'GPS') {
         getAirportData(currentStartICAO).then(d => {
             if (d) fetchRunwayDetails(d.lat, d.lon, 'mDepRwy', currentStartICAO);
         });
+    } else if (currentStartICAO === 'GPS') {
+        document.getElementById("mDepRwy").innerText = "Live-Start";
     }
     if (currentDestICAO && currentDestICAO !== currentStartICAO && !state.isPOI) {
         getAirportData(currentDestICAO).then(d => {
@@ -820,7 +825,7 @@ async function restoreMissionState(state) {
 
     // --- NEU: Restore METAR Widgets ---
     const depP = routeWaypoints && routeWaypoints.length > 0 ? routeWaypoints[0] : null;
-    loadMetarWidget(currentStartICAO, 'metarContainerDep', depP?.lat, depP?.lng || depP?.lon);
+    loadMetarWidget(currentStartICAO === 'GPS' ? null : currentStartICAO, 'metarContainerDep', depP?.lat, depP?.lng || depP?.lon);
 
     const destP = routeWaypoints && routeWaypoints.length > 1 ? routeWaypoints[routeWaypoints.length - 1] : null;
     loadMetarWidget(state.isPOI ? null : currentDestICAO, 'metarContainerDest', destP?.lat, destP?.lng || destP?.lon);
@@ -2540,6 +2545,7 @@ async function generateMission() {
 
     document.getElementById("destRwyContainer").style.display = isPOI ? "none" : "block";
     if (document.getElementById("wikiDestRwyText")) document.getElementById("wikiDestRwyText").style.display = isPOI ? "none" : "block";
+    const depLinks = document.getElementById("wikiDepLinks"); if (depLinks) depLinks.style.display = "block";
     const destSwitchRow = document.getElementById("destSwitchRow"); if (destSwitchRow) destSwitchRow.style.display = isPOI ? "none" : "flex";
 
     document.getElementById("briefingBox").style.display = "block";

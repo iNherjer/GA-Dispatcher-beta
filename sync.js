@@ -603,6 +603,119 @@ let liveGpsSocket = null;
 let liveGpsMarker = null;
 let gpsWatchdog;
 let gpsReconnectDelay = 2000; // Start: 2s, wächst bei wiederholtem Fehlschlag
+let liveNextLegIndex = 0;
+let liveNextRouteKey = '';
+
+function hideNextWpTelemetry() {
+    const box = document.getElementById('liveNextWpBox');
+    if (box) box.style.display = 'none';
+}
+
+function routeKeyForLiveNav() {
+    if (typeof routeWaypoints === 'undefined' || !Array.isArray(routeWaypoints) || routeWaypoints.length < 2) return '';
+    return routeWaypoints.map((wp, i) => `${i}:${(wp.lat || 0).toFixed(4)},${((wp.lng || wp.lon) || 0).toFixed(4)}`).join('|');
+}
+
+function legDistanceToSegmentNm(lat, lon, a, b) {
+    const refLat = (a.lat + b.lat + lat) / 3;
+    const cosRef = Math.cos(refLat * Math.PI / 180);
+
+    const ax = (a.lng || a.lon) * cosRef * 60;
+    const ay = a.lat * 60;
+    const bx = (b.lng || b.lon) * cosRef * 60;
+    const by = b.lat * 60;
+    const px = lon * cosRef * 60;
+    const py = lat * 60;
+
+    const abx = bx - ax, aby = by - ay;
+    const apx = px - ax, apy = py - ay;
+    const denom = abx * abx + aby * aby;
+    const t = denom > 0 ? Math.max(0, Math.min(1, (apx * abx + apy * aby) / denom)) : 0;
+    const cx = ax + t * abx, cy = ay + t * aby;
+    return Math.hypot(px - cx, py - cy);
+}
+
+function nearestLegIndexBySegment(lat, lon) {
+    if (typeof routeWaypoints === 'undefined' || !Array.isArray(routeWaypoints) || routeWaypoints.length < 2) return 0;
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < routeWaypoints.length - 1; i++) {
+        const d = legDistanceToSegmentNm(lat, lon, routeWaypoints[i], routeWaypoints[i + 1]);
+        if (d < bestDist) {
+            bestDist = d;
+            bestIdx = i;
+        }
+    }
+    return bestIdx;
+}
+
+function getWpDisplayName(idx) {
+    if (typeof routeWaypoints === 'undefined' || !Array.isArray(routeWaypoints) || !routeWaypoints[idx]) return `WP ${idx}`;
+    const isLast = idx === routeWaypoints.length - 1;
+    if (idx === 0 && typeof currentStartICAO !== 'undefined' && currentStartICAO) return currentStartICAO;
+    if (isLast) {
+        if (typeof currentDestICAO !== 'undefined' && currentDestICAO) return currentDestICAO;
+        if (typeof currentDName !== 'undefined' && currentDName) return currentDName;
+    }
+    return routeWaypoints[idx].name || `WP ${idx}`;
+}
+
+function updateNextWpTelemetry(lat, lon) {
+    const box = document.getElementById('liveNextWpBox');
+    const nameEl = document.getElementById('nextWpName');
+    const courseEl = document.getElementById('nextWpCourse');
+    const distEl = document.getElementById('nextWpDist');
+    if (!box || !nameEl || !courseEl || !distEl) return;
+    if (typeof routeWaypoints === 'undefined' || !Array.isArray(routeWaypoints) || routeWaypoints.length < 2 || typeof calcNav !== 'function') {
+        box.style.display = 'none';
+        return;
+    }
+
+    const key = routeKeyForLiveNav();
+    if (key !== liveNextRouteKey) {
+        liveNextRouteKey = key;
+        liveNextLegIndex = nearestLegIndexBySegment(lat, lon);
+    }
+
+    const maxLeg = routeWaypoints.length - 2;
+    let legIdx = Math.max(0, Math.min(liveNextLegIndex, maxLeg));
+
+    // Auto-Advance:
+    // 1) Ziel-WP in 5 NM Radius
+    // 2) Näher an nächstem Leg als am aktuellen Leg (Shortcut/Umweg-Erkennung)
+    for (let guard = 0; guard < routeWaypoints.length; guard++) {
+        const target = routeWaypoints[legIdx + 1];
+        const navToTarget = calcNav(lat, lon, target.lat, target.lng || target.lon);
+        const inFiveNm = navToTarget.dist <= 5;
+        if (inFiveNm && legIdx < maxLeg) {
+            legIdx++;
+            continue;
+        }
+
+        if (legIdx < maxLeg) {
+            const dCurrent = legDistanceToSegmentNm(lat, lon, routeWaypoints[legIdx], routeWaypoints[legIdx + 1]);
+            const dNext = legDistanceToSegmentNm(lat, lon, routeWaypoints[legIdx + 1], routeWaypoints[legIdx + 2]);
+            if (dNext + 0.25 < dCurrent) {
+                legIdx++;
+                continue;
+            }
+        }
+        break;
+    }
+    liveNextLegIndex = legIdx;
+
+    const wpIdx = Math.min(legIdx + 1, routeWaypoints.length - 1);
+    const wp = routeWaypoints[wpIdx];
+    const nav = calcNav(lat, lon, wp.lat, wp.lng || wp.lon);
+    const crs = `${String(nav.brng).padStart(3, '0')}°`;
+    const dist = nav.dist.toFixed(1);
+
+    nameEl.textContent = getWpDisplayName(wpIdx);
+    courseEl.textContent = crs;
+    distEl.textContent = dist;
+    box.style.display = 'block';
+}
+
 // Diese Funktion aufrufen, sobald eine Route per Sync ID geladen wurde (z.B. connectToLiveGPS("4815"))
 window.connectToLiveGPS = async function(syncId) {
     if (!syncId) return;
@@ -704,6 +817,7 @@ window.connectToLiveGPS = async function(syncId) {
             ind.style.color = '#666';
             ind.style.textShadow = 'none';
         }
+        hideNextWpTelemetry();
 
         // Auto-HDG zurücksetzen damit es bei der nächsten Verbindung wieder greift
         window._hdgAutoActivated = false;
@@ -722,6 +836,7 @@ window.connectToLiveGPS = async function(syncId) {
             ind.style.color = '#666'; // Grau
             ind.style.textShadow = 'none';
         }
+        hideNextWpTelemetry();
     };
 };
 
@@ -773,6 +888,7 @@ function updateLivePlanePosition(lat, lon, alt, hdg) {
                 }
                 // AGL wird in updateLivePlanePosition weiter unten gesetzt (nach bestIdx-Suche)
             }
+            updateNextWpTelemetry(lat, lon);
             // Smoothed GS/VS for prediction (EMA α=0.3)
             smoothedGS = smoothedGS === 0 ? gs : smoothedGS * 0.7 + gs * 0.3;
             smoothedVS = smoothedVS === 0 ? vs : smoothedVS * 0.7 + vs * 0.3;
@@ -791,6 +907,7 @@ function updateLivePlanePosition(lat, lon, alt, hdg) {
         }
     } else {
         lastGpsTickDetails = { lat, lon, alt, t: now };
+        updateNextWpTelemetry(lat, lon);
     }
 
     // --- PREDICTION VECTORS ---
@@ -1174,6 +1291,7 @@ window.hideLivePlane = function () {
     window.lastLiveGpsPos = null;
     lastGpsTickDetails = null;
     lastTrailPoint = null;
+    hideNextWpTelemetry();
 };
 
 // Auto-Start & Login on app load
