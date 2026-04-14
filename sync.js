@@ -787,6 +787,53 @@ function getRegionalFisFrequency(lat, lon) {
     return '';
 }
 
+function normalizeTextToken(s) {
+    return String(s || '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9 ]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function getAssociatedAirportIcaoForRpp(wp) {
+    if (!wp) return '';
+    const direct = String(wp.rppAirportIcao || '').trim().toUpperCase();
+    if (/^[A-Z]{4}$/.test(direct)) return direct;
+    if (wp._rppAssocIcao && /^[A-Z]{4}$/.test(wp._rppAssocIcao)) return wp._rppAssocIcao;
+    if (typeof globalAirports !== 'object' || !globalAirports || typeof calcNav !== 'function') return '';
+
+    const label = String(wp.name || '').replace(/^RPP\s+/i, '');
+    const normLabel = normalizeTextToken(label);
+    const tokens = normLabel.split(' ').filter(t => t.length >= 4);
+
+    let bestIcao = '';
+    let bestScore = Infinity;
+
+    for (const key in globalAirports) {
+        const apt = globalAirports[key];
+        const icao = String(apt?.icao || key || '').trim().toUpperCase();
+        if (!/^[A-Z]{4}$/.test(icao)) continue;
+        if (!Number.isFinite(wp.lat) || !Number.isFinite(wp.lng || wp.lon)) continue;
+        if (!Number.isFinite(apt.lat) || !Number.isFinite(apt.lon)) continue;
+
+        const dNm = calcNav(wp.lat, wp.lng || wp.lon, apt.lat, apt.lon).dist;
+        if (!Number.isFinite(dNm) || dNm > 35) continue;
+
+        const aptText = normalizeTextToken(`${apt.name || ''} ${apt.city || ''} ${icao}`);
+        const tokenHit = tokens.length > 0 && tokens.some(t => aptText.includes(t));
+        if (!tokenHit && dNm > 8) continue;
+
+        const score = dNm + (tokenHit ? 0 : 12);
+        if (score < bestScore) {
+            bestScore = score;
+            bestIcao = icao;
+        }
+    }
+
+    wp._rppAssocIcao = bestIcao || '';
+    return bestIcao;
+}
+
 function getWpFrequencyText(wpIdx) {
     if (typeof routeWaypoints === 'undefined' || !Array.isArray(routeWaypoints) || !routeWaypoints[wpIdx]) return '';
     const wp = routeWaypoints[wpIdx];
@@ -805,6 +852,14 @@ function getWpFrequencyText(wpIdx) {
         const icao = (typeof currentDestICAO !== 'undefined') ? currentDestICAO : '';
         const f = (typeof currentDestFreq !== 'undefined' && currentDestFreq) ? currentDestFreq : getPrimaryAirportFrequency(icao, 'dest');
         return f ? `📻 ${f}` : '';
+    }
+
+    if (/^RPP\s+/i.test(wpName)) {
+        const rppIcao = getAssociatedAirportIcaoForRpp(wp);
+        if (rppIcao) {
+            const f = getPrimaryAirportFrequency(rppIcao, null);
+            if (f) return `📻 ${rppIcao} ${f}`;
+        }
     }
 
     const fis = getRegionalFisFrequency(wp.lat, wp.lng || wp.lon);
@@ -1126,23 +1181,16 @@ function updateLivePlanePosition(lat, lon, alt, hdg) {
     // Hilfsfunktion: Luftraum-Farbe für einen Vorhersagepunkt (synchron, für Marker-Einfärbung)
     function _getAirspaceColorForPredPoint(pt) {
         if (typeof activeAirspaces === 'undefined' || !activeAirspaces.length) return null;
-        if (typeof vpPointInPoly === 'undefined' || typeof airspaceLimitToFt === 'undefined') return null;
+        if (typeof getAirspaceVerticalBandFt === 'undefined' || typeof isPointInsideAirspace === 'undefined') return null;
         for (const as of activeAirspaces) {
             if (!as.geometry || !as.lowerLimit || !as.upperLimit) continue;
             if (as.type === 33) continue; // FIS überspringen
-            const lowerFt = airspaceLimitToFt(as.lowerLimit);
-            const upperFt = airspaceLimitToFt(as.upperLimit);
-            if (lowerFt === null || upperFt === null) continue;
-            const effLower = (as.lowerLimit.referenceDatum === 0) ? 0 : lowerFt;
-            if (pt.alt < effLower - 500 || pt.alt > upperFt + 500) continue;
-            const polys = [];
-            if (as.geometry.type === 'Polygon') polys.push(as.geometry.coordinates[0]);
-            else if (as.geometry.type === 'MultiPolygon') as.geometry.coordinates.forEach(mc => polys.push(mc[0]));
-            for (const poly of polys) {
-                if (vpPointInPoly({ lat: pt.lat, lon: pt.lon }, poly)) {
-                    return typeof getAirspaceStyle === 'function' ? getAirspaceStyle(as).color : '#f2c12e';
-                }
-            }
+            const terrainBase = Number(pt.terrainFt ?? window.lastLiveTerrainFt) || 0;
+            const band = getAirspaceVerticalBandFt(as, terrainBase);
+            if (!band) continue;
+            if (pt.alt < band.lowerFt - 500 || pt.alt > band.upperFt + 500) continue;
+            if (isPointInsideAirspace(as, pt.lat, pt.lon))
+                return typeof getAirspaceStyle === 'function' ? getAirspaceStyle(as).color : '#f2c12e';
         }
         return null;
     }
@@ -1166,6 +1214,13 @@ function updateLivePlanePosition(lat, lon, alt, hdg) {
             return { lat: pt.lat, lon: pt.lon, min, alt: Math.max(0, alt + smoothedVS * min) };
         });
         const _awmPredPoints = [...predPoints, ..._awmExtra];
+        // Zusätzlicher TAWS-Feinpunkt für 15s "time-to-impact" Warnung.
+        const _tawsExtra = [0.25].map(min => {
+            const distNM = smoothedGS * (min / 60);
+            const pt = getDestinationPoint(lat, lon, distNM, hdg);
+            return { lat: pt.lat, lon: pt.lon, min, alt: Math.max(0, alt + smoothedVS * min) };
+        });
+        const _tawsPredPoints = [..._awmPredPoints, ..._tawsExtra];
 
         const lineCoords = [[lat, lon], ...predPoints.map(p => [p.lat, p.lon])];
 
@@ -1223,16 +1278,23 @@ function updateLivePlanePosition(lat, lon, alt, hdg) {
             window._lastGpsCityKey = null;
         }
 
-        // Airspace-Warnungen prüfen (Sprach-Alerts via AWM)
-        if (typeof checkAirspaceWarnings === 'function') checkAirspaceWarnings(_awmPredPoints);
-
         // TAWS-Check: Prediction-Linie einfärben wenn taws.js geladen
         if (typeof checkTerrainAlongPath === 'function') {
-            checkTerrainAlongPath(predPoints).then(results => {
+            checkTerrainAlongPath(_tawsPredPoints).then(results => {
                 if (!results || !predictionLine) return;
+                // Airspace-Warnungen mit Terrain-Info füttern (AGL-Limits korrekt auswerten).
+                if (typeof checkAirspaceWarnings === 'function') {
+                    const terrainFallback = Number(window.lastLiveTerrainFt) || 0;
+                    const awmPts = _awmPredPoints.map((p, idx) => ({
+                        ...p,
+                        terrainFt: Number(results[idx]?.terrainFt ?? terrainFallback) || 0
+                    }));
+                    checkAirspaceWarnings(awmPts);
+                }
+
                 // Worst-case Threat bestimmt Linienfarbe
                 let worst = 'green';
-                for (const r of results) {
+                for (const r of results.slice(0, predPoints.length)) {
                     if (r.threat === 'red') { worst = 'red'; break; }
                     if (r.threat === 'amber') worst = 'amber';
                 }
@@ -1268,6 +1330,9 @@ function updateLivePlanePosition(lat, lon, alt, hdg) {
                     });
                 }
             });
+        } else {
+            // Fallback ohne Terrain-Resolver
+            if (typeof checkAirspaceWarnings === 'function') checkAirspaceWarnings(_awmPredPoints);
         }
 
         // Zeitmarker zeichnen/updaten
@@ -1377,6 +1442,7 @@ function updateLivePlanePosition(lat, lon, alt, hdg) {
 
         // AGL aus Terrain-Höhe an der nächstgelegenen Route-Position
         const terrainFt = bestDist < 0.028 ? (ed[bestIdx].elevFt ?? 0) : 0;
+        window.lastLiveTerrainFt = terrainFt;
         const aglFt = Math.max(0, Math.round(alt - terrainFt));
         const aglEl = document.getElementById('teleAGL');
         if (aglEl) {

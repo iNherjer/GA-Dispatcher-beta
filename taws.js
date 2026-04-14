@@ -363,6 +363,36 @@ function _awPulseOnMap(as, color) {
     });
 }
 
+let _awProfilePulseTimer = null;
+function _awPulseOnProfileBand(as) {
+    if (!as || typeof activeAirspaces === 'undefined' || !Array.isArray(activeAirspaces)) return;
+    const idx = activeAirspaces.findIndex(a => a === as || (a && as && a._id && as._id && a._id === as._id));
+    if (idx < 0) return;
+
+    const prevIdx = (typeof vpHighlightPulseIdx === 'number') ? vpHighlightPulseIdx : -1;
+    vpHighlightPulseIdx = idx;
+
+    if (typeof vpStartHighlightPulse === 'function') vpStartHighlightPulse();
+    else {
+        if (typeof renderMapProfile === 'function') renderMapProfile();
+        if (document.getElementById('verticalProfileCanvas') && typeof renderVerticalProfile === 'function') {
+            renderVerticalProfile('verticalProfileCanvas');
+        }
+    }
+
+    if (_awProfilePulseTimer) clearTimeout(_awProfilePulseTimer);
+    _awProfilePulseTimer = setTimeout(() => {
+        if (typeof vpHighlightPulseIdx !== 'undefined') {
+            vpHighlightPulseIdx = (prevIdx >= 0 && activeAirspaces[prevIdx]) ? prevIdx : -1;
+        }
+        if (typeof vpStopHighlightPulse === 'function') vpStopHighlightPulse();
+        if (typeof renderMapProfile === 'function') renderMapProfile();
+        if (document.getElementById('verticalProfileCanvas') && typeof renderVerticalProfile === 'function') {
+            renderVerticalProfile('verticalProfileCanvas');
+        }
+    }, 6000);
+}
+
 /**
  * Frequenz/Squawk-Banner am unteren Kartenrand anzeigen.
  * Bleibt stehen bis der Pilot tippt/klickt — kein Auto-Dismiss.
@@ -443,11 +473,13 @@ function checkAirspaceWarnings(predPoints) {
     if (!_awLoaded) { _awLoadClips(); return; }
     if (!_tawsAudioCtx) return;
     if (typeof activeAirspaces === 'undefined' || !activeAirspaces.length) return;
-    if (typeof vpPointInPoly === 'undefined' || typeof airspaceLimitToFt === 'undefined') return;
+    if (typeof getAirspaceVerticalBandFt === 'undefined' || typeof isPointInsideAirspace === 'undefined') return;
 
     const now = Date.now();
     const PERSIST = 5000;
     const STICKY  = 3000;
+    const lastTerrainFt = Number(window.lastLiveTerrainFt) || 0;
+    const getTerrainForPoint = (pt) => Number(pt?.terrainFt ?? lastTerrainFt) || 0;
 
     // ── Pass 1: Schnittstellen für alle Lufträume berechnen ───────────────────
     const crossings = [];
@@ -456,20 +488,12 @@ function checkAirspaceWarnings(predPoints) {
         if (as.type === 33) continue;
 
         const typeKey = _awTypeKey(as) || 'aw-ctr';
-        let effLower = 0, effUpper = 99999;
-        if (as.lowerLimit && as.upperLimit) {
-            const lo = airspaceLimitToFt(as.lowerLimit);
-            const hi = airspaceLimitToFt(as.upperLimit);
-            if (lo !== null) effLower = (as.lowerLimit.referenceDatum === 0) ? 0 : lo;
-            if (hi !== null) effUpper = hi;
-        }
-
-        const polys = [];
-        if (as.geometry.type === 'Polygon')
-            polys.push(as.geometry.coordinates[0]);
-        else if (as.geometry.type === 'MultiPolygon')
-            as.geometry.coordinates.forEach(mc => polys.push(mc[0]));
-        if (!polys.length) continue;
+        const bandBase = getAirspaceVerticalBandFt(as, 0);
+        if (!bandBase) continue;
+        const lowerFt = bandBase.baseLowerFt;
+        const upperFt = bandBase.baseUpperFt;
+        const lowerIsAgl = bandBase.isLowerAgl;
+        const upperIsAgl = bandBase.isUpperAgl;
 
         let earliest5 = null, earliest2 = null, insideNow = false;
 
@@ -478,31 +502,27 @@ function checkAirspaceWarnings(predPoints) {
         // tatsächlich durchflogen wird — nicht schon 1 Minute vorher.
         const _gps = window.lastLiveGpsPos;
         if (_gps && _gps.alt !== undefined && _gps.lat !== undefined) {
+            const bandNow = getAirspaceVerticalBandFt(as, getTerrainForPoint(_gps));
+            if (!bandNow) continue;
             const _gAlt = _gps.alt; // bereits in Feet (sync.js)
-            if (_gAlt >= effLower - 200 && _gAlt <= effUpper + 200) {
-                for (const poly of polys) {
-                    if (vpPointInPoly({ lat: _gps.lat, lon: _gps.lon }, poly)) {
-                        insideNow = true; break;
-                    }
-                }
+            if (_gAlt >= bandNow.lowerFt - 200 && _gAlt <= bandNow.upperFt + 200) {
+                if (isPointInsideAirspace(as, _gps.lat, _gps.lon)) insideNow = true;
             }
         }
 
         for (const pt of predPoints) {
-            if (pt.alt < effLower - 500 || pt.alt > effUpper + 300) continue;
-            let inside = false;
-            for (const poly of polys) {
-                if (vpPointInPoly({ lat: pt.lat, lon: pt.lon }, poly)) { inside = true; break; }
-            }
-            if (!inside) continue;
+            const bandPt = getAirspaceVerticalBandFt(as, getTerrainForPoint(pt));
+            if (!bandPt) continue;
+            if (pt.alt < bandPt.lowerFt - 500 || pt.alt > bandPt.upperFt + 300) continue;
+            if (!isPointInsideAirspace(as, pt.lat, pt.lon)) continue;
             if (pt.min <= 5 && (earliest5 === null || pt.min < earliest5)) earliest5 = pt.min;
             if (pt.min <= 2 && (earliest2 === null || pt.min < earliest2)) earliest2 = pt.min;
         }
 
         if (earliest5 === null && earliest2 === null && !insideNow) continue;
 
-        const asKey = `${as.type}_${as.name || 'x'}_${Math.round(effLower)}`;
-        crossings.push({ as, typeKey, effLower, effUpper, earliest5, earliest2, insideNow, asKey });
+        const asKey = `${as.type}_${as.name || 'x'}_${Math.round(lowerFt)}`;
+        crossings.push({ as, typeKey, lowerFt, upperFt, lowerIsAgl, upperIsAgl, earliest5, earliest2, insideNow, asKey });
     }
 
     // ── Pass 2: Nächsten noch nicht eingetretenen Luftraum bestimmen ──────────
@@ -534,7 +554,7 @@ function checkAirspaceWarnings(predPoints) {
 
     // ── Pass 3: Warnungen ausspielen ──────────────────────────────────────────
     for (const c of crossings) {
-        const { as, typeKey, effLower, effUpper, earliest5, earliest2, insideNow, asKey } = c;
+        const { as, typeKey, earliest5, earliest2, insideNow, asKey } = c;
         const in5 = earliest5 !== null;
         const in2 = earliest2 !== null;
 
@@ -571,7 +591,7 @@ function checkAirspaceWarnings(predPoints) {
                 st.t2 = true;
                 const col = (typeof getAirspaceStyle === 'function') ? getAirspaceStyle(as).color : '#ffffff';
                 _awPulseOnMap(as, col);
-                window._awmPulse = { color: col, lowerFt: effLower, upperFt: effUpper, startMs: now, as };
+                _awPulseOnProfileBand(as);
                 window.vpBgNeedsUpdate = true;
                 console.log(`[AWM] ✈ ${as.name} (${typeKey}) in ${Math.round(earliest2)} min`);
                 _awPlaySequence(['aw-achtung', ..._awTypeClips(as), 'aw-in', _awMinKey(Math.round(earliest2)) || 'aw-2min', ..._awGetFreqClips(as)]);
@@ -591,7 +611,7 @@ function checkAirspaceWarnings(predPoints) {
                 st.t5 = true;
                 const col = (typeof getAirspaceStyle === 'function') ? getAirspaceStyle(as).color : '#ffffff';
                 _awPulseOnMap(as, col);
-                window._awmPulse = { color: col, lowerFt: effLower, upperFt: effUpper, startMs: now, as };
+                _awPulseOnProfileBand(as);
                 window.vpBgNeedsUpdate = true;
                 console.log(`[AWM] ✈ ${as.name} (${typeKey}) in ${Math.round(earliest5)} min`);
                 _awPlaySequence(['aw-achtung', ..._awTypeClips(as), 'aw-in', _awMinKey(Math.round(earliest5)) || 'aw-5min', ..._awGetFreqClips(as)]);
@@ -714,8 +734,8 @@ async function checkTerrainAlongPath(points) {
             let threat = 'green';
             if (clearance < TAWS_SAFETY_RED) {
                 threat = 'red';
-                // Voice nur wenn Kollision in ≤ 60 Sekunden
-                if ((p.min ?? 99) <= 1) hasImmediateThreat = true;
+                // Voice nur wenn Kollision in ≤ 15 Sekunden
+                if ((p.min ?? 99) <= 0.25) hasImmediateThreat = true;
             } else if (clearance < TAWS_SAFETY_AMBER) {
                 threat = 'amber';
             }

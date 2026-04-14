@@ -1986,6 +1986,7 @@ let highlightedAirspaceIdx = -1; // track which airspace is toggled on
 let vpHighlightPulseIdx = -1; // airspace index pulsing in profile canvas
 let vpPulseAnimFrame = null; // requestAnimationFrame ID
 let vpPulsePhase = 0; // 0..1 for pulse animation
+const _airspaceFreqFallbackInFlight = new Set();
 
 function vpStartHighlightPulse() {
     vpStopHighlightPulse();
@@ -2081,13 +2082,154 @@ function getAirspaceDisplayName(a) {
     return `${name.trim()} [${style.category}]`;
 }
 
+function normalizeAirspaceNameForFreq(name) {
+    return String(name || '')
+        .toUpperCase()
+        .replace(/\b(TMA|CTR|CTA|TMZ|RMZ|FIS|HX)\b/g, ' ')
+        .replace(/[^A-Z0-9]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function inferAirspaceLimitIsAgl(as, lim, boundary) {
+    if (!as || !lim) return false;
+    if (lim.referenceDatum === 0) return true;
+    if (lim.referenceDatum !== 1) return false;
+
+    const t = as.type;
+    const isTypicalLowAirspace = [0, 4, 5, 6, 7, 26, 27, 28].includes(t);
+    if (!isTypicalLowAirspace) return false;
+
+    const value = Number(lim.value);
+    if (!Number.isFinite(value)) return false;
+
+    // OpenAIP liefert "GND" vereinzelt als 0 FT MSL statt 0 FT AGL.
+    if (boundary === 'lower' && value === 0) return true;
+
+    // Obergrenze nur bei TMZ/RMZ heuristisch auf AGL drehen.
+    // Für CTR/TMA/CTA nie auto-AGL, sonst werden legitime MSL-Decken verfälscht.
+    if (boundary === 'upper' && lim.unit !== 6 && value > 0) {
+        const canAutoUpperAgl = [5, 6, 27, 28].includes(t);
+        if (!canAutoUpperAgl) return false;
+        const lower = as.lowerLimit || null;
+        const lowerLooksGnd = !!lower && Number(lower.value) === 0 && (lower.referenceDatum === 0 || lower.referenceDatum === 1);
+        const upperFt = lim.unit === 1 ? value : (lim.unit === 0 ? value * 3.28084 : value);
+        if (lowerLooksGnd && upperFt <= 4000) return true;
+    }
+
+    return false;
+}
+
+function applyAirspaceLimitHeuristics(as) {
+    if (!as) return;
+    const lowerIsAgl = inferAirspaceLimitIsAgl(as, as.lowerLimit, 'lower');
+    const upperIsAgl = inferAirspaceLimitIsAgl(as, as.upperLimit, 'upper');
+    as._lowerIsAgl = !!lowerIsAgl;
+    as._upperIsAgl = !!upperIsAgl;
+    if (as.lowerLimit && lowerIsAgl) as.lowerLimit.referenceDatum = 0;
+    if (as.upperLimit && upperIsAgl) as.upperLimit.referenceDatum = 0;
+}
+
+function getAirspaceApproxCenter(as) {
+    if (!as?.geometry) return null;
+    const pts = [];
+    if (as.geometry.type === 'Polygon' && Array.isArray(as.geometry.coordinates?.[0])) {
+        as.geometry.coordinates[0].forEach(c => Array.isArray(c) && c.length >= 2 && pts.push(c));
+    } else if (as.geometry.type === 'MultiPolygon') {
+        as.geometry.coordinates.forEach(poly => {
+            if (Array.isArray(poly?.[0])) poly[0].forEach(c => Array.isArray(c) && c.length >= 2 && pts.push(c));
+        });
+    }
+    if (!pts.length) return null;
+    let sumLon = 0, sumLat = 0;
+    pts.forEach(p => { sumLon += Number(p[0]) || 0; sumLat += Number(p[1]) || 0; });
+    return { lon: sumLon / pts.length, lat: sumLat / pts.length };
+}
+
+function approxNmBetween(lat1, lon1, lat2, lon2) {
+    if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return Infinity;
+    const meanLatRad = ((lat1 + lat2) * 0.5) * Math.PI / 180;
+    const dLatNm = (lat2 - lat1) * 60;
+    const dLonNm = (lon2 - lon1) * 60 * Math.cos(meanLatRad);
+    return Math.hypot(dLatNm, dLonNm);
+}
+
+function toAirspaceFreqList(freqEntries) {
+    if (!Array.isArray(freqEntries)) return [];
+    return freqEntries
+        .filter(f => f && f.value)
+        .map(f => ({ name: f.name || f.label || 'INFO', value: f.value, primary: !!f.primary }));
+}
+
+function getAirportFrequencyFallbackByIcao(icao) {
+    const code = String(icao || '').trim().toUpperCase();
+    if (!code) return [];
+    const cached = freqCache?.[code];
+    return toAirspaceFreqList(cached);
+}
+
+function pickAirportForAirspaceFallback(as) {
+    if (!as || !globalAirports) return null;
+    const center = getAirspaceApproxCenter(as);
+    const asNorm = normalizeAirspaceNameForFreq(as.name);
+    const tokens = asNorm.split(' ').filter(t => t.length >= 4);
+    if (!tokens.length && !center) return null;
+
+    let best = null;
+    let bestScore = Infinity;
+
+    for (const key in globalAirports) {
+        const apt = globalAirports[key];
+        const icao = String(apt?.icao || key || '').trim().toUpperCase();
+        if (!icao) continue;
+
+        const aptNorm = normalizeAirspaceNameForFreq(`${apt.name || ''} ${apt.city || ''} ${icao}`);
+        const nameHit = tokens.length ? tokens.some(t => aptNorm.includes(t) || asNorm.includes(icao)) : true;
+        if (!nameHit) continue;
+
+        let distScore = 0;
+        if (center && Number.isFinite(apt.lat) && Number.isFinite(apt.lon)) {
+            const nm = approxNmBetween(center.lat, center.lon, Number(apt.lat), Number(apt.lon));
+            if (!Number.isFinite(nm) || nm > 40) continue;
+            distScore = nm;
+        }
+
+        const score = distScore;
+        if (score < bestScore) {
+            bestScore = score;
+            best = { icao, apt };
+        }
+    }
+    return best;
+}
+
+function pickPreferredAirspaceFrequency(freqs, airspaceType) {
+    if (!Array.isArray(freqs) || freqs.length === 0) return null;
+    const list = freqs.filter(f => f && f.value);
+    if (!list.length) return null;
+
+    const wantsTowerLike = [4, 7, 26].includes(airspaceType) || airspaceType === 0;
+    if (wantsTowerLike) {
+        const towerRx = /\b(TWR|TOWER|TURM)\b/i;
+        const appRx = /\b(APP|APPROACH|ANFLUG)\b/i;
+        const infoRx = /\b(INFO|INFORMATION|RADIO)\b/i;
+        return list.find(f => towerRx.test(f.name || ''))
+            || list.find(f => appRx.test(f.name || ''))
+            || list.find(f => infoRx.test(f.name || ''))
+            || list.find(f => f.primary)
+            || list[0];
+    }
+
+    return list.find(f => f.primary) || list[0];
+}
+
 function getAirspaceFreqInfo(a) {
     const t = a.type;
     if (!a.frequencies || a.frequencies.length === 0) return '';
 
     // For CTR/TMA/CTA (type 4, 7, 26) and type 0 with icaoClass 3: show Tower/Approach freq
     if ([4, 7, 26].includes(t) || (t === 0 && a.icaoClass === 3)) {
-        const primary = a.frequencies.find(f => f.primary) || a.frequencies[0];
+        const primary = pickPreferredAirspaceFrequency(a.frequencies, t);
         if (primary) {
             const label = primary.name || 'TWR';
             return `<span style="color:#f2c12e; font-weight:bold; font-size:10px;">📻 ${label}: ${primary.value}</span>`;
@@ -2096,7 +2238,7 @@ function getAirspaceFreqInfo(a) {
 
     // For TMZ (type 5 or 27): show squawk if available, otherwise freq
     if (t === 5 || t === 27) {
-        const primary = a.frequencies.find(f => f.primary) || a.frequencies[0];
+        const primary = pickPreferredAirspaceFrequency(a.frequencies, t);
         if (primary) {
             return `<span style="color:#9966ff; font-weight:bold; font-size:10px;">📻 ${primary.name || 'XPDR'}: ${primary.value}</span>`;
         }
@@ -2104,7 +2246,7 @@ function getAirspaceFreqInfo(a) {
     // For RMZ (type 6 or 28) and FIS (type 33): show freq
     // Para-Zonen (PARA-RMZ): orangene Farbe + 🪂 Icon
     if ([6, 28, 33].includes(t)) {
-        const primary = a.frequencies.find(f => f.primary) || a.frequencies[0];
+        const primary = pickPreferredAirspaceFrequency(a.frequencies, t);
         if (primary) {
             const isPara = isParaAirspace(a);
             const col  = isPara ? '#ffaa00' : '#66cccc';
@@ -2296,6 +2438,66 @@ async function fetchRouteAirspaces(routePts) {
             }
         }
         activeAirspaces = [...byName.values()];
+
+        // Zusätzlicher Frequenz-Fallback:
+        // Wenn ein CTR/TMA/CTA-Eintrag ohne Frequenz durchrutscht, versuche aus
+        // gleich benannten/intersektierenden Sektoren die Frequenzen zu übernehmen.
+        const byNormNameWithFreq = new Map();
+        for (const src of intersecting) {
+            if (!src?.frequencies || src.frequencies.length === 0) continue;
+            const norm = normalizeAirspaceNameForFreq(src.name);
+            if (!norm) continue;
+            if (!byNormNameWithFreq.has(norm)) byNormNameWithFreq.set(norm, src.frequencies);
+        }
+        activeAirspaces.forEach(as => {
+            if (as?.frequencies && as.frequencies.length > 0) return;
+            const isCtaCtrFamily = [0, 4, 7, 26].includes(as?.type);
+            if (!isCtaCtrFamily) return;
+            const norm = normalizeAirspaceNameForFreq(as.name);
+            const fallbackFreqs = norm ? byNormNameWithFreq.get(norm) : null;
+            if (fallbackFreqs && fallbackFreqs.length > 0) {
+                as.frequencies = fallbackFreqs;
+            }
+        });
+
+        // AGL-/GND-Heuristik auf gematchte Airspaces anwenden.
+        activeAirspaces.forEach(as => applyAirspaceLimitHeuristics(as));
+
+        // Zweiter Frequenz-Fallback: CTR/TMA/CTA ohne Frequenz → passender Flugplatz.
+        activeAirspaces.forEach(as => {
+            if (!as || (as.frequencies && as.frequencies.length > 0)) return;
+            if (![0, 4, 7, 26].includes(as.type)) return;
+
+            const pick = pickAirportForAirspaceFallback(as);
+            if (!pick?.icao) return;
+
+            const immediate = getAirportFrequencyFallbackByIcao(pick.icao);
+            if (immediate.length > 0) {
+                as.frequencies = immediate;
+                return;
+            }
+
+            // Noch nicht im Cache: einmalig nachladen und Liste danach neu rendern.
+            if (typeof fetchAirportFreq !== 'function') return;
+            if (freqCache[pick.icao] !== undefined) return;
+            if (_airspaceFreqFallbackInFlight.has(pick.icao)) return;
+
+            _airspaceFreqFallbackInFlight.add(pick.icao);
+            const asId = as._id;
+            fetchAirportFreq(pick.icao, null, null)
+                .catch(() => null)
+                .finally(() => {
+                    _airspaceFreqFallbackInFlight.delete(pick.icao);
+                    const fetched = getAirportFrequencyFallbackByIcao(pick.icao);
+                    if (!fetched.length) return;
+                    const target = activeAirspaces.find(a => a && a._id === asId);
+                    if (target && (!target.frequencies || target.frequencies.length === 0)) {
+                        target.frequencies = fetched;
+                    }
+                    if (typeof renderAirspaceWarningsList === 'function') renderAirspaceWarningsList();
+                });
+        });
+
         window._activeAirspacesVersion = (window._activeAirspacesVersion || 0) + 1;
         clearAirspaceMapLayers();
         renderAirspaceWarningsList();

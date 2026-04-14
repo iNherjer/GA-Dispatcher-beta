@@ -1469,13 +1469,12 @@ function getCachedAirspaceIntersections(elevData, totalDist) {
     for (let asIdx = 0; asIdx < activeAirspaces.length; asIdx++) {
         const as = activeAirspaces[asIdx];
         if (as.type === 33) continue;
-        if (!as.lowerLimit || !as.upperLimit) continue;
-        const lowerFt = airspaceLimitToFt(as.lowerLimit);
-        const upperFt = airspaceLimitToFt(as.upperLimit);
-        if (lowerFt === null || upperFt === null) continue;
-
-        const isLowerAgl = as.lowerLimit.referenceDatum === 0;
-        const isUpperAgl = as.upperLimit.referenceDatum === 0;
+        const band = getAirspaceVerticalBandFt(as, 0);
+        if (!band) continue;
+        const lowerFt = band.baseLowerFt;
+        const upperFt = band.baseUpperFt;
+        const isLowerAgl = band.isLowerAgl;
+        const isUpperAgl = band.isUpperAgl;
 
         let asMinDist = totalDist, asMaxDist = 0, found = false;
         const polys = [];
@@ -1885,6 +1884,30 @@ function airspaceLimitToFt(lim) {
     return lim.value;
 }
 
+function getAirspaceVerticalBandFt(as, terrainFt) {
+    if (!as?.lowerLimit || !as?.upperLimit) return null;
+    const baseLowerFt = airspaceLimitToFt(as.lowerLimit);
+    const baseUpperFt = airspaceLimitToFt(as.upperLimit);
+    if (baseLowerFt === null || baseUpperFt === null) return null;
+    const groundFt = Number(terrainFt) || 0;
+    const isLowerAgl = !!(as._lowerIsAgl || as.lowerLimit.referenceDatum === 0);
+    const isUpperAgl = !!(as._upperIsAgl || as.upperLimit.referenceDatum === 0);
+    const lowerFt = isLowerAgl ? (groundFt + baseLowerFt) : baseLowerFt;
+    const upperFt = isUpperAgl ? (groundFt + baseUpperFt) : baseUpperFt;
+    return { lowerFt, upperFt, baseLowerFt, baseUpperFt, isLowerAgl, isUpperAgl };
+}
+
+function isPointInsideAirspace(as, lat, lon) {
+    if (!as?.geometry) return false;
+    const polys = [];
+    if (as.geometry.type === 'Polygon') polys.push(as.geometry.coordinates[0]);
+    else if (as.geometry.type === 'MultiPolygon') as.geometry.coordinates.forEach(mc => polys.push(mc[0]));
+    for (const poly of polys) {
+        if (vpPointInPoly({ lat, lon }, poly)) return true;
+    }
+    return false;
+}
+
 function vpHexToRgba(hex, alpha) {
     if (!hex || hex.charAt(0) !== '#') return 'rgba(0,0,0,' + alpha + ')';
     const r = parseInt(hex.slice(1, 3), 16) || 0;
@@ -2223,7 +2246,7 @@ function renderMapProfileFrames(timeMs) {
                 const style = getAirspaceStyle(as);
                 const x1 = xOf(asMinDist), x2 = xOf(asMaxDist);
 
-                const isHighlighted = (typeof vpHighlightPulseIdx !== 'undefined' && vpHighlightPulseIdx >= 0 && asIdx === vpHighlightPulseIdx);
+                const isHighlighted = !!isFg && (typeof vpHighlightPulseIdx !== 'undefined' && vpHighlightPulseIdx >= 0 && asIdx === vpHighlightPulseIdx);
                 const phase = typeof vpPulsePhase !== 'undefined' ? vpPulsePhase : 0;
                 const pulseOpacity = isHighlighted ? 0.2 + 0.4 * (0.5 + 0.5 * Math.sin(phase * Math.PI * 2)) : (isFg ? 0.22 : 0.15);
                 const strokeOpacity = isHighlighted ? 0.5 + 0.5 * (0.5 + 0.5 * Math.sin(phase * Math.PI * 2)) : 0.5;
@@ -2683,39 +2706,51 @@ function renderMapProfileFrames(timeMs) {
     // D: TRAFFIC IM PROFIL
     vpDrawTrafficInProfile(fgCtx, xOf, yOf, elevData, isHdgMode, viewMinX, viewMaxX);
 
-    // E: AWM PULS — nur das Luftraum-Polygon aufblinken (nicht ganzer Bildschirm)
-    if (window._awmPulse) {
-        const _p = window._awmPulse;
-        const _elapsed = Date.now() - _p.startMs;
-        const _TOTAL = 2700;  // 3 Pulse × 900ms
-        if (_elapsed > _TOTAL) {
-            window._awmPulse = null;
-        } else {
-            const _phase = Math.floor(_elapsed / 450);  // 0-5
-            if (_phase % 2 === 0) {
-                // Horizontale Ausdehnung aus dem Airspace-Cache holen
-                let _px1 = padLeft, _pw = plotW; // Fallback: volle Breite
-                if (_p.as && window._vpAsCache && window._vpAsCache.items) {
-                    const _match = window._vpAsCache.items.find(item => item.as === _p.as);
-                    if (_match) {
-                        _px1 = xOf(_match.asMinDist);
-                        _pw  = Math.max(4, xOf(_match.asMaxDist) - _px1);
-                    }
+    // E: Vordergrund-Puls fuer den aktuell gewarnten Luftraum.
+    // Zeichnet das bereits vorhandene Band nochmals im FG, damit der Blinkeffekt
+    // auch bei statischem BG-Cache sichtbar bleibt.
+    if (typeof vpHighlightPulseIdx !== 'undefined' && vpHighlightPulseIdx >= 0) {
+        const phase = (typeof vpPulsePhase !== 'undefined') ? vpPulsePhase : 0;
+        const pulse = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(phase * Math.PI * 2));
+        const cachedAirspaces = getCachedAirspaceIntersections(elevData, totalDist);
+        const item = cachedAirspaces.find(it => it.asIdx === vpHighlightPulseIdx);
+        if (item && item.as) {
+            const { as, lowerFt, upperFt, isLowerAgl, isUpperAgl, relevantPts } = item;
+            const style = getAirspaceStyle(as);
+
+            fgCtx.save();
+            fgCtx.fillStyle = vpHexToRgba(style.color, 0.14 + 0.24 * pulse);
+            fgCtx.strokeStyle = vpHexToRgba(style.color, 0.65 + 0.30 * pulse);
+            fgCtx.lineWidth = 2.2 + 1.8 * pulse;
+            fgCtx.setLineDash([]);
+            fgCtx.beginPath();
+
+            if (!isLowerAgl && !isUpperAgl) {
+                const x1 = xOf(item.asMinDist), x2 = xOf(item.asMaxDist);
+                const ry1 = yOf(Math.min(upperFt, maxAlt));
+                const ry2 = yOf(Math.max(lowerFt, minAlt));
+                fgCtx.moveTo(x1, ry1);
+                fgCtx.lineTo(x2, ry1);
+                fgCtx.lineTo(x2, ry2);
+                fgCtx.lineTo(x1, ry2);
+            } else {
+                for (let i = 0; i < relevantPts.length; i++) {
+                    const p = relevantPts[i];
+                    const realUpper = isUpperAgl ? p.elevFt + upperFt : upperFt;
+                    const y = yOf(Math.min(realUpper, maxAlt));
+                    if (i === 0) fgCtx.moveTo(xOf(p.distNM), y); else fgCtx.lineTo(xOf(p.distNM), y);
                 }
-                const _alpha = 0.75 * (1 - (_elapsed % 450) / 450 * 0.35);
-                const _y1 = Math.min(yOf(Math.max(_p.lowerFt, 0)), yOf(Math.max(_p.upperFt, 0)));
-                const _y2 = Math.max(yOf(Math.max(_p.lowerFt, 0)), yOf(Math.max(_p.upperFt, 0)));
-                const _h  = Math.max(4, _y2 - _y1);
-                fgCtx.save();
-                fgCtx.globalAlpha = _alpha;
-                fgCtx.strokeStyle = _p.color;
-                fgCtx.lineWidth = 3;
-                fgCtx.strokeRect(_px1, _y1, _pw, _h);
-                fgCtx.globalAlpha = _alpha * 0.28;
-                fgCtx.fillStyle = _p.color;
-                fgCtx.fillRect(_px1, _y1, _pw, _h);
-                fgCtx.restore();
+                for (let i = relevantPts.length - 1; i >= 0; i--) {
+                    const p = relevantPts[i];
+                    const realLower = isLowerAgl ? p.elevFt + lowerFt : lowerFt;
+                    fgCtx.lineTo(xOf(p.distNM), yOf(Math.max(realLower, minAlt)));
+                }
             }
+
+            fgCtx.closePath();
+            fgCtx.fill();
+            fgCtx.stroke();
+            fgCtx.restore();
         }
     }
 

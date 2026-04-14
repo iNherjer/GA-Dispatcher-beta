@@ -158,6 +158,612 @@ function getAipPopupUrl(icao, fallbackCountry = '') {
     return `https://aip.aero${route}?${encodeURIComponent(String(icao).trim().toUpperCase())}=`;
 }
 
+const AIP_PROXY_BASE = 'https://ga-proxy.einherjer.workers.dev';
+const AIP_CHART_STORAGE_KEY = 'ga_aip_chart_settings_v1';
+const AIP_CHART_UI_ENABLED = false;
+const AIP_CHART_OPACITY_MIN = 0.15;
+const AIP_CHART_OPACITY_MAX = 1.0;
+const AIP_CHART_OPACITY_DEFAULT = 0.65;
+const AIP_CHART_CAL_MARKER_STYLE = [
+    { color: '#2ec4ff', fillColor: '#2ec4ff' },
+    { color: '#ffd166', fillColor: '#ffd166' }
+];
+const AIP_PDFJS_CDN = {
+    lib: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+    worker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+};
+
+let aipChartOverlayLayer = null;
+let aipChartOverlayMeta = null;
+let aipChartBusy = false;
+let aipPrevClosePopupOnClick = null;
+let aipChartCalibration = {
+    active: false,
+    targetIcao: '',
+    step: 0,
+    imagePoints: [],
+    mapPoints: [],
+    mapMarkers: []
+};
+
+function escapeJsSingleQuoted(v) {
+    return String(v ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, '')
+        .replace(/\n/g, ' ');
+}
+
+function sanitizeAipIcaoKey(icao) {
+    return String(icao || '').trim().toUpperCase();
+}
+
+function getAipStorageData() {
+    try {
+        const raw = localStorage.getItem(AIP_CHART_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return (parsed && typeof parsed === 'object') ? parsed : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function saveAipStorageData(data) {
+    try {
+        localStorage.setItem(AIP_CHART_STORAGE_KEY, JSON.stringify(data || {}));
+    } catch (e) { }
+}
+
+function getAipChartSettings(icao) {
+    const key = sanitizeAipIcaoKey(icao);
+    if (!key) return null;
+    const all = getAipStorageData();
+    const obj = all[key];
+    return (obj && typeof obj === 'object') ? obj : null;
+}
+
+function patchAipChartSettings(icao, patch) {
+    const key = sanitizeAipIcaoKey(icao);
+    if (!key || !patch || typeof patch !== 'object') return;
+    const all = getAipStorageData();
+    const prev = (all[key] && typeof all[key] === 'object') ? all[key] : {};
+    all[key] = { ...prev, ...patch };
+    saveAipStorageData(all);
+}
+
+function normalizeAipOpacity(value) {
+    let v = Number(value);
+    if (!Number.isFinite(v)) return AIP_CHART_OPACITY_DEFAULT;
+    if (v > 1) v = v / 100;
+    v = Math.max(AIP_CHART_OPACITY_MIN, Math.min(AIP_CHART_OPACITY_MAX, v));
+    return Math.round(v * 1000) / 1000;
+}
+
+function getAipCurrentOpacity(icao) {
+    const key = sanitizeAipIcaoKey(icao);
+    if (!key) return AIP_CHART_OPACITY_DEFAULT;
+    if (aipChartOverlayMeta && aipChartOverlayMeta.icao === key) return normalizeAipOpacity(aipChartOverlayMeta.opacity);
+    const saved = getAipChartSettings(key);
+    if (saved && saved.opacity != null) return normalizeAipOpacity(saved.opacity);
+    return AIP_CHART_OPACITY_DEFAULT;
+}
+
+function decodeAipStoredBounds(bounds) {
+    if (!bounds || typeof bounds !== 'object') return null;
+    const south = Number(bounds.south);
+    const west = Number(bounds.west);
+    const north = Number(bounds.north);
+    const east = Number(bounds.east);
+    if (![south, west, north, east].every(Number.isFinite)) return null;
+    const s = Math.min(south, north);
+    const n = Math.max(south, north);
+    const w = Math.min(west, east);
+    const e = Math.max(west, east);
+    if (n - s < 0.00001 || e - w < 0.00001) return null;
+    return L.latLngBounds([s, w], [n, e]);
+}
+
+function encodeAipBounds(bounds) {
+    if (!bounds || typeof bounds.getSouth !== 'function') return null;
+    return {
+        south: bounds.getSouth(),
+        west: bounds.getWest(),
+        north: bounds.getNorth(),
+        east: bounds.getEast()
+    };
+}
+
+function ensureAipOverlayPane() {
+    if (!map) return null;
+    let pane = map.getPane('aipChartPane');
+    if (!pane) pane = map.createPane('aipChartPane');
+    pane.style.zIndex = '320';
+    pane.style.pointerEvents = 'none';
+    return pane;
+}
+
+function getAipOverlayImageEl() {
+    if (!aipChartOverlayLayer || typeof aipChartOverlayLayer.getElement !== 'function') return null;
+    return aipChartOverlayLayer.getElement();
+}
+
+function setAipOverlayPointerEvents(enabled) {
+    const pane = map && map.getPane ? map.getPane('aipChartPane') : null;
+    if (pane) pane.style.pointerEvents = enabled ? 'auto' : 'none';
+    const img = getAipOverlayImageEl();
+    if (img) img.style.pointerEvents = enabled ? 'auto' : 'none';
+}
+
+function getAipStatusElementsForIcao(icao) {
+    const key = sanitizeAipIcaoKey(icao);
+    if (!key) return [];
+    return Array.from(document.querySelectorAll(`.aip-overlay-status[data-aip-icao="${key}"]`));
+}
+
+function setAipOverlayStatus(icao, text, isError = false) {
+    const targets = getAipStatusElementsForIcao(icao);
+    targets.forEach(el => {
+        el.textContent = String(text || '');
+        el.style.color = isError ? '#b91c1c' : '#444';
+    });
+}
+
+function refreshAipOverlayPopupUi(icao) {
+    const key = sanitizeAipIcaoKey(icao);
+    if (!key) return;
+    const opacityPct = Math.round(getAipCurrentOpacity(key) * 100);
+    const statusText = aipChartOverlayMeta && aipChartOverlayMeta.icao === key
+        ? `Overlay aktiv (${Math.round((aipChartOverlayMeta.opacity || AIP_CHART_OPACITY_DEFAULT) * 100)}%)`
+        : 'Overlay aus';
+
+    const statusEls = getAipStatusElementsForIcao(key);
+    statusEls.forEach(el => {
+        if (!el.textContent || el.textContent.trim() === '' || /Overlay (aktiv|aus)/i.test(el.textContent.trim())) {
+            el.textContent = statusText;
+            el.style.color = '#444';
+        }
+    });
+
+    Array.from(document.querySelectorAll(`.aip-opacity-slider[data-aip-icao="${key}"]`)).forEach(slider => {
+        slider.value = String(opacityPct);
+    });
+    Array.from(document.querySelectorAll(`.aip-opacity-value[data-aip-icao="${key}"]`)).forEach(el => {
+        el.textContent = `${opacityPct}%`;
+    });
+    Array.from(document.querySelectorAll(`.aip-calibrate-btn[data-aip-icao="${key}"]`)).forEach(btn => {
+        btn.textContent = aipChartCalibration.active && aipChartCalibration.targetIcao === key
+            ? '❌ Kalibrierung abbrechen'
+            : '🎯 Kalibrieren (2 Punkte)';
+    });
+}
+
+function clearAipCalibrationMarkers() {
+    if (!map || !Array.isArray(aipChartCalibration.mapMarkers)) return;
+    aipChartCalibration.mapMarkers.forEach(m => {
+        try { map.removeLayer(m); } catch (e) { }
+    });
+    aipChartCalibration.mapMarkers = [];
+}
+
+function resetAipCalibrationState() {
+    clearAipCalibrationMarkers();
+    if (map && aipPrevClosePopupOnClick !== null) {
+        map.options.closePopupOnClick = aipPrevClosePopupOnClick;
+    }
+    aipPrevClosePopupOnClick = null;
+    aipChartCalibration = {
+        active: false,
+        targetIcao: '',
+        step: 0,
+        imagePoints: [],
+        mapPoints: [],
+        mapMarkers: []
+    };
+    setAipOverlayPointerEvents(false);
+}
+
+function addAipCalibrationMapMarker(latlng, idx) {
+    if (!map || !latlng) return;
+    const style = AIP_CHART_CAL_MARKER_STYLE[idx] || AIP_CHART_CAL_MARKER_STYLE[0];
+    const marker = L.circleMarker(latlng, {
+        radius: 5,
+        color: style.color,
+        fillColor: style.fillColor,
+        fillOpacity: 0.9,
+        weight: 2,
+        interactive: false
+    }).addTo(map);
+    aipChartCalibration.mapMarkers.push(marker);
+}
+
+function getAipCalibrationInstruction() {
+    switch (aipChartCalibration.step) {
+        case 0: return 'Kalibrierung: Punkt 1 auf dem Blatt anklicken.';
+        case 1: return 'Kalibrierung: zugehörigen Punkt 1 auf der Karte anklicken.';
+        case 2: return 'Kalibrierung: Punkt 2 auf dem Blatt anklicken.';
+        case 3: return 'Kalibrierung: zugehörigen Punkt 2 auf der Karte anklicken.';
+        default: return 'Kalibrierung läuft…';
+    }
+}
+
+function readAipImagePointFromEvent(evt) {
+    const img = getAipOverlayImageEl();
+    const oe = evt && evt.originalEvent;
+    if (!img || !oe || !Number.isFinite(oe.clientX) || !Number.isFinite(oe.clientY)) return null;
+    const rect = img.getBoundingClientRect();
+    const x = oe.clientX - rect.left;
+    const y = oe.clientY - rect.top;
+    const inside = x >= 0 && y >= 0 && x <= rect.width && y <= rect.height;
+    if (!inside || rect.width < 2 || rect.height < 2) return null;
+
+    const naturalW = aipChartOverlayMeta?.naturalWidth || img.naturalWidth || rect.width;
+    const naturalH = aipChartOverlayMeta?.naturalHeight || img.naturalHeight || rect.height;
+    return {
+        x: (x / rect.width) * naturalW,
+        y: (y / rect.height) * naturalH
+    };
+}
+
+function finishAipCalibration(successMsg = '') {
+    const key = sanitizeAipIcaoKey(aipChartCalibration.targetIcao);
+    resetAipCalibrationState();
+    if (key) refreshAipOverlayPopupUi(key);
+    if (key && successMsg) setAipOverlayStatus(key, successMsg, false);
+}
+
+function abortAipCalibration(errorMsg = '') {
+    const key = sanitizeAipIcaoKey(aipChartCalibration.targetIcao || aipChartOverlayMeta?.icao || '');
+    resetAipCalibrationState();
+    if (key) {
+        refreshAipOverlayPopupUi(key);
+        if (errorMsg) setAipOverlayStatus(key, errorMsg, true);
+    }
+}
+
+function finalizeAipCalibration() {
+    if (!aipChartOverlayLayer || !aipChartOverlayMeta) {
+        abortAipCalibration('Kalibrierung nicht möglich: Kein Overlay aktiv.');
+        return;
+    }
+    if (aipChartCalibration.imagePoints.length !== 2 || aipChartCalibration.mapPoints.length !== 2) {
+        abortAipCalibration('Kalibrierung unvollständig.');
+        return;
+    }
+    const w = Number(aipChartOverlayMeta.naturalWidth);
+    const h = Number(aipChartOverlayMeta.naturalHeight);
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w < 2 || h < 2) {
+        abortAipCalibration('Kalibrierung fehlgeschlagen (Bildgröße ungültig).');
+        return;
+    }
+
+    const ip1 = aipChartCalibration.imagePoints[0];
+    const ip2 = aipChartCalibration.imagePoints[1];
+    const mp1 = aipChartCalibration.mapPoints[0];
+    const mp2 = aipChartCalibration.mapPoints[1];
+    const dx = ip2.x - ip1.x;
+    const dy = ip2.y - ip1.y;
+    if (Math.abs(dx) < 8 || Math.abs(dy) < 8) {
+        abortAipCalibration('Kalibrierung: Punkte liegen zu nah beieinander.');
+        return;
+    }
+
+    const lonScale = (mp2.lng - mp1.lng) / dx;
+    const lonOffset = mp1.lng - lonScale * ip1.x;
+    const latScale = (mp2.lat - mp1.lat) / dy;
+    const latOffset = mp1.lat - latScale * ip1.y;
+
+    const west = lonOffset;
+    const east = lonScale * w + lonOffset;
+    const north = latOffset;
+    const south = latScale * h + latOffset;
+
+    const s = Math.min(south, north);
+    const n = Math.max(south, north);
+    const wst = Math.min(west, east);
+    const est = Math.max(west, east);
+    if (n - s < 0.00001 || est - wst < 0.00001) {
+        abortAipCalibration('Kalibrierung: Ergebnis unplausibel.');
+        return;
+    }
+
+    const bounds = L.latLngBounds([s, wst], [n, est]);
+    aipChartOverlayLayer.setBounds(bounds);
+    patchAipChartSettings(aipChartOverlayMeta.icao, { bounds: encodeAipBounds(bounds) });
+    finishAipCalibration('Kalibrierung gespeichert.');
+}
+
+function handleAipCalibrationMapClick(evt) {
+    if (!aipChartCalibration.active) return false;
+    const key = sanitizeAipIcaoKey(aipChartCalibration.targetIcao || aipChartOverlayMeta?.icao || '');
+    if (!key) return true;
+    if (!aipChartOverlayLayer || !aipChartOverlayMeta || aipChartOverlayMeta.icao !== key) {
+        abortAipCalibration('Kalibrierung abgebrochen: Overlay nicht mehr aktiv.');
+        return true;
+    }
+    const expectImagePoint = aipChartCalibration.step % 2 === 0;
+    if (expectImagePoint) {
+        const imgPoint = readAipImagePointFromEvent(evt);
+        if (!imgPoint) {
+            setAipOverlayStatus(key, 'Bitte direkt auf das Anflugblatt klicken.', true);
+            return true;
+        }
+        aipChartCalibration.imagePoints.push(imgPoint);
+        aipChartCalibration.step += 1;
+        setAipOverlayStatus(key, getAipCalibrationInstruction(), false);
+        return true;
+    }
+
+    if (!evt || !evt.latlng) {
+        setAipOverlayStatus(key, 'Ungültiger Kartenpunkt.', true);
+        return true;
+    }
+    const pairIdx = aipChartCalibration.mapPoints.length;
+    aipChartCalibration.mapPoints.push({ lat: evt.latlng.lat, lng: evt.latlng.lng });
+    addAipCalibrationMapMarker(evt.latlng, pairIdx);
+    aipChartCalibration.step += 1;
+
+    if (aipChartCalibration.step >= 4) {
+        finalizeAipCalibration();
+    } else {
+        setAipOverlayStatus(key, getAipCalibrationInstruction(), false);
+    }
+    return true;
+}
+
+function computeAipFallbackBounds(naturalWidth, naturalHeight) {
+    const center = (map && typeof map.getCenter === 'function') ? map.getCenter() : { lat: 51.0, lng: 10.0 };
+    const h = Number(naturalHeight) > 0 ? Number(naturalHeight) : 1000;
+    const w = Number(naturalWidth) > 0 ? Number(naturalWidth) : 1000;
+    const ratio = Math.max(0.35, Math.min(4.0, w / h));
+    const halfLat = 0.11;
+    const lonScale = Math.max(0.2, Math.cos((center.lat || 0) * Math.PI / 180));
+    const halfLon = (halfLat * ratio) / lonScale;
+    return L.latLngBounds(
+        [center.lat - halfLat, center.lng - halfLon],
+        [center.lat + halfLat, center.lng + halfLon]
+    );
+}
+
+function applyAipChartOverlay(dataUrl, bounds, opacity) {
+    if (!map || !dataUrl) return;
+    ensureAipOverlayPane();
+    if (aipChartOverlayLayer) {
+        try { map.removeLayer(aipChartOverlayLayer); } catch (e) { }
+        aipChartOverlayLayer = null;
+    }
+    aipChartOverlayLayer = L.imageOverlay(dataUrl, bounds, {
+        pane: 'aipChartPane',
+        opacity: normalizeAipOpacity(opacity),
+        interactive: false
+    }).addTo(map);
+    setAipOverlayPointerEvents(false);
+}
+
+async function ensurePdfJsReady() {
+    if (window.pdfjsLib) {
+        if (window.pdfjsLib.GlobalWorkerOptions) {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = AIP_PDFJS_CDN.worker;
+        }
+        return window.pdfjsLib;
+    }
+    await new Promise((resolve, reject) => {
+        const existing = document.querySelector('script[data-aip-pdfjs="1"]');
+        if (existing) {
+            existing.addEventListener('load', () => resolve(), { once: true });
+            existing.addEventListener('error', () => reject(new Error('PDF.js konnte nicht geladen werden.')), { once: true });
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = AIP_PDFJS_CDN.lib;
+        script.async = true;
+        script.dataset.aipPdfjs = '1';
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('PDF.js konnte nicht geladen werden.'));
+        document.head.appendChild(script);
+    });
+    if (!window.pdfjsLib) throw new Error('PDF.js steht nicht zur Verfügung.');
+    if (window.pdfjsLib.GlobalWorkerOptions) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = AIP_PDFJS_CDN.worker;
+    }
+    return window.pdfjsLib;
+}
+
+async function fetchAipFileViaProxy(fileUrl) {
+    const proxyUrl = `${AIP_PROXY_BASE}/api/aip-chart/file?url=${encodeURIComponent(fileUrl)}`;
+    const res = await fetch(proxyUrl);
+    if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`Dateiabruf fehlgeschlagen (${res.status}) ${body || ''}`.trim());
+    }
+    const blob = await res.blob();
+    const contentType = String(res.headers.get('content-type') || blob.type || '').toLowerCase();
+    return { blob, contentType };
+}
+
+function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Datei konnte nicht gelesen werden.'));
+        reader.readAsDataURL(blob);
+    });
+}
+
+function readImageSizeFromDataUrl(dataUrl) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+        img.onerror = () => reject(new Error('Bildgröße konnte nicht gelesen werden.'));
+        img.src = dataUrl;
+    });
+}
+
+async function renderPdfBlobToImageData(pdfBlob) {
+    const lib = await ensurePdfJsReady();
+    const bytes = new Uint8Array(await pdfBlob.arrayBuffer());
+    const loadingTask = lib.getDocument({ data: bytes });
+    const pdf = await loadingTask.promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 2.0 });
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const dataUrl = canvas.toDataURL('image/png');
+    return { dataUrl, width: canvas.width, height: canvas.height };
+}
+
+async function resolveAipChartSource(icao, countryCode = '') {
+    const key = sanitizeAipIcaoKey(icao);
+    if (!key) throw new Error('ICAO fehlt.');
+    const url = `${AIP_PROXY_BASE}/api/aip-chart/resolve?icao=${encodeURIComponent(key)}&country=${encodeURIComponent(String(countryCode || '').toUpperCase())}`;
+    const res = await fetch(url);
+    let payload = null;
+    try { payload = await res.json(); } catch (e) { }
+    if (!res.ok || !payload || payload.ok !== true) {
+        const errCode = payload?.errorCode || `http_${res.status}`;
+        throw new Error(`AIP-Quelle nicht verfügbar (${errCode}).`);
+    }
+    if (!payload.chartUrl || !payload.chartKind) {
+        throw new Error(`AIP-Quelle ohne Chart-Link (${payload.errorCode || 'not_found'}).`);
+    }
+    return payload;
+}
+
+function persistAipOverlayState(icao, patch) {
+    const key = sanitizeAipIcaoKey(icao);
+    if (!key) return;
+    patchAipChartSettings(key, patch);
+}
+
+window.loadAipChartOverlay = async function(icao, countryCode = '') {
+    if (!map) return;
+    const key = sanitizeAipIcaoKey(icao);
+    if (!key) return;
+    if (aipChartBusy) {
+        setAipOverlayStatus(key, 'AIP-Overlay lädt bereits…', false);
+        return;
+    }
+    if (aipChartCalibration.active) abortAipCalibration('');
+    aipChartBusy = true;
+    setAipOverlayStatus(key, 'AIP-Overlay wird geladen…', false);
+
+    try {
+        const resolved = await resolveAipChartSource(key, countryCode);
+        const fetched = await fetchAipFileViaProxy(resolved.chartUrl);
+
+        let imageData = null;
+        if (resolved.chartKind === 'image' || fetched.contentType.startsWith('image/')) {
+            const dataUrl = await blobToDataUrl(fetched.blob);
+            const size = await readImageSizeFromDataUrl(dataUrl);
+            imageData = { dataUrl, width: size.width, height: size.height, chartKind: 'image' };
+        } else if (resolved.chartKind === 'pdf' || fetched.contentType.includes('pdf')) {
+            const rendered = await renderPdfBlobToImageData(fetched.blob);
+            imageData = { ...rendered, chartKind: 'pdf' };
+        } else {
+            throw new Error('Unbekanntes AIP-Format.');
+        }
+
+        const saved = getAipChartSettings(key);
+        const savedBounds = decodeAipStoredBounds(saved?.bounds);
+        const bounds = savedBounds || computeAipFallbackBounds(imageData.width, imageData.height);
+        const opacity = getAipCurrentOpacity(key);
+
+        applyAipChartOverlay(imageData.dataUrl, bounds, opacity);
+        aipChartOverlayMeta = {
+            icao: key,
+            countryCode: String(countryCode || '').toUpperCase(),
+            chartKind: imageData.chartKind,
+            chartUrl: resolved.chartUrl,
+            sourcePage: resolved.sourcePage || '',
+            dfsLink: resolved.dfsLink || '',
+            title: resolved.title || '',
+            naturalWidth: imageData.width,
+            naturalHeight: imageData.height,
+            opacity: normalizeAipOpacity(opacity)
+        };
+
+        persistAipOverlayState(key, {
+            opacity: aipChartOverlayMeta.opacity,
+            chartKind: aipChartOverlayMeta.chartKind,
+            chartUrl: aipChartOverlayMeta.chartUrl,
+            sourcePage: aipChartOverlayMeta.sourcePage,
+            dfsLink: aipChartOverlayMeta.dfsLink
+        });
+        refreshAipOverlayPopupUi(key);
+        setAipOverlayStatus(key, `Overlay aktiv (${Math.round(aipChartOverlayMeta.opacity * 100)}%)`, false);
+    } catch (e) {
+        const msg = (e && e.message) ? e.message : 'Overlay konnte nicht geladen werden.';
+        setAipOverlayStatus(key, msg, true);
+    } finally {
+        aipChartBusy = false;
+    }
+};
+
+window.setAipChartOpacity = function(value, icao = '') {
+    const opacity = normalizeAipOpacity(value);
+    const requestedKey = sanitizeAipIcaoKey(icao);
+    const key = requestedKey || sanitizeAipIcaoKey(aipChartOverlayMeta?.icao || '');
+    if (aipChartOverlayLayer && typeof aipChartOverlayLayer.setOpacity === 'function') {
+        if (!requestedKey || (aipChartOverlayMeta && aipChartOverlayMeta.icao === requestedKey)) {
+            aipChartOverlayLayer.setOpacity(opacity);
+        }
+    }
+    if (aipChartOverlayMeta && (!requestedKey || aipChartOverlayMeta.icao === requestedKey)) {
+        aipChartOverlayMeta.opacity = opacity;
+    }
+    if (key) persistAipOverlayState(key, { opacity });
+    if (key) {
+        refreshAipOverlayPopupUi(key);
+        if (aipChartOverlayMeta && aipChartOverlayMeta.icao === key) {
+            setAipOverlayStatus(key, `Overlay aktiv (${Math.round(opacity * 100)}%)`, false);
+        } else {
+            setAipOverlayStatus(key, `Transparenz gespeichert (${Math.round(opacity * 100)}%)`, false);
+        }
+    }
+};
+
+window.clearAipChartOverlay = function() {
+    const key = sanitizeAipIcaoKey(aipChartOverlayMeta?.icao || aipChartCalibration.targetIcao || '');
+    if (aipChartOverlayLayer && map) {
+        try { map.removeLayer(aipChartOverlayLayer); } catch (e) { }
+    }
+    aipChartOverlayLayer = null;
+    aipChartOverlayMeta = null;
+    abortAipCalibration('');
+    if (key) {
+        refreshAipOverlayPopupUi(key);
+        setAipOverlayStatus(key, 'Overlay aus', false);
+    }
+};
+
+window.startAipChartCalibration = function(icao = '') {
+    const key = sanitizeAipIcaoKey(icao || aipChartOverlayMeta?.icao || '');
+    if (aipChartCalibration.active) {
+        abortAipCalibration('Kalibrierung abgebrochen.');
+        return;
+    }
+    if (!aipChartOverlayLayer || !aipChartOverlayMeta || !key || aipChartOverlayMeta.icao !== key) {
+        setAipOverlayStatus(key || '---', 'Bitte zuerst Overlay laden.', true);
+        return;
+    }
+    aipChartCalibration.active = true;
+    aipChartCalibration.targetIcao = key;
+    aipChartCalibration.step = 0;
+    aipChartCalibration.imagePoints = [];
+    aipChartCalibration.mapPoints = [];
+    clearAipCalibrationMarkers();
+    if (map) {
+        aipPrevClosePopupOnClick = map.options.closePopupOnClick;
+        map.options.closePopupOnClick = false;
+    }
+    setAipOverlayPointerEvents(true);
+    refreshAipOverlayPopupUi(key);
+    setAipOverlayStatus(key, getAipCalibrationInstruction(), false);
+};
+
 function buildPopupFrequencyLines(icao) {
     if (!icao || typeof freqCache === 'undefined' || !Array.isArray(freqCache[icao])) {
         return '<span style="color:#666;">Frequenzen laden…</span>';
@@ -395,6 +1001,7 @@ function renderMainRoute() {
                 }));
                 marker.getPopup().update();
                 const depIcao = currentStartICAO;
+                if (depIcao) setTimeout(() => refreshAipOverlayPopupUi(depIcao), 0);
                 if (depIcao && depIcao !== 'GPS' && typeof fetchRunwayDetails === 'function') {
                     fetchRunwayDetails(latlng.lat, latlng.lng || latlng.lon, 'wxPopupDepRwy', depIcao);
                 }
@@ -422,6 +1029,7 @@ function renderMainRoute() {
                     lon: latlng.lng || latlng.lon
                 }));
                 marker.getPopup().update();
+                if (icao) setTimeout(() => refreshAipOverlayPopupUi(icao), 0);
                 if (icao && typeof fetchRunwayDetails === 'function') {
                     fetchRunwayDetails(latlng.lat, latlng.lng || latlng.lon, 'wxPopupDestRwy', icao);
                 }
@@ -625,15 +1233,18 @@ function renderMainRoute() {
                         routeWaypoints[index].lat = closest.lat;
                         routeWaypoints[index].lng = closest.lng;
                         routeWaypoints[index].name = closest.name;
+                        routeWaypoints[index].rppAirportIcao = closest.rppAirportIcao || '';
                     } else {
                         routeWaypoints[index].lat = dropLatLng.lat;
                         routeWaypoints[index].lng = dropLatLng.lng;
                         routeWaypoints[index].name = null;
+                        routeWaypoints[index].rppAirportIcao = '';
                     }
                 } else {
                     routeWaypoints[index].lat = dropLatLng.lat;
                     routeWaypoints[index].lng = dropLatLng.lng;
                     routeWaypoints[index].name = null;
+                    routeWaypoints[index].rppAirportIcao = '';
                 }
                 renderMainRoute();
             });
@@ -684,6 +1295,10 @@ function _buildAptPopup(label, name, elev, icaoForRunways, options = {}) {
     const showDirectTo = Boolean(options.showDirectTo && icaoForRunways && Number.isFinite(options.lat) && Number.isFinite(options.lon));
     const aipUrl = icaoForRunways ? getAipPopupUrl(icaoForRunways, countryCode) : null;
     const showAip = Boolean(aipUrl);
+    const icaoSafe = sanitizeAipIcaoKey(icaoForRunways || '');
+    const icaoEsc = escapeJsSingleQuoted(icaoSafe);
+    const countryEsc = escapeJsSingleQuoted(String(countryCode || '').toUpperCase());
+    const opacityPct = Math.round(getAipCurrentOpacity(icaoSafe) * 100);
     let html = `<div style="font-family:'Courier New',monospace; min-width:190px; color:#111;">`;
     html += titleHtml;
 
@@ -731,6 +1346,19 @@ function _buildAptPopup(label, name, elev, icaoForRunways, options = {}) {
     if (showAip) {
         html += `<hr style="border-color:#ccc; margin:5px 0;">`;
         html += `<a href="${aipUrl}" target="_blank" rel="noopener noreferrer" style="display:block; font-size:11px; text-decoration:none; color:#0b1f65; font-weight:bold;">📄 AIP VFR öffnen ↗</a>`;
+        if (AIP_CHART_UI_ENABLED) {
+            html += `<div style="margin-top:6px; border:1px solid #ddd; border-radius:5px; padding:6px; background:#f8f8f8;">`;
+            html += `<div class="aip-overlay-status" data-aip-icao="${icaoSafe}" style="font-size:10px; color:#444; margin-bottom:6px;">Overlay aus</div>`;
+            html += `<button onclick="window.loadAipChartOverlay('${icaoEsc}','${countryEsc}')" style="display:block; width:100%; background:#235ea7; color:#fff; border:none; padding:6px 8px; cursor:pointer; border-radius:3px; font-size:11px; margin-bottom:4px;">🗺️ Overlay laden</button>`;
+            html += `<button class="aip-calibrate-btn" data-aip-icao="${icaoSafe}" onclick="window.startAipChartCalibration('${icaoEsc}')" style="display:block; width:100%; background:#7c4d9e; color:#fff; border:none; padding:6px 8px; cursor:pointer; border-radius:3px; font-size:11px; margin-bottom:6px;">🎯 Kalibrieren (2 Punkte)</button>`;
+            html += `<div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">`;
+            html += `<span style="font-size:10px; color:#555; min-width:64px;">Transparenz</span>`;
+            html += `<input class="aip-opacity-slider" data-aip-icao="${icaoSafe}" type="range" min="15" max="100" value="${opacityPct}" oninput="window.setAipChartOpacity(this.value, '${icaoEsc}'); this.nextElementSibling.textContent=this.value+'%';" style="flex:1;">`;
+            html += `<span class="aip-opacity-value" data-aip-icao="${icaoSafe}" style="font-size:10px; color:#222; min-width:34px; text-align:right;">${opacityPct}%</span>`;
+            html += `</div>`;
+            html += `<button onclick="window.clearAipChartOverlay()" style="display:block; width:100%; background:#666; color:#fff; border:none; padding:5px 8px; cursor:pointer; border-radius:3px; font-size:10px;">Overlay aus</button>`;
+            html += `</div>`;
+        }
     }
 
     html += `<hr style="border-color:#ccc; margin:5px 0;">`;
@@ -794,6 +1422,7 @@ function openAirportInfoPopup(airport, latlng = null) {
         .setLatLng(popupLatLng)
         .setContent(html)
         .openOn(map);
+    setTimeout(() => refreshAipOverlayPopupUi(apt.icao), 0);
 
     if (typeof fetchRunwayDetails === 'function') {
         fetchRunwayDetails(apt.lat, apt.lon, runwayId, apt.icao);
@@ -1265,6 +1894,7 @@ function initMapBase() {
     };
     fsControl.addTo(map);
     map.on('click', function (e) {
+        if (handleAipCalibrationMapClick(e)) return;
         if (isMapUiClickTarget(e.originalEvent)) return;
         if (freeflightMode) { handleFreeflightMapClick(e); return; }
         if (measureMode) { addMeasurePoint(e.latlng); return; }
@@ -1440,6 +2070,39 @@ function updateMiniMap() {
 let snapMode = true;
 let cachedNavData = [];
 
+function extractRppAirportIcao(rppItem) {
+    if (!rppItem || typeof rppItem !== 'object') return '';
+    const readIcao = (obj) => String(
+        obj?.icao || obj?.icaoCode || obj?.ident || obj?.designator || obj?.code || ''
+    ).trim().toUpperCase();
+
+    const directCandidates = [
+        rppItem.airport,
+        rppItem.aerodrome,
+        rppItem.relatedAirport,
+        rppItem.location,
+        rppItem.parent
+    ];
+    for (const c of directCandidates) {
+        const icao = readIcao(c);
+        if (/^[A-Z]{4}$/.test(icao)) return icao;
+    }
+
+    if (Array.isArray(rppItem.airports)) {
+        for (const a of rppItem.airports) {
+            const icao = readIcao(a);
+            if (/^[A-Z]{4}$/.test(icao)) return icao;
+        }
+    }
+
+    // Fallback: gelegentlich steckt die ICAO nur im Namen/Kommentar.
+    const textBlob = [rppItem.name, rppItem.title, rppItem.description, rppItem.note, rppItem.remarks]
+        .filter(Boolean)
+        .join(' ');
+    const m = textBlob.match(/\b[A-Z]{4}\b/);
+    return m ? m[0] : '';
+}
+
 /* --- DIRECT TO STATE --- */
 let freeflightMode = false;
 let ffWaypoints = [];
@@ -1517,7 +2180,14 @@ async function fetchOpenAIPData() {
         });
         repArray.forEach(i => {
             if (!i.geometry) return;
-            cachedNavData.push({ name: `RPP ${i.name}`, lat: i.geometry.coordinates[1], lng: i.geometry.coordinates[0] });
+            cachedNavData.push({
+                name: `RPP ${i.name}`,
+                lat: i.geometry.coordinates[1],
+                lng: i.geometry.coordinates[0],
+                type: 'RPP',
+                rppAirportIcao: extractRppAirportIcao(i),
+                sourceId: i._id || i.id || ''
+            });
         });
         aptArray.forEach(i => {
             if (!i.geometry) return;
