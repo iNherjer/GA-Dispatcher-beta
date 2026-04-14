@@ -732,7 +732,7 @@
                 </div>
             </div>
             <button class="pb-btn" id="freeflightBtn" onclick="toggleFreeflightMode()" style="background:#444; color:#fff;">✈️ Direct To (Aus)</button>
-            <button class="pb-btn close" onclick="document.body.classList.remove('map-is-fullscreen'); toggleMapTable()">❌ Schließen</button>
+            <button class="pb-btn close" onclick="document.body.classList.remove('map-is-fullscreen'); document.documentElement.classList.remove('map-is-fullscreen'); toggleMapTable()">❌ Schließen</button>
         </div>
     </div>
     <div class="pinboard-scroll-area">

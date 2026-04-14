@@ -280,6 +280,14 @@
             btn.classList.toggle('active', active);
             btn.innerHTML = active ? '⏹&thinsp;SIM' : '▶&thinsp;SIM';
             btn.title = active ? 'Simulation stoppen' : 'Route simulieren';
+            btn.onclick = function (e) {
+                if (e) { e.preventDefault(); e.stopPropagation(); }
+                if (active) {
+                    if (typeof window.stopSimMode === 'function') window.stopSimMode();
+                } else {
+                    if (typeof window.startSimMode === 'function') window.startSimMode();
+                }
+            };
         }
         const strip = document.getElementById('simSpeedStrip');
         if (strip) strip.style.display = active ? 'flex' : 'none';

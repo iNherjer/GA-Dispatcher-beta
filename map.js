@@ -372,7 +372,13 @@ function renderMainRoute() {
         // Wir erlauben das Draggen von POIs und Wegpunkten. Start/Dest bleiben fix.
         let draggable = (!isStart && !isDest && !measureMode);
         // POI Marker immer nach vorne holen (Z-Index), damit er nicht hinter der Linie verschwindet
-        let marker = L.marker(latlng, { icon: icon, draggable: draggable, interactive: !measureMode, zIndexOffset: isPOI ? 1000 : 0 }).addTo(map);
+        let marker = L.marker(latlng, {
+            icon: icon,
+            draggable: draggable,
+            interactive: !measureMode,
+            riseOnHover: true,
+            zIndexOffset: isPOI ? 3500 : 3000
+        }).addTo(map);
 
         if (isStart) {
             marker.bindPopup('');
@@ -432,7 +438,13 @@ function renderMainRoute() {
             marker.bindPopup(`<div style="text-align:center; color:#b266ff;"><b>${routeWaypoints[index].name}</b></div>`);
         } else {
             let wpName = routeWaypoints[index].name ? `<b>${routeWaypoints[index].name}</b>` : `<b>Wegpunkt</b>`;
-            marker.bindPopup(`<div style="text-align:center;">${wpName}<br><button onclick="removeRouteWaypoint(${index})" style="margin-top:5px; background:#d93829; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius: 2px;">🗑️ Löschen</button></div>`);
+            const wpAirport = findNearestAirport(L.latLng(latlng.lat, latlng.lng || latlng.lon), getAirportTapRadiusPx(18));
+            const infoBtn = wpAirport
+                ? `<button onclick="openRouteWaypointAirportInfo(${index})" style="margin-top:5px; margin-right:4px; background:#235ea7; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius:2px;">ℹ️ Info</button>`
+                : '';
+            marker.bindPopup(
+                `<div style="text-align:center;">${wpName}<br>${infoBtn}<button onclick="removeRouteWaypoint(${index})" style="margin-top:5px; background:#d93829; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius:2px;">🗑️ Löschen</button></div>`
+            );
         }
 
         if (draggable) {
@@ -632,6 +644,34 @@ function renderMainRoute() {
     renderRouteLegLabels();
     updateRoutePerformance(); updateMiniMap();
     if (typeof updateWeatherMarkerDodging === 'function') updateWeatherMarkerDodging();
+}
+
+window.openRouteWaypointAirportInfo = function (index) {
+    if (!map || !Array.isArray(routeWaypoints)) return;
+    const wp = routeWaypoints[index];
+    if (!wp) return;
+    const latlng = L.latLng(wp.lat, wp.lng || wp.lon);
+    const apt = findNearestAirport(latlng, getAirportTapRadiusPx(18));
+    if (!apt) return;
+    openAirportInfoPopup(apt, latlng);
+};
+
+function findNearestEditableWaypoint(latlng, maxPixels = 28) {
+    if (!map || !Array.isArray(routeWaypoints) || routeWaypoints.length < 3) return null;
+    const tapPx = map.latLngToLayerPoint(latlng);
+    let bestIndex = -1;
+    let bestDist = maxPixels + 1;
+    for (let i = 1; i < routeWaypoints.length - 1; i++) {
+        const wp = routeWaypoints[i];
+        if (!wp || wp.isPOI) continue;
+        const wpPx = map.latLngToLayerPoint([wp.lat, wp.lng || wp.lon]);
+        const d = tapPx.distanceTo(wpPx);
+        if (d < bestDist) {
+            bestDist = d;
+            bestIndex = i;
+        }
+    }
+    return bestIndex >= 0 ? bestIndex : null;
 }
 
 function _buildAptPopup(label, name, elev, icaoForRunways, options = {}) {
@@ -1210,7 +1250,10 @@ function initMapBase() {
         btn.style.lineHeight = '30px'; btn.style.backgroundColor = '#fff'; btn.style.border = '1px solid #ccc';
         btn.style.cursor = 'pointer'; btn.style.fontSize = '18px'; btn.style.fontWeight = 'bold'; btn.style.textAlign = 'center'; btn.style.padding = '0';
         btn.onclick = function (e) {
-            e.preventDefault(); document.body.classList.toggle('map-is-fullscreen');
+            e.preventDefault();
+            const willBeFs = !document.body.classList.contains('map-is-fullscreen');
+            document.body.classList.toggle('map-is-fullscreen');
+            document.documentElement.classList.toggle('map-is-fullscreen', willBeFs);
             if (document.body.classList.contains('map-is-fullscreen')) { btn.innerHTML = '✖'; } else { btn.innerHTML = '⛶'; }
             setTimeout(() => {
                 if (map) map.invalidateSize();
@@ -1225,6 +1268,12 @@ function initMapBase() {
         if (isMapUiClickTarget(e.originalEvent)) return;
         if (freeflightMode) { handleFreeflightMapClick(e); return; }
         if (measureMode) { addMeasurePoint(e.latlng); return; }
+
+        const wpIndex = findNearestEditableWaypoint(e.latlng, 30);
+        if (wpIndex !== null && routeMarkers[wpIndex]) {
+            routeMarkers[wpIndex].openPopup();
+            return;
+        }
 
         const apt = findNearestAirport(e.latlng, getAirportTapRadiusPx(34));
         if (apt) openAirportInfoPopup(apt, e.latlng);
@@ -1315,9 +1364,15 @@ function toggleMapTable() {
     if (typeof _closeFloatingMenus === 'function') _closeFloatingMenus();
 
     if (board.classList.contains('active')) {
-        lockBodyScroll();
+        const autoFs = shouldAutoStartMapFullscreen();
+        if (autoFs) {
+            document.body.classList.add('map-is-fullscreen');
+            document.documentElement.classList.add('map-is-fullscreen');
+            document.body.style.overflow = 'hidden';
+        } else {
+            lockBodyScroll();
+        }
         if (!map) initMapBase();
-        if (shouldAutoStartMapFullscreen()) document.body.classList.add('map-is-fullscreen');
 
         setTimeout(() => {
             if (map) {
@@ -1334,6 +1389,8 @@ function toggleMapTable() {
     } else {
         unlockBodyScroll();
         document.body.classList.remove('map-is-fullscreen');
+        document.documentElement.classList.remove('map-is-fullscreen');
+        document.body.style.overflow = '';
         if (typeof _closeFloatingMenus === 'function') _closeFloatingMenus();
     }
 }
@@ -1597,7 +1654,7 @@ window.renderWeatherMarkers = function() {
 
     let seenIcao = new Set();
 
-    vpWeatherData.forEach(zone => {
+    vpWeatherData.forEach((zone, markerIndex) => {
         if (!zone.icao || !zone.stnLat || !zone.stnLon || seenIcao.has(zone.icao)) return;
         seenIcao.add(zone.icao);
 
@@ -1633,7 +1690,12 @@ window.renderWeatherMarkers = function() {
         `;
 
         const icon = L.divIcon({ className: 'custom-pin', html: html, iconSize: [80, 45], iconAnchor: [40, 15] });
-        const marker = L.marker([zone.stnLat, zone.stnLon], { icon: icon, interactive: !measureMode }).addTo(map);
+        const stnPos = L.latLng(zone.stnLat, zone.stnLon);
+        const stnPx = map.latLngToLayerPoint(stnPos);
+        const angle = (markerIndex % 8) * (Math.PI / 4);
+        const offsetPx = L.point(Math.round(Math.cos(angle) * 14), Math.round(Math.sin(angle) * 14) - 10);
+        const drawPos = map.layerPointToLatLng(stnPx.add(offsetPx));
+        const marker = L.marker(drawPos, { icon: icon, interactive: !measureMode }).addTo(map);
         
         // Kompaktes Popup-Container
         const popupId = `wxPopup_${zone.icao}`;
