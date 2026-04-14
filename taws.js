@@ -124,6 +124,8 @@ const _AWM_CLIPS = [
     'aw-freq','aw-sqwk','aw-komma',
     'aw-d0','aw-d1','aw-d2','aw-d3','aw-d4',
     'aw-d5','aw-d6','aw-d7','aw-d8','aw-d9',
+    // Optional: separates "zwo"-Snippet (falls vorhanden, sonst Fallback auf aw-d2)
+    'aw-zwo',
     // Wegpunkt-Ansage
     'aw-wp-erreicht','aw-neuer-kurs','aw-grad','aw-fuer','aw-meilen',
     'taws-alert'
@@ -159,14 +161,23 @@ window.awmSetWpAlert = function(on) {
 
 // Aufgerufen aus sync.js wenn Auto-Advance ausgelöst wird
 // brng = Kurs zum nächsten WP, distNM = Distanz in NM
+function _awDigitClip(digit) {
+    const d = Number(digit);
+    if (!Number.isInteger(d) || d < 0 || d > 9) return null;
+    if (d === 2) return _awBuffers['aw-zwo'] ? 'aw-zwo' : 'aw-d2';
+    return `aw-d${d}`;
+}
+
+function _awDigitsToClips(numStr) {
+    return String(numStr).split('').map(ch => _awDigitClip(parseInt(ch, 10))).filter(Boolean);
+}
+
 window.awmAnnounceWpAdvance = function(brng, distNM) {
     if (!_awmWpAlert) return;
-    const digitKey = ['aw-d0','aw-d1','aw-d2','aw-d3','aw-d4',
-                      'aw-d5','aw-d6','aw-d7','aw-d8','aw-d9'];
     // Kurs: 3-stellig, Ziffer für Ziffer
-    const crsDigits = String(Math.round(brng)).padStart(3, '0').split('').map(c => digitKey[+c]);
+    const crsDigits = _awDigitsToClips(String(Math.round(brng)).padStart(3, '0'));
     // Distanz: gerundet, Ziffer für Ziffer
-    const distDigits = String(Math.round(distNM)).split('').map(c => digitKey[+c]);
+    const distDigits = _awDigitsToClips(String(Math.round(distNM)));
     const clips = [
         'aw-wp-erreicht',
         'aw-neuer-kurs', ...crsDigits, 'aw-grad',
@@ -177,18 +188,16 @@ window.awmAnnounceWpAdvance = function(brng, distNM) {
 
 // Frequenz-/Squawk-String → Clip-Keys (mit "Zwo" für 2)
 function _awFreqToClips(valueStr, isSquawk) {
-    const digitKey = ['aw-d0','aw-d1','aw-d2','aw-d3','aw-d4',
-                      'aw-d5','aw-d6','aw-d7','aw-d8','aw-d9'];
     const prefix = isSquawk ? 'aw-sqwk' : 'aw-freq';
     const clips = [prefix];
     // Trailing-Nullen nach dem Komma entfernen (130.000 → 130)
     let s = valueStr.toString().trim().replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
     for (const ch of s) {
-        if (ch >= '0' && ch <= '9') clips.push(digitKey[parseInt(ch)]);
+        if (ch >= '0' && ch <= '9') clips.push(_awDigitClip(parseInt(ch, 10)));
         else if (ch === '.' || ch === ',') clips.push('aw-komma');
         // Sonstige Zeichen (Leerzeichen, Bindestrich) überspringen
     }
-    return clips;
+    return clips.filter(Boolean);
 }
 
 // Primäre Frequenz/Squawk eines Luftraums als Clip-Sequenz
@@ -203,6 +212,19 @@ function _awGetFreqClips(as) {
 const _awBuffers   = {};           // key → AudioBuffer
 let   _awLoaded    = false;
 let   _awLoading   = false;
+
+// Voice-Pack: '' = Anna (Standard), 'matilda'|'liam'|'hannah' = ElevenLabs
+let _awmVoicePack = localStorage.getItem('awm_voice_pack') || '';
+window.awmSetVoice = function(pack) {
+    _awmVoicePack = pack;
+    localStorage.setItem('awm_voice_pack', pack);
+    // Clips neu laden
+    _awLoaded  = false;
+    _awLoading = false;
+    for (const k of Object.keys(_awBuffers)) delete _awBuffers[k];
+    _tawsInitAudio();
+    _awLoadClips();
+};
 
 // State pro Luftraum: { t5, t2, t5in, t2in, firstSeen5, firstSeen2 }
 const _awState = new Map();
@@ -255,20 +277,31 @@ function _awDrainQueue() {
 async function _awLoadClips() {
     if (_awLoaded || _awLoading || !_tawsAudioCtx) return;
     _awLoading = true;
+    const pack = _awmVoicePack;
+    const optionalClips = new Set(['aw-zwo']);
     await Promise.all(_AWM_CLIPS.map(async key => {
-        // taws-alert liegt im Root, alle anderen in audio-warnings/
-        const url = key === 'taws-alert'
-            ? './taws-alert.m4a'
-            : './audio-warnings/' + key + '.m4a';
+        let url;
+        if (key === 'taws-alert') {
+            url = './taws-alert.m4a';
+        } else if (pack) {
+            url = `./audio-warnings/voices/${pack}/${key}.mp3`;
+        } else {
+            url = `./audio-warnings/${key}.m4a`;
+        }
         try {
             const r  = await fetch(url);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
             const ab = await r.arrayBuffer();
             _awBuffers[key] = await _tawsAudioCtx.decodeAudioData(ab);
-        } catch(e) { console.warn('[AWM] Clip laden fehlgeschlagen:', key, e); }
+        } catch(e) {
+            if (!optionalClips.has(key)) console.warn('[AWM] Clip laden fehlgeschlagen:', key, e);
+        }
     }));
+    // Wenn kein eigenes "zwo"-Snippet vorhanden ist, auf bestehendes "2"-Snippet zurückfallen.
+    if (!_awBuffers['aw-zwo'] && _awBuffers['aw-d2']) _awBuffers['aw-zwo'] = _awBuffers['aw-d2'];
     _awLoaded  = true;
     _awLoading = false;
-    console.log('[AWM] Alle Clips geladen:', Object.keys(_awBuffers).join(', '));
+    console.log(`[AWM] Clips geladen (${pack || 'anna'}):`, Object.keys(_awBuffers).length);
 }
 
 // Ansage in serielle Queue einreihen
@@ -289,6 +322,11 @@ function _awTypeKey(as) {
     if (t === 6 || t === 28)    return 'aw-rmz';      // RMZ
     if (t === 1)                return 'aw-edr';      // ED-R Restricted (Buchstaben E-D-R)
     return null;   // Danger/Prohibited/FIS → kein Sprach-Alert
+}
+
+function _awTypeClips(as) {
+    const key = _awTypeKey(as);
+    return key ? [key] : [];
 }
 
 // Minuten-Zahl → Audio-Key
@@ -536,7 +574,7 @@ function checkAirspaceWarnings(predPoints) {
                 window._awmPulse = { color: col, lowerFt: effLower, upperFt: effUpper, startMs: now, as };
                 window.vpBgNeedsUpdate = true;
                 console.log(`[AWM] ✈ ${as.name} (${typeKey}) in ${Math.round(earliest2)} min`);
-                _awPlaySequence(['aw-achtung', typeKey, 'aw-in', _awMinKey(Math.round(earliest2)) || 'aw-2min', ..._awGetFreqClips(as)]);
+                _awPlaySequence(['aw-achtung', ..._awTypeClips(as), 'aw-in', _awMinKey(Math.round(earliest2)) || 'aw-2min', ..._awGetFreqClips(as)]);
                 _awShowFreqBanner(as, col);
                 // Kette starten: gleiche Klasse dahinter nicht nochmals ansagen
                 if (typeKey && _awTypeChain.has(typeKey)) _awTypeChain.get(typeKey).warnedAt = now;
@@ -556,7 +594,7 @@ function checkAirspaceWarnings(predPoints) {
                 window._awmPulse = { color: col, lowerFt: effLower, upperFt: effUpper, startMs: now, as };
                 window.vpBgNeedsUpdate = true;
                 console.log(`[AWM] ✈ ${as.name} (${typeKey}) in ${Math.round(earliest5)} min`);
-                _awPlaySequence(['aw-achtung', typeKey, 'aw-in', _awMinKey(Math.round(earliest5)) || 'aw-5min', ..._awGetFreqClips(as)]);
+                _awPlaySequence(['aw-achtung', ..._awTypeClips(as), 'aw-in', _awMinKey(Math.round(earliest5)) || 'aw-5min', ..._awGetFreqClips(as)]);
                 _awShowFreqBanner(as, col);
                 // Kette starten: gleiche Klasse dahinter nicht nochmals ansagen
                 if (typeKey && _awTypeChain.has(typeKey)) _awTypeChain.get(typeKey).warnedAt = now;

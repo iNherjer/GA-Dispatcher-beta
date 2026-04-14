@@ -1786,8 +1786,8 @@ function renderVerticalProfile(canvasId) {
     }
 
     // Y axis
-    ctx.fillStyle = '#555';
-    ctx.font = '9px Arial';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 10px Arial';
     ctx.textAlign = 'right';
     const altStep = maxAlt > 6000 ? 2000 : (maxAlt > 3000 ? 1000 : 500);
     for (let alt = 0; alt <= maxAlt; alt += altStep) {
@@ -1799,7 +1799,8 @@ function renderVerticalProfile(canvasId) {
         ctx.moveTo(padLeft, y);
         ctx.lineTo(padLeft + plotW, y);
         ctx.stroke();
-        ctx.fillStyle = '#555';
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px Arial';
         ctx.fillText(alt >= 1000 ? (alt / 1000).toFixed(alt % 1000 === 0 ? 0 : 1) + 'k' : alt + '', padLeft - 4, y + 3);
     }
 
@@ -2358,7 +2359,7 @@ function renderMapProfileFrames(timeMs) {
             if (y < padTop - 3 || y > padTop + plotH + 3) continue;
             bgCtx.beginPath(); bgCtx.strokeStyle = 'rgba(255,255,255,0.05)'; bgCtx.lineWidth = 0.5;
             bgCtx.moveTo(viewX + padLeft, y); bgCtx.lineTo(viewX + baseWidth, y); bgCtx.stroke();
-            bgCtx.fillStyle = '#777'; bgCtx.font = '9px Arial';
+            bgCtx.fillStyle = '#fff'; bgCtx.font = 'bold 10px Arial';
             bgCtx.fillText(alt >= 1000 ? (alt / 1000).toFixed(0) + 'k' : alt + '', viewX + padLeft - 3, y + 3);
         }
 

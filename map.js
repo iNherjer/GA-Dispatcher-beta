@@ -225,6 +225,12 @@ function getLegScreenAngle(p1, p2) {
     return angle;
 }
 
+function formatNm(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '0.0';
+    return (Math.round(n * 10) / 10).toFixed(1);
+}
+
 function renderRouteLegLabels() {
     clearRouteLegLabels();
     if (!map || !routeWaypoints || routeWaypoints.length < 2) return;
@@ -245,7 +251,7 @@ function renderRouteLegLabels() {
         const html = `
             <div class="route-leg-label" style="transform: translate(-50%, -50%) rotate(${angle}deg); --leg-fz:${fontSize}px; --leg-gap:${gap}px;">
                 <div class="route-leg-course">${nav.brng}°</div>
-                <div class="route-leg-dist">${nav.dist} NM</div>
+                <div class="route-leg-dist">${formatNm(nav.dist)} NM</div>
             </div>
         `;
 
@@ -303,7 +309,7 @@ function updateMeasureRoute() {
         measurePolyline = L.polyline(measurePoints, { color: '#f2c12e', weight: 4, dashArray: '6,6' }).addTo(map);
         const nav = calcNav(measurePoints[0].lat, measurePoints[0].lng || measurePoints[0].lon, measurePoints[1].lat, measurePoints[1].lng || measurePoints[1].lon);
         const centerLat = (measurePoints[0].lat + measurePoints[1].lat) / 2, centerLng = (measurePoints[0].lng + measurePoints[1].lng) / 2;
-        const labelText = `<div style="font-weight:bold; font-size:14px; color:#111; text-align:center; line-height: 1.2;">${nav.brng}°<br>${nav.dist} NM</div>`;
+        const labelText = `<div style="font-weight:bold; font-size:14px; color:#111; text-align:center; line-height: 1.2;">${nav.brng}°<br>${formatNm(nav.dist)} NM</div>`;
         measureTooltip = L.tooltip({ permanent: true, direction: 'center', className: 'measure-label' }).setLatLng([centerLat, centerLng]).setContent(labelText).addTo(map);
     }
 }
@@ -790,10 +796,10 @@ function renderGpsStartBriefing(destAirport, startPoint) {
     document.getElementById('mDestCoords').innerText = `${destAirport.lat.toFixed(4)}, ${destAirport.lon.toFixed(4)}`;
     document.getElementById('mPay').innerText = 'N/A';
     document.getElementById('mWeight').innerText = 'N/A';
-    document.getElementById('mDistNote').innerText = `${nav.dist} NM`;
+    document.getElementById('mDistNote').innerText = `${formatNm(nav.dist)} NM`;
     document.getElementById('mHeadingNote').innerText = `${nav.brng}°`;
     document.getElementById('mETENote').innerText = `${eteMinutes} min`;
-    if (typeof setDrumCounter === 'function') setDrumCounter('distDrum', nav.dist);
+    if (typeof setDrumCounter === 'function') setDrumCounter('distDrum', parseFloat(formatNm(nav.dist)));
     if (typeof recalculatePerformance === 'function') recalculatePerformance();
     const indicator = document.getElementById('searchIndicator');
     if (indicator) indicator.innerText = 'Direct-To Flug bereit.';
@@ -1005,15 +1011,16 @@ function updateRoutePerformance() {
         blHTML += `<td style="padding:8px 0 8px 8px; color:var(--navlog-text); line-height: 1.4;"><span style="display:inline-block; min-width:20px; text-align:right;">${i + 1}.</span> ${cleanName1}<br><span style="display:inline-block; min-width:20px; text-align:left;">➔</span> ${cleanName2}</td>`;
         blHTML += `<td style="padding:8px 0 8px 4px; font-size:14px; line-height: 1.6;"><span style="color:${c1}">${f1}</span><br><span style="color:${c2}">${f2}</span></td>`;
         blHTML += `<td style="padding:8px 0 8px 16px; color:var(--navlog-data); vertical-align:middle;">${nav.brng}°</td>`;
-        blHTML += `<td style="padding:8px 0; color:var(--navlog-data); vertical-align:middle;">${nav.dist}</td>`;
+        blHTML += `<td style="padding:8px 0; color:var(--navlog-data); vertical-align:middle;">${formatNm(nav.dist)}</td>`;
         blHTML += `<td style="padding:8px 0; color:var(--navlog-data); vertical-align:middle;">${legTime}</td>`;
         blHTML += `<td style="padding:8px 0; color:var(--navlog-data); vertical-align:middle;">${legFuel.toFixed(1)}</td>`;
         blHTML += `</tr>`;
 
-        wpHTML += `<div class="wp-row"><span class="wp-name">${cleanName1.replace(/<[^>]+>/g, '').trim()} ➔ ${cleanName2.replace(/<[^>]+>/g, '').trim()}</span><span class="wp-data">${nav.brng}° | ${nav.dist} NM</span></div>`;
+        wpHTML += `<div class="wp-row"><span class="wp-name">${cleanName1.replace(/<[^>]+>/g, '').trim()} ➔ ${cleanName2.replace(/<[^>]+>/g, '').trim()}</span><span class="wp-data">${nav.brng}° | ${formatNm(nav.dist)} NM</span></div>`;
     }
 
-    blHTML += `<tr style="border-top:2px solid var(--navlog-border); color:var(--navlog-heading); font-size:15px;"><td style="padding-top:8px;">TOTAL</td><td style="padding-top:8px;"></td><td style="padding-top:8px;"></td><td style="padding-top:8px;">${totalNM}</td><td style="padding-top:8px;">${totalTime}</td><td style="padding-top:8px;">${totalFuel.toFixed(1)}</td></tr>`;
+    const totalNmDisplay = formatNm(totalNM);
+    blHTML += `<tr style="border-top:2px solid var(--navlog-border); color:var(--navlog-heading); font-size:15px;"><td style="padding-top:8px;">TOTAL</td><td style="padding-top:8px;"></td><td style="padding-top:8px;"></td><td style="padding-top:8px;">${totalNmDisplay}</td><td style="padding-top:8px;">${totalTime}</td><td style="padding-top:8px;">${totalFuel.toFixed(1)}</td></tr>`;
     blHTML += '</table>';
 
     const blDiv = document.getElementById('briefingNavLog');
@@ -1022,16 +1029,16 @@ function updateRoutePerformance() {
     let initialNav = calcNav(routeWaypoints[0].lat, routeWaypoints[0].lng || routeWaypoints[0].lon, routeWaypoints[1].lat, routeWaypoints[1].lng || routeWaypoints[1].lon);
 
     if (currentMissionData) {
-        currentMissionData.dist = totalNM;
+        currentMissionData.dist = parseFloat(totalNmDisplay);
         currentMissionData.heading = initialNav.brng;
     }
 
-    setDrumCounter('distDrum', totalNM);
+    setDrumCounter('distDrum', parseFloat(totalNmDisplay));
     const mHeadingNote = document.getElementById("mHeadingNote"); if (mHeadingNote) mHeadingNote.innerText = `${initialNav.brng}°`;
     const wpListContainer = document.getElementById("waypointList"); if (wpListContainer) wpListContainer.innerHTML = wpHTML;
 
     recalculatePerformance();
-    const mDistNote = document.getElementById("mDistNote"); if (mDistNote) mDistNote.innerText = `${totalNM} NM`;
+    const mDistNote = document.getElementById("mDistNote"); if (mDistNote) mDistNote.innerText = `${totalNmDisplay} NM`;
     const hrs = Math.floor(totalTime / 60), mins = totalTime % 60;
     const mETENote = document.getElementById("mETENote"); if (mETENote) mETENote.innerText = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} Min.`;
 
@@ -1310,6 +1317,7 @@ function toggleMapTable() {
     if (board.classList.contains('active')) {
         lockBodyScroll();
         if (!map) initMapBase();
+        if (shouldAutoStartMapFullscreen()) document.body.classList.add('map-is-fullscreen');
 
         setTimeout(() => {
             if (map) {
@@ -1328,6 +1336,10 @@ function toggleMapTable() {
         document.body.classList.remove('map-is-fullscreen');
         if (typeof _closeFloatingMenus === 'function') _closeFloatingMenus();
     }
+}
+
+function shouldAutoStartMapFullscreen() {
+    return window.innerWidth < 1250;
 }
 
 /* =========================================================

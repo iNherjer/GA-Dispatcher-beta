@@ -681,7 +681,7 @@
             <button class="pb-btn" id="vpToggleBtn" onclick="toggleMapProfile()" style="background:#2E8B57; color:#fff; font-weight:bold;">📊 Profil (An)</button>
             <div style="position:relative; display:inline-flex; align-items:center;">
                 <button class="pb-btn" id="mapHintsBtn" onclick="window.toggleMapHintsMenu && toggleMapHintsMenu()">⚙️ Hinweise</button>
-                <div id="mapHintsMenu" style="display:none; position:absolute; top:38px; right:0; min-width:210px; background:#121212; border:1px solid #555; border-radius:8px; padding:8px; box-shadow:0 8px 24px rgba(0,0,0,0.45); z-index:10020;">
+                <div id="mapHintsMenu" style="display:none; position:absolute; top:38px; right:0; min-width:210px; background:#121212; border:1px solid #555; border-radius:8px; padding:8px; box-shadow:0 8px 24px rgba(0,0,0,0.45); z-index:100120;">
                     <button id="hintToggleMagentaLine" class="pb-btn" style="display:block; width:100%; margin:0 0 6px 0; text-align:left;" onclick="window.toggleMapHint && toggleMapHint('magentaLine')">🟣 Direkt-Linie (An)</button>
                     <button id="hintToggleWeather" class="pb-btn" style="display:block; width:100%; margin:0 0 6px 0; text-align:left;" onclick="window.toggleMapHint && toggleMapHint('weather')">🌤️ Wetter (An)</button>
                     <button id="hintToggleTraffic" class="pb-btn" style="display:block; width:100%; margin:0 0 6px 0; text-align:left;" onclick="window.toggleMapHint && toggleMapHint('traffic')">✈️ Traffic (An)</button>
@@ -691,7 +691,7 @@
             </div>
             <div style="position:relative; display:inline-flex; align-items:center;">
                 <button class="pb-btn" id="mapVoiceBtn" onclick="toggleMapVoiceMenu()">🎙️ Voice</button>
-                <div id="mapVoiceMenu" style="display:none; position:absolute; top:38px; right:0; min-width:230px; background:#121212; border:1px solid #555; border-radius:8px; padding:8px; box-shadow:0 8px 24px rgba(0,0,0,0.45); z-index:10020;">
+                <div id="mapVoiceMenu" style="display:none; position:absolute; top:38px; right:0; min-width:230px; background:#121212; border:1px solid #555; border-radius:8px; padding:8px; box-shadow:0 8px 24px rgba(0,0,0,0.45); z-index:100120;">
                     <div style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
                         <span style="font-size:13px;">🔊</span>
                         <input type="range" id="awmVolumeSlider" min="0" max="100" value="100"
@@ -717,16 +717,22 @@
                             onchange="awmSetAirspaceWarn(this.checked)">
                         🛡️ Luftraum Warning
                     </label>
-                    <label class="pb-btn" style="display:flex; width:100%; margin:0; text-align:left; align-items:center; gap:8px; cursor:pointer;">
+                    <label class="pb-btn" style="display:flex; width:100%; margin:0 0 8px 0; text-align:left; align-items:center; gap:8px; cursor:pointer;">
                         <input type="checkbox" id="awmWpAlertCheck" checked
                             style="width:14px; height:14px; accent-color:#4da6ff; cursor:pointer; flex-shrink:0;"
                             onchange="awmSetWpAlert(this.checked)">
-                        📍 Wegpunkt-Ansage (1 min)
+                        📍 Wegpunkt-Ansage
                     </label>
+                    <div style="border-top:1px solid #333; padding-top:8px;">
+                        <div style="font-size:11px; color:#888; margin-bottom:6px; letter-spacing:0.04em;">STIMME</div>
+                        <audio id="awmDemoAudio" style="display:none;"></audio>
+                        <div id="awmVoiceList" style="display:flex; flex-direction:column; gap:4px;">
+                        </div>
+                    </div>
                 </div>
             </div>
             <button class="pb-btn" id="freeflightBtn" onclick="toggleFreeflightMode()" style="background:#444; color:#fff;">✈️ Direct To (Aus)</button>
-            <button class="pb-btn close" onclick="toggleMapTable()">❌ Schließen</button>
+            <button class="pb-btn close" onclick="document.body.classList.remove('map-is-fullscreen'); toggleMapTable()">❌ Schließen</button>
         </div>
     </div>
     <div class="pinboard-scroll-area">
@@ -798,7 +804,7 @@
                         <button id="btnVpSettings" onclick="toggleVpSettingsMenu()" title="Darstellungs-Optionen" class="vp-toggle-cloud active vp-btn-relative" style="min-width:28px; font-size:13px;">
                             ⚙️<span id="vpSettingsErrorDot" style="display:none; position:absolute; top:-4px; right:-4px; width:9px; height:9px; background:#ff4444; border-radius:50%; border:1.5px solid #222; box-shadow:0 0 4px #f00;"></span>
                         </button>
-                        <div id="vpSettingsMenu" style="display:none; position:fixed; min-width:210px; background:#121212; border:1px solid #555; border-radius:8px; padding:8px; box-shadow:0 8px 24px rgba(0,0,0,0.45); z-index:10040;">
+                        <div id="vpSettingsMenu" style="display:none; position:fixed; min-width:210px; background:#121212; border:1px solid #555; border-radius:8px; padding:8px; box-shadow:0 8px 24px rgba(0,0,0,0.45); z-index:100120;">
                             <div style="display:flex; flex-direction:column; gap:5px; align-items:stretch;">
                                 <button id="btnToggleClouds" class="pb-btn active" onclick="vpToggleClouds()" title="Wetter-Wolkenbasis aus METAR an/aus" style="display:block; width:100%; margin:0; text-align:left;">⛅ Wolken</button>
                                 <button id="btnToggleLandmarks" class="pb-btn active" onclick="vpToggleLandmarks()" title="Städte & Sehenswürdigkeiten an/aus" style="display:block; width:100%; margin:0; text-align:left;">🏙️ Städte</button>
@@ -1047,6 +1053,80 @@
             const cb = document.getElementById('awmWpAlertCheck');
             if (cb) cb.checked = (wpSaved !== '0');
         }
+
+        const activePack = localStorage.getItem('awm_voice_pack') || '';
+        const list = document.getElementById('awmVoiceList');
+        async function _loadVoicePacks() {
+            const fallback = [
+                { id: 'matilda', label: 'Matilda', emoji: '🎙️' },
+                { id: 'liam',    label: 'Liam',    emoji: '🎙️' },
+                { id: 'hannah',  label: 'Hannah',  emoji: '🎙️' }
+            ];
+            try {
+                const r = await fetch('./audio-warnings/voices/catalog.json', { cache: 'no-store' });
+                if (!r.ok) return fallback;
+                const data = await r.json();
+                if (!Array.isArray(data?.packs)) return fallback;
+                return data.packs;
+            } catch(_) {
+                return fallback;
+            }
+        }
+
+        async function _packHasDemo(id) {
+            try {
+                const r = await fetch(`./audio-warnings/voices/${id}/demo.mp3`, { method: 'HEAD', cache: 'no-store' });
+                return r.ok;
+            } catch(_) {
+                return false;
+            }
+        }
+
+        async function _buildVoiceList() {
+            if (!list) return;
+            list.innerHTML = '';
+            const dynamicPacks = await _loadVoicePacks();
+            const visiblePacks = [];
+            for (const p of dynamicPacks) {
+                if (p?.id && await _packHasDemo(p.id)) visiblePacks.push(p);
+            }
+            const VOICE_PACKS = [{ id: '', label: 'Anna', emoji: '🇩🇪' }, ...visiblePacks];
+            VOICE_PACKS.forEach(v => {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex; align-items:center; gap:6px;';
+                const isActive = v.id === activePack;
+                row.innerHTML = `
+                    <button id="awmVoiceBtn_${v.id || 'anna'}"
+                        onclick="awmSelectVoice('${v.id}')"
+                        style="flex:1; text-align:left; padding:5px 8px; border-radius:5px; border:1px solid ${isActive ? '#4da6ff' : '#444'}; background:${isActive ? '#1a3a5c' : '#1e1e1e'}; color:${isActive ? '#4da6ff' : '#ccc'}; font-size:12px; cursor:pointer;">
+                        ${v.emoji} ${v.label}
+                    </button>
+                    ${v.id ? `<button onclick="awmPlayVoiceDemo('${v.id}')"
+                        style="padding:5px 8px; border-radius:5px; border:1px solid #444; background:#1e1e1e; color:#aaa; font-size:11px; cursor:pointer;" title="Demo abspielen">▶</button>` : ''}
+                `;
+                list.appendChild(row);
+            });
+        }
+        _buildVoiceList();
+
+        window.awmSelectVoice = function(pack) {
+            if (typeof awmSetVoice === 'function') awmSetVoice(pack);
+            document.querySelectorAll('[id^="awmVoiceBtn_"]').forEach(btn => {
+                const active = btn.id === `awmVoiceBtn_${pack || 'anna'}`;
+                btn.style.border    = `1px solid ${active ? '#4da6ff' : '#444'}`;
+                btn.style.background = active ? '#1a3a5c' : '#1e1e1e';
+                btn.style.color      = active ? '#4da6ff' : '#ccc';
+            });
+        };
+
+        window.awmPlayVoiceDemo = function(pack) {
+            const audio = document.getElementById('awmDemoAudio');
+            if (!audio) return;
+            audio.src    = `./audio-warnings/voices/${pack}/demo.mp3`;
+            audio.volume = parseFloat(localStorage.getItem('awm_volume') ?? '1');
+            audio.currentTime = 0;
+            audio.play().catch(() => {});
+        };
     });
 </script>
 

@@ -2300,10 +2300,6 @@ body.map-is-fullscreen .map-profile-strip {
     }
 }
 
-body.map-is-fullscreen .pb-btn.close {
-    display: none !important;
-}
-
 /* ==========================================================================
    13. NAV-LOG (WEGPUNKTE)
    ========================================================================== */
