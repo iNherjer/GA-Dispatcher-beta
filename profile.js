@@ -1298,6 +1298,178 @@ function vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, isDarkTheme, elev
     ctx.restore();
 }
 
+function vpGetCloudLayerProfile(cloudType, hasTS) {
+    let profile = {
+        thicknessFt: 1800,
+        density: 0.55,
+        topAlpha: 0.22,
+        bottomAlpha: 0.36,
+        ridgeStrength: 0.35
+    };
+
+    if (cloudType === 'FEW') {
+        profile.thicknessFt = 900;
+        profile.density = 0.32;
+        profile.topAlpha = 0.12;
+        profile.bottomAlpha = 0.2;
+        profile.ridgeStrength = 0.22;
+    } else if (cloudType === 'SCT') {
+        profile.thicknessFt = 1700;
+        profile.density = 0.46;
+        profile.topAlpha = 0.16;
+        profile.bottomAlpha = 0.28;
+        profile.ridgeStrength = 0.3;
+    } else if (cloudType === 'BKN') {
+        profile.thicknessFt = 3200;
+        profile.density = 0.72;
+        profile.topAlpha = 0.2;
+        profile.bottomAlpha = 0.42;
+        profile.ridgeStrength = 0.4;
+    } else if (cloudType === 'OVC' || cloudType === 'VV') {
+        profile.thicknessFt = 5200;
+        profile.density = 0.9;
+        profile.topAlpha = 0.24;
+        profile.bottomAlpha = 0.5;
+        profile.ridgeStrength = 0.46;
+    }
+
+    if (hasTS) {
+        profile.thicknessFt = Math.max(profile.thicknessFt, 12000);
+        profile.density = Math.min(1, profile.density + 0.12);
+        profile.topAlpha = Math.min(0.38, profile.topAlpha + 0.08);
+        profile.bottomAlpha = Math.min(0.62, profile.bottomAlpha + 0.1);
+        profile.ridgeStrength = Math.min(0.62, profile.ridgeStrength + 0.12);
+    }
+
+    return profile;
+}
+
+function vpRoundedRectPath(ctx, x, y, w, h, r) {
+    const rr = Math.max(0, Math.min(r, w * 0.5, h * 0.5));
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.lineTo(x + w - rr, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+    ctx.lineTo(x + w, y + h - rr);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+    ctx.lineTo(x + rr, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+    ctx.lineTo(x, y + rr);
+    ctx.quadraticCurveTo(x, y, x + rr, y);
+    ctx.closePath();
+}
+
+function vpDrawCloudsPro(ctx, xOf, yOf, padTop, plotH, totalDist, isDarkTheme, elevData) {
+    if (!vpWeatherData || vpWeatherData.length === 0) return;
+    const prng = (s) => { const x = Math.sin(s) * 10000; return x - Math.floor(x); };
+    const viewMinX = -Infinity;
+    const viewMaxX = Infinity;
+
+    ctx.save();
+    for (let i = 0; i < vpWeatherData.length; i++) {
+        const zone = vpWeatherData[i];
+        const prevDist = (i > 0) ? (zone.distNM + vpWeatherData[i - 1].distNM) / 2 : Math.max(0, zone.distNM - totalDist * 0.05);
+        const nextDist = (i < vpWeatherData.length - 1) ? (zone.distNM + vpWeatherData[i + 1].distNM) / 2 : Math.min(totalDist, zone.distNM + totalDist * 0.05);
+        const startX = xOf(prevDist);
+        const endX = xOf(nextDist);
+        const width = endX - startX;
+        const midX = startX + width / 2;
+
+        if (width <= 1 || endX < viewMinX || startX > viewMaxX) continue;
+        if (!zone.clouds || zone.clouds.length === 0) continue;
+
+        const hasTS = !!(zone.weather && zone.weather.hasTS);
+        for (let cIdx = 0; cIdx < zone.clouds.length; cIdx++) {
+            const c = zone.clouds[cIdx];
+            const profile = vpGetCloudLayerProfile(c.type, hasTS);
+            const topFt = c.baseMsl + profile.thicknessFt;
+            const baseY = yOf(c.baseMsl);
+            const topY = yOf(topFt);
+            const layerTop = Math.min(baseY, topY);
+            const layerBottom = Math.max(baseY, topY);
+            const layerHeight = layerBottom - layerTop;
+
+            if (layerBottom < padTop - 20 || layerTop > padTop + plotH + 20 || layerHeight < 2) continue;
+
+            const left = startX - width * 0.04;
+            const bandW = width * 1.08;
+            const radius = Math.max(6, Math.min(16, Math.abs(yOf(500) - yOf(0)) * 0.65));
+            const seed = (i + 1) * 103.7 + (cIdx + 1) * 71.9 + c.baseMsl * 0.001;
+            const grayTop = Math.round((isDarkTheme ? 165 : 230) - profile.density * 28 - (hasTS ? 18 : 0));
+            const grayBottom = Math.round((isDarkTheme ? 120 : 188) - profile.density * 35 - (hasTS ? 24 : 0));
+
+            const grad = ctx.createLinearGradient(0, layerTop, 0, layerBottom);
+            grad.addColorStop(0, `rgba(${grayTop},${grayTop},${grayTop},${profile.topAlpha})`);
+            grad.addColorStop(0.45, `rgba(${grayTop - 8},${grayTop - 8},${grayTop - 8},${profile.topAlpha + 0.05})`);
+            grad.addColorStop(1, `rgba(${grayBottom},${grayBottom},${grayBottom},${profile.bottomAlpha})`);
+
+            vpRoundedRectPath(ctx, left, layerTop, bandW, layerHeight, radius);
+            ctx.fillStyle = grad;
+            ctx.fill();
+
+            // Strukturierte Oberkante: klare Schichtkontur statt Blob-Rand
+            const ridgeSteps = Math.max(8, Math.min(46, Math.round(bandW / 13)));
+            ctx.beginPath();
+            for (let s = 0; s <= ridgeSteps; s++) {
+                const t = s / ridgeSteps;
+                const x = left + t * bandW;
+                const wave = Math.sin((t * (2.6 + profile.ridgeStrength) * Math.PI * 2) + seed) * (1.8 + layerHeight * 0.025);
+                const noise = (prng(seed + s * 1.37) - 0.5) * (2.2 + layerHeight * 0.03);
+                const y = layerTop + 2 + wave + noise;
+                if (s === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.strokeStyle = isDarkTheme
+                ? `rgba(240,245,255,${0.18 + profile.ridgeStrength * 0.22})`
+                : `rgba(120,130,145,${0.16 + profile.ridgeStrength * 0.18})`;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Dezente Schichtstruktur innen
+            const stripeCount = Math.max(1, Math.round(2 + profile.density * 2));
+            for (let k = 1; k <= stripeCount; k++) {
+                const sy = layerTop + (layerHeight * k) / (stripeCount + 1);
+                const wobble = (prng(seed + k * 11.1) - 0.5) * 2.4;
+                ctx.beginPath();
+                ctx.moveTo(left + 4, sy + wobble);
+                ctx.lineTo(left + bandW - 4, sy - wobble);
+                ctx.strokeStyle = isDarkTheme
+                    ? `rgba(220,228,240,${0.06 + profile.density * 0.08})`
+                    : `rgba(95,105,122,${0.05 + profile.density * 0.07})`;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+
+            if (width > 34) {
+                const topFL = Math.round(topFt / 100);
+                const baseFL = Math.round(c.baseMsl / 100);
+                ctx.fillStyle = isDarkTheme ? 'rgba(205,215,230,0.82)' : 'rgba(35,42,52,0.78)';
+                ctx.font = 'bold 8px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${c.type} FL${baseFL}-${topFL}`, midX, Math.min(layerBottom + 12, padTop + plotH + 10));
+            }
+        }
+    }
+    ctx.restore();
+}
+
+function vpClipWeatherColumnToSky(ctx, startX, endX, prevDist, nextDist, getElevY) {
+    const width = Math.max(1, endX - startX);
+    const steps = Math.max(10, Math.min(48, Math.round(width / 12)));
+    ctx.beginPath();
+    ctx.moveTo(startX, -2000);
+    ctx.lineTo(endX, -2000);
+    for (let s = steps; s >= 0; s--) {
+        const t = s / steps;
+        const x = startX + t * width;
+        const dNM = prevDist + t * (nextDist - prevDist);
+        const gy = getElevY(dNM);
+        ctx.lineTo(x, gy);
+    }
+    ctx.closePath();
+    ctx.clip();
+}
+
 function vpDrawAnimatedWeather(ctx, xOf, yOf, totalDist, elevData, timeMs, viewMinX, viewMaxX) {
     if (!vpWeatherData || vpWeatherData.length === 0) return;
 
@@ -1334,6 +1506,9 @@ function vpDrawAnimatedWeather(ctx, xOf, yOf, totalDist, elevData, timeMs, viewM
 
         // 1. REGEN & SCHNEE ANIMIERT
         if ((zone.weather.hasRain || zone.weather.hasSnow) && zone.visuals && zone.visuals.drops) {
+            // Niederschlag hinter Gelände halten, damit Tropfen am Boden "enden".
+            ctx.save();
+            vpClipWeatherColumnToSky(ctx, startX, endX, prevDist, nextDist, getElevY);
             ctx.beginPath();
             
             // FIX: Virtuelles Fall-Band (von ganz oben nach ganz unten auf dem Bildschirm)
@@ -1382,6 +1557,7 @@ function vpDrawAnimatedWeather(ctx, xOf, yOf, totalDist, elevData, timeMs, viewM
             ctx.strokeStyle = zone.weather.hasSnow ? 'rgba(255,255,255,0.8)' : 'rgba(100, 160, 255, 0.5)';
             ctx.lineWidth = zone.weather.hasSnow ? 1 : 1.5;
             if (zone.weather.hasSnow) ctx.fill(); else ctx.stroke();
+            ctx.restore();
         }
 
         // 2. BLITZE ANIMIERT
@@ -1413,6 +1589,196 @@ function vpDrawAnimatedWeather(ctx, xOf, yOf, totalDist, elevData, timeMs, viewM
                 ctx.strokeStyle = 'rgba(255, 230, 100, 0.9)';
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
+            }
+        }
+    }
+    ctx.restore();
+}
+
+function vpDrawAnimatedWeatherPro(ctx, xOf, yOf, totalDist, elevData, timeMs, viewMinX, viewMaxX) {
+    if (!vpWeatherData || vpWeatherData.length === 0) return;
+    const prng = (s) => { const x = Math.sin(s) * 10000; return x - Math.floor(x); };
+
+    const getElevY = (dNM) => {
+        if (!elevData || elevData.length < 2) return yOf(0);
+        let low = 0, high = elevData.length - 2;
+        while (low <= high) {
+            const mid = (low + high) >> 1;
+            if (dNM < elevData[mid].distNM) high = mid - 1;
+            else if (dNM > elevData[mid + 1].distNM) low = mid + 1;
+            else {
+                const p1 = elevData[mid];
+                const p2 = elevData[mid + 1];
+                const f = (dNM - p1.distNM) / (p2.distNM - p1.distNM || 1);
+                return yOf(p1.elevFt + f * (p2.elevFt - p1.elevFt));
+            }
+        }
+        return yOf(elevData[elevData.length - 1].elevFt);
+    };
+
+    ctx.save();
+    for (let i = 0; i < vpWeatherData.length; i++) {
+        const zone = vpWeatherData[i];
+        if (!zone.weather || (!zone.weather.hasRain && !zone.weather.hasSnow && !zone.weather.hasTS)) continue;
+
+        const prevDist = (i > 0) ? (zone.distNM + vpWeatherData[i - 1].distNM) / 2 : Math.max(0, zone.distNM - totalDist * 0.05);
+        const nextDist = (i < vpWeatherData.length - 1) ? (zone.distNM + vpWeatherData[i + 1].distNM) / 2 : Math.min(totalDist, zone.distNM + totalDist * 0.05);
+        const startX = xOf(prevDist);
+        const endX = xOf(nextDist);
+        const width = endX - startX;
+        if (width <= 1 || endX < viewMinX || startX > viewMaxX) continue;
+
+        const baseFt = (zone.lowestBase && Number.isFinite(zone.lowestBase)) ? zone.lowestBase : 4500;
+        const baseY = yOf(baseFt);
+        const hasSnow = !!zone.weather.hasSnow;
+        const hasRain = !!zone.weather.hasRain && !hasSnow;
+        const hasTS = !!zone.weather.hasTS;
+
+        if (hasSnow || hasRain) {
+            ctx.save();
+            vpClipWeatherColumnToSky(ctx, startX, endX, prevDist, nextDist, getElevY);
+            const colTop = baseY - 6;
+            const steps = 10;
+            ctx.beginPath();
+            ctx.moveTo(startX, colTop);
+            ctx.lineTo(endX, colTop);
+            for (let s = steps; s >= 0; s--) {
+                const t = s / steps;
+                const x = startX + t * width;
+                const dNM = prevDist + t * (nextDist - prevDist);
+                const gy = getElevY(dNM);
+                ctx.lineTo(x, gy);
+            }
+            ctx.closePath();
+            const columnGrad = ctx.createLinearGradient(0, colTop, 0, colTop + 220);
+            if (hasSnow) {
+                columnGrad.addColorStop(0, 'rgba(214,230,255,0.16)');
+                columnGrad.addColorStop(1, 'rgba(190,215,255,0.03)');
+            } else {
+                columnGrad.addColorStop(0, 'rgba(95,155,230,0.18)');
+                columnGrad.addColorStop(1, 'rgba(80,130,210,0.04)');
+            }
+            ctx.fillStyle = columnGrad;
+            ctx.fill();
+
+            const drops = (zone.visuals && zone.visuals.drops && zone.visuals.drops.length > 0) ? zone.visuals.drops : null;
+            const sampleCount = drops ? Math.min(drops.length, hasSnow ? 90 : 115) : (hasSnow ? 80 : 100);
+            ctx.beginPath();
+            for (let d = 0; d < sampleCount; d++) {
+                const drop = drops ? drops[d] : {
+                    x: prng(i * 193 + d * 17.1),
+                    y: prng(i * 219 + d * 11.7),
+                    spd: prng(i * 251 + d * 7.3)
+                };
+                const fracX = drop.x;
+                const dNM = prevDist + fracX * (nextDist - prevDist);
+                const groundY = getElevY(dNM);
+                if (groundY <= baseY + 2) continue;
+
+                const span = (groundY - colTop) + 16;
+                const speed = hasSnow ? (0.017 + drop.spd * 0.011) : (0.062 + drop.spd * 0.046);
+                const y = colTop + ((drop.y * span) + (timeMs * speed)) % span;
+                if (y < baseY || y > groundY) continue;
+
+                if (hasSnow) {
+                    const sway = Math.sin(timeMs * 0.0012 + d * 0.8) * (2.5 + drop.spd * 2.4);
+                    let sx = startX + fracX * width + sway;
+                    sx = startX + ((sx - startX) % width + width) % width;
+                    const r = 0.8 + drop.spd * 1.1;
+                    ctx.moveTo(sx + r, y);
+                    ctx.arc(sx, y, r, 0, Math.PI * 2);
+                } else {
+                    const slant = 2.5 + drop.spd * 5;
+                    const tail = 7 + drop.spd * 9;
+                    let rx = startX + fracX * width - (timeMs * 0.01 * (0.1 + drop.spd));
+                    rx = startX + ((rx - startX) % width + width) % width;
+                    ctx.moveTo(rx, y);
+                    ctx.lineTo(rx - slant, y + tail);
+                }
+            }
+            if (hasSnow) {
+                ctx.fillStyle = 'rgba(245,250,255,0.84)';
+                ctx.fill();
+            } else {
+                ctx.strokeStyle = 'rgba(120,185,255,0.56)';
+                ctx.lineWidth = 1.4;
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        if (hasTS) {
+            const tsLeft = startX + width * 0.12;
+            const tsRight = endX - width * 0.12;
+            const tsWidth = Math.max(8, tsRight - tsLeft);
+            const tsTop = baseY - 10;
+            const pulse = 0.45 + 0.35 * (0.5 + 0.5 * Math.sin(timeMs * 0.003 + i * 0.8));
+
+            // Konvektionskern als vertikaler Gefahrenvorhang
+            const steps = 12;
+            ctx.beginPath();
+            ctx.moveTo(tsLeft, tsTop);
+            ctx.lineTo(tsRight, tsTop);
+            for (let s = steps; s >= 0; s--) {
+                const t = s / steps;
+                const x = tsLeft + t * tsWidth;
+                const dNM = prevDist + ((x - startX) / Math.max(1, width)) * (nextDist - prevDist);
+                const gy = getElevY(dNM);
+                ctx.lineTo(x, gy);
+            }
+            ctx.closePath();
+            const tsGrad = ctx.createLinearGradient(0, tsTop, 0, tsTop + 260);
+            tsGrad.addColorStop(0, `rgba(255,120,60,${0.12 + pulse * 0.16})`);
+            tsGrad.addColorStop(0.5, `rgba(255,80,45,${0.08 + pulse * 0.14})`);
+            tsGrad.addColorStop(1, 'rgba(255,60,45,0.02)');
+            ctx.fillStyle = tsGrad;
+            ctx.fill();
+
+            ctx.beginPath();
+            const ridgeSteps = Math.max(8, Math.round(tsWidth / 14));
+            for (let s = 0; s <= ridgeSteps; s++) {
+                const t = s / ridgeSteps;
+                const x = tsLeft + t * tsWidth;
+                const y = tsTop + Math.sin((t * Math.PI * 2 * 2.4) + i * 1.2) * (2 + pulse * 3);
+                if (s === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.strokeStyle = `rgba(255,190,90,${0.34 + pulse * 0.3})`;
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+
+            const flashes = (zone.visuals && zone.visuals.flashes && zone.visuals.flashes.length > 0)
+                ? zone.visuals.flashes
+                : [{ x: 0.4, pts: [0.45, 0.55, 0.4, 0.6] }];
+            const cycle = timeMs % 4400;
+            let hasActiveFlash = false;
+
+            ctx.beginPath();
+            for (let f = 0; f < flashes.length; f++) {
+                const flash = flashes[f];
+                const start = (flash.x * 3600) % 3600 + 220;
+                if (cycle < start || cycle > start + 150) continue;
+
+                const fx = tsLeft + tsWidth * (0.08 + flash.x * 0.84);
+                const dNM = prevDist + ((fx - startX) / Math.max(1, width)) * (nextDist - prevDist);
+                const gy = getElevY(dNM);
+                if (gy <= tsTop) continue;
+
+                hasActiveFlash = true;
+                const seg = (gy - tsTop) / 4;
+                ctx.moveTo(fx, tsTop);
+                ctx.lineTo(fx + (flash.pts[0] - 0.5) * 18, tsTop + seg);
+                ctx.lineTo(fx + (flash.pts[1] - 0.5) * 18, tsTop + seg * 2);
+                ctx.lineTo(fx + (flash.pts[2] - 0.5) * 18, tsTop + seg * 3);
+                ctx.lineTo(fx + (flash.pts[3] - 0.5) * 18, gy);
+            }
+            if (hasActiveFlash) {
+                ctx.strokeStyle = `rgba(255,235,150,${0.72 + pulse * 0.24})`;
+                ctx.lineWidth = 1.8;
+                ctx.shadowColor = 'rgba(255,220,130,0.6)';
+                ctx.shadowBlur = 8;
+                ctx.stroke();
+                ctx.shadowBlur = 0;
             }
         }
     }
@@ -1589,7 +1955,10 @@ function renderVerticalProfile(canvasId) {
     skyGrad.addColorStop(1, '#e8f4f8');
     ctx.fillStyle = skyGrad;
     ctx.fillRect(padLeft, padTop, plotW, plotH);
-    if (vpShowClouds) vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, typeof zoomFactor !== 'undefined', typeof elevData !== 'undefined' ? elevData : vpElevationData);
+    if (vpShowClouds) {
+        if (vpWeatherRenderMode === 'abstrakt' || vpWeatherRenderMode === 'pro') vpDrawCloudsPro(ctx, xOf, yOf, padTop, plotH, totalDist, typeof zoomFactor !== 'undefined', typeof elevData !== 'undefined' ? elevData : vpElevationData);
+        else vpDrawClouds(ctx, xOf, yOf, padTop, plotH, totalDist, typeof zoomFactor !== 'undefined', typeof elevData !== 'undefined' ? elevData : vpElevationData);
+    }
 
     // Airspace blocks
     let occupiedASLabels = [];
@@ -2339,7 +2708,10 @@ function renderMapProfileFrames(timeMs) {
 
         // Wolken explizit weit nach hinten: direkt nach dem Himmel zeichnen,
         // damit Landschaft, Landmarken und Hindernisse klar davor liegen.
-        if (vpShowClouds && !isHdgMode) vpDrawClouds(bgCtx, xOf, yOf, padTop, plotH, totalDist, true, elevData);
+        if (vpShowClouds && !isHdgMode) {
+            if (vpWeatherRenderMode === 'abstrakt' || vpWeatherRenderMode === 'pro') vpDrawCloudsPro(bgCtx, xOf, yOf, padTop, plotH, totalDist, true, elevData);
+            else vpDrawClouds(bgCtx, xOf, yOf, padTop, plotH, totalDist, true, elevData);
+        }
 
         // Aufruf für Layer 1 (Statischer Hintergrund)
         if (vpAirspaceMode === 1) {
@@ -2452,7 +2824,10 @@ function renderMapProfileFrames(timeMs) {
         const obsSrc = isHdgMode ? vpHdgObstacles : vpObstacles;
         if (obsSrc && obsSrc.length > 0) vpDrawObstacles(fgCtx, xOf, yOf, totalDist, zoomFactor, elevData, timeMs, obsSrc);
     }
-    if (vpShowClouds && !isHdgMode) vpDrawAnimatedWeather(fgCtx, xOf, yOf, totalDist, elevData, timeMs, viewMinX, viewMaxX);
+    if (vpShowClouds && !isHdgMode) {
+        if (vpWeatherRenderMode === 'abstrakt' || vpWeatherRenderMode === 'pro') vpDrawAnimatedWeatherPro(fgCtx, xOf, yOf, totalDist, elevData, timeMs, viewMinX, viewMaxX);
+        else vpDrawAnimatedWeather(fgCtx, xOf, yOf, totalDist, elevData, timeMs, viewMinX, viewMaxX);
+    }
 
     // Im HDG-Modus: Fluglinie einblenden wenn Flugzeug ≤2 NM von der geplanten Route entfernt
     // X-Achse: NM-Offset vom aktuellen Standort → Minuten umrechnen (offsetNM / gs * 60)
@@ -3472,6 +3847,8 @@ setTimeout(() => initAltWaypoints(), 2000);
 // === VERTICAL PROFILE CONTROLS (V49) ===
 let vpMaxAltOverride = 0; // 0 = Auto-Scaling
 let vpShowClouds = localStorage.getItem('ga_show_clouds') !== 'false'; // Default: true
+const _storedWeatherRenderMode = localStorage.getItem('ga_weather_render_mode');
+let vpWeatherRenderMode = (_storedWeatherRenderMode === 'abstrakt' || _storedWeatherRenderMode === 'pro') ? 'abstrakt' : 'classic';
 let vpShowLandmarks = localStorage.getItem('ga_show_landmarks') !== 'false';
 let vpShowObstacles = localStorage.getItem('ga_show_obstacles') !== 'false';
 let vpShowLinear = localStorage.getItem('ga_show_linear') !== 'false';
@@ -3485,8 +3862,21 @@ function updateAirspaceBtn() {
     else if (vpAirspaceMode === 2) btn.innerHTML = '🛡️<span style="font-size:8px;vertical-align:super;">FG</span>';
     else btn.innerHTML = '🛡️<span style="font-size:8px;vertical-align:sub;">OFF</span>';
 }
+
+function updateWeatherRenderModeBtn() {
+    const btn = document.getElementById('btnToggleWeatherRenderMode');
+    if (!btn) return;
+    const isAbstrakt = vpWeatherRenderMode === 'abstrakt' || vpWeatherRenderMode === 'pro';
+    btn.classList.toggle('active', isAbstrakt);
+    btn.textContent = '🌦️ Wetterstil: ' + (isAbstrakt ? 'Abstrakt' : 'Classic');
+    btn.title = isAbstrakt
+        ? 'Aktuell: abstrakter Wetterstil (nochmal klicken = Classic)'
+        : 'Aktuell: klassischer Wetterstil (nochmal klicken = Abstrakt)';
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const bc = document.getElementById('btnToggleClouds'); if(bc) bc.classList.toggle('active', vpShowClouds);
+    updateWeatherRenderModeBtn();
     const bl = document.getElementById('btnToggleLandmarks'); if(bl) bl.classList.toggle('active', vpShowLandmarks);
     const bo = document.getElementById('btnToggleObstacles'); if(bo) bo.classList.toggle('active', vpShowObstacles);
     const blin = document.getElementById('btnToggleLinear'); if(blin) blin.classList.toggle('active', vpShowLinear);
@@ -3551,6 +3941,14 @@ function vpToggleClouds() {
         window.vpBgNeedsUpdate = true;
         if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
     }
+}
+
+function vpToggleWeatherRenderMode() {
+    vpWeatherRenderMode = (vpWeatherRenderMode === 'classic') ? 'abstrakt' : 'classic';
+    localStorage.setItem('ga_weather_render_mode', vpWeatherRenderMode);
+    updateWeatherRenderModeBtn();
+    window.vpBgNeedsUpdate = true;
+    if (typeof window.throttledRenderProfiles === 'function') window.throttledRenderProfiles();
 }
 
 function vpToggleLandmarks() {
