@@ -27,6 +27,8 @@ const AIP_POPUP_ROUTES = {
 const MAP_HINT_DEFAULTS = {
     magentaLine: true,
     weather: true,
+    windBarbs: true,
+    cloudFields: true,
     traffic: true,
     telemetry: true,
     nextLeg: true
@@ -59,6 +61,10 @@ function applyMapHintEffects(key) {
         window.vpShowMapMetar = window.mapHints.weather !== false;
         localStorage.setItem('ga_show_map_metar', window.vpShowMapMetar);
         if (typeof renderWeatherMarkers === 'function') renderWeatherMarkers();
+        if (typeof window.scheduleMapWeatherOverlayUpdate === 'function') window.scheduleMapWeatherOverlayUpdate(true);
+    }
+    if (key === 'windBarbs' || key === 'cloudFields') {
+        if (typeof window.scheduleMapWeatherOverlayUpdate === 'function') window.scheduleMapWeatherOverlayUpdate(true);
     }
     if (key === 'traffic') {
         window.vpTrafficMapVisible = window.mapHints.traffic !== false;
@@ -81,6 +87,8 @@ function refreshMapHintMenuUi() {
     const labels = {
         magentaLine: '🟣 Direkt-Linie',
         weather: '🌤️ Wetter',
+        windBarbs: '🪁 Windbarben',
+        cloudFields: '☁️ Wolkenfelder',
         traffic: '✈️ Traffic',
         telemetry: '📟 Telemetrie',
         nextLeg: '🧭 Wegpunkt-Info'
@@ -88,6 +96,8 @@ function refreshMapHintMenuUi() {
     const ids = {
         magentaLine: 'hintToggleMagentaLine',
         weather: 'hintToggleWeather',
+        windBarbs: 'hintToggleWindBarbs',
+        cloudFields: 'hintToggleCloudFields',
         traffic: 'hintToggleTraffic',
         telemetry: 'hintToggleTelemetry',
         nextLeg: 'hintToggleNextLeg'
@@ -1870,6 +1880,10 @@ function initMapBase() {
             clearTimeout(fetchTimeout);
             fetchTimeout = setTimeout(fetchOpenAIPData, 600);
         }
+        if (typeof window.scheduleMapWeatherOverlayUpdate === 'function') window.scheduleMapWeatherOverlayUpdate(false);
+    });
+    map.on('zoomend', function() {
+        if (typeof window.scheduleMapWeatherOverlayUpdate === 'function') window.scheduleMapWeatherOverlayUpdate(false);
     });
     
     const fsControl = L.control({ position: 'topleft' });
@@ -1914,6 +1928,7 @@ function initMapBase() {
         });
         map._routeLegLabelsBound = true;
     }
+    if (typeof window.scheduleMapWeatherOverlayUpdate === 'function') window.scheduleMapWeatherOverlayUpdate(true);
 }
 
 function updateMap(lat1, lon1, lat2, lon2, s, d) {
@@ -2223,6 +2238,7 @@ window.toggleMapMetars = function() {
     } else {
         if (typeof renderWeatherMarkers === 'function') renderWeatherMarkers();
     }
+    if (typeof window.scheduleMapWeatherOverlayUpdate === 'function') window.scheduleMapWeatherOverlayUpdate(true);
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -2233,6 +2249,8 @@ document.addEventListener('DOMContentLoaded', () => {
     window.vpTrafficMapVisible = window.mapHints.traffic !== false;
     refreshMapHintMenuUi();
     applyMapHintEffects('weather');
+    applyMapHintEffects('windBarbs');
+    applyMapHintEffects('cloudFields');
     applyMapHintEffects('traffic');
 
     document.addEventListener('click', (e) => {
@@ -2245,6 +2263,342 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 let wxMapMarkers = [];
+let wxWindBarbMarkers = [];
+let wxCloudFieldMarkers = [];
+let wxCloudFieldSvgSeq = 0;
+let wxOverlayFetchController = null;
+let wxOverlayFetchTimer = null;
+let wxOverlayLastKey = '';
+const WX_GRID_SPACING_SCALE = 1.5;
+
+function clearMapOpenMeteoOverlays() {
+    if (!map) return;
+    wxWindBarbMarkers.forEach(m => map.removeLayer(m));
+    wxCloudFieldMarkers.forEach(m => map.removeLayer(m));
+    wxWindBarbMarkers = [];
+    wxCloudFieldMarkers = [];
+}
+
+function clamp01(v) {
+    if (!Number.isFinite(v)) return 0;
+    return Math.max(0, Math.min(1, v));
+}
+
+function mixChannel(a, b, t) {
+    return Math.round(a + (b - a) * clamp01(t));
+}
+
+function windBarbStyleFromSpeed(speedKt) {
+    const t = clamp01(speedKt / 42);
+    const r = mixChannel(168, 26, t);
+    const g = mixChannel(214, 120, t);
+    const b = mixChannel(255, 255, t);
+    const alpha = 0.86 + 0.14 * t;
+    const shadow = 0.62 + 0.28 * t;
+    const strokeWidth = 2.2 + 1.2 * t;
+    return {
+        stroke: `rgba(${r},${g},${b},${alpha.toFixed(3)})`,
+        fill: `rgba(${r},${g},${b},${Math.min(1, alpha + 0.12).toFixed(3)})`,
+        core: `rgba(${r},${g},${b},${Math.min(1, alpha + 0.2).toFixed(3)})`,
+        shadow: shadow.toFixed(3),
+        strokeWidth: strokeWidth.toFixed(2)
+    };
+}
+
+function buildWindBarbIcon(directionDeg, speedKt) {
+    const dirFrom = Number.isFinite(directionDeg) ? directionDeg : 0;
+    // Open-Meteo liefert "coming from"; auf der Karte zeigen wir die Bewegungsrichtung (to).
+    const renderDir = (dirFrom + 180) % 360;
+    const speed = Math.max(0, Number.isFinite(speedKt) ? speedKt : 0);
+    const style = windBarbStyleFromSpeed(speed);
+    let rem = Math.round(speed / 5) * 5;
+    let y = 20.4;
+    let feathers = '';
+    while (rem >= 50) {
+        feathers += `<path d="M12 ${y} L19 ${y + 2.7} L12 ${y + 5.4} Z" fill="${style.fill}"/>`;
+        y -= 5.4;
+        rem -= 50;
+    }
+    while (rem >= 10) {
+        feathers += `<line x1="12" y1="${y}" x2="19" y2="${y + 3.4}" stroke="${style.stroke}" stroke-width="${style.strokeWidth}" stroke-linecap="round"/>`;
+        y -= 3.5;
+        rem -= 10;
+    }
+    if (rem >= 5) {
+        feathers += `<line x1="12" y1="${y}" x2="16.6" y2="${y + 2.1}" stroke="${style.stroke}" stroke-width="${style.strokeWidth}" stroke-linecap="round"/>`;
+    }
+
+    const svg = `
+        <svg width="36" height="36" viewBox="0 0 24 24" style="overflow:visible;">
+            <g transform="rotate(${renderDir} 12 12)">
+                <circle cx="12" cy="12" r="1.8" fill="${style.core}"/>
+                <line x1="12" y1="21.2" x2="12" y2="2.2" stroke="${style.stroke}" stroke-width="${style.strokeWidth}" stroke-linecap="round"/>
+                ${feathers}
+            </g>
+        </svg>`;
+
+    return L.divIcon({
+        className: 'wx-windbarb-icon',
+        html: `<div style="filter: drop-shadow(0 1px 3px rgba(0,0,0,${style.shadow}));">${svg}</div>`,
+        iconSize: [36, 36],
+        iconAnchor: [18, 18]
+    });
+}
+
+function cloudBandFillLevel(pct) {
+    const v = Math.max(0, Math.min(100, Number(pct) || 0));
+    if (v < 34) return 0; // leer
+    if (v < 67) return 1; // halb
+    return 2;             // voll
+}
+
+function cloudBandOpacity(level) {
+    if (level <= 0) return 0;
+    if (level === 1) return 0.42;
+    return 0.86;
+}
+
+function createCloudFieldMarker(lat, lon, lowPct, midPct, highPct, sizePx) {
+    const highLevel = cloudBandFillLevel(highPct);
+    const midLevel = cloudBandFillLevel(midPct);
+    const lowLevel = cloudBandFillLevel(lowPct);
+    const anyFill = (highLevel + midLevel + lowLevel) > 0;
+    if (!anyFill) return null;
+
+    const topA = cloudBandOpacity(highLevel).toFixed(3);
+    const midA = cloudBandOpacity(midLevel).toFixed(3);
+    const lowA = cloudBandOpacity(lowLevel).toFixed(3);
+    const id = `wx-cloud-clip-${(++wxCloudFieldSvgSeq)}`;
+    const size = Math.max(40, Math.min(72, Math.round(sizePx)));
+
+    const svg = `
+        <svg width="${size}" height="${size}" viewBox="0 0 100 100" style="overflow:visible;">
+            <defs>
+                <clipPath id="${id}">
+                    <circle cx="50" cy="50" r="46"></circle>
+                </clipPath>
+            </defs>
+            <circle cx="50" cy="50" r="46" fill="rgba(128,128,128,0.10)" stroke="rgba(214,214,214,0.72)" stroke-width="2.8"></circle>
+            <g clip-path="url(#${id})">
+                <rect x="4" y="4" width="92" height="30.67" fill="rgba(170,170,170,${topA})"></rect>
+                <rect x="4" y="34.67" width="92" height="30.66" fill="rgba(160,160,160,${midA})"></rect>
+                <rect x="4" y="65.33" width="92" height="30.67" fill="rgba(150,150,150,${lowA})"></rect>
+                <line x1="6" y1="34.67" x2="94" y2="34.67" stroke="rgba(230,230,230,0.62)" stroke-width="1"></line>
+                <line x1="6" y1="65.33" x2="94" y2="65.33" stroke="rgba(230,230,230,0.62)" stroke-width="1"></line>
+            </g>
+        </svg>`;
+
+    const icon = L.divIcon({
+        className: 'wx-cloudfield-icon',
+        html: `<div style="filter: drop-shadow(0 1px 2px rgba(0,0,0,0.58));">${svg}</div>`,
+        iconSize: [size, size],
+        iconAnchor: [Math.round(size / 2), Math.round(size / 2)]
+    });
+    return L.marker([lat, lon], { icon, interactive: false, keyboard: false, opacity: 0.98 });
+}
+
+function pickWeatherGridStep(spanDeg, targetLines) {
+    const raw = Math.max(0.02, spanDeg / Math.max(2, targetLines - 1));
+    const steps = [0.02, 0.03, 0.05, 0.075, 0.1, 0.125, 0.2, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 10];
+    for (const s of steps) {
+        if (raw <= s) return s;
+    }
+    return Math.ceil(raw / 5) * 5;
+}
+
+function normalizeLon180(lon) {
+    let x = lon;
+    while (x > 180) x -= 360;
+    while (x <= -180) x += 360;
+    return x;
+}
+
+function buildRouteWeatherBounds() {
+    if (typeof routeWaypoints === 'undefined' || !Array.isArray(routeWaypoints) || routeWaypoints.length < 2) return null;
+    let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+    for (const wp of routeWaypoints) {
+        const lat = Number(wp && wp.lat);
+        const lon = Number(wp && (wp.lng ?? wp.lon));
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        minLat = Math.min(minLat, lat);
+        maxLat = Math.max(maxLat, lat);
+        minLon = Math.min(minLon, lon);
+        maxLon = Math.max(maxLon, lon);
+    }
+    if (!Number.isFinite(minLat) || !Number.isFinite(minLon)) return null;
+    const padDeg = 1.6; // ~95 NM
+    return {
+        minLat: Math.max(-89.5, minLat - padDeg),
+        maxLat: Math.min(89.5, maxLat + padDeg),
+        minLon: normalizeLon180(minLon - padDeg),
+        maxLon: normalizeLon180(maxLon + padDeg),
+        wrapsDateline: (minLon - padDeg) < -180 || (maxLon + padDeg) > 180
+    };
+}
+
+function pointInsideBounds(lat, lon, b) {
+    if (!b) return false;
+    const latOk = lat >= b.minLat && lat <= b.maxLat;
+    if (!latOk) return false;
+    if (!b.wrapsDateline) return lon >= b.minLon && lon <= b.maxLon;
+    return lon >= b.minLon || lon <= b.maxLon;
+}
+
+function filterWeatherPointsByActiveDomain(points) {
+    if (!Array.isArray(points) || points.length === 0) return points;
+    const routeBounds = buildRouteWeatherBounds();
+    const gps = window.lastLiveGpsPos;
+    const hasRecentGps = !!(gps && Number.isFinite(gps.lat) && Number.isFinite(gps.lon) && Number.isFinite(gps.t) && (Date.now() - gps.t < 15 * 60 * 1000));
+    const gpsRadiusDeg = 2.3; // ~140 NM
+    const gpsLatMin = hasRecentGps ? Math.max(-89.5, gps.lat - gpsRadiusDeg) : 0;
+    const gpsLatMax = hasRecentGps ? Math.min(89.5, gps.lat + gpsRadiusDeg) : 0;
+    const gpsLonMin = hasRecentGps ? normalizeLon180(gps.lon - gpsRadiusDeg) : 0;
+    const gpsLonMax = hasRecentGps ? normalizeLon180(gps.lon + gpsRadiusDeg) : 0;
+    const gpsWrap = hasRecentGps ? ((gps.lon - gpsRadiusDeg) < -180 || (gps.lon + gpsRadiusDeg) > 180) : false;
+
+    if (!routeBounds && !hasRecentGps) return points;
+    const filtered = points.filter(p => {
+        if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return false;
+        if (routeBounds && pointInsideBounds(p.lat, p.lon, routeBounds)) return true;
+        if (hasRecentGps) {
+            if (p.lat < gpsLatMin || p.lat > gpsLatMax) return false;
+            if (!gpsWrap) return p.lon >= gpsLonMin && p.lon <= gpsLonMax;
+            return p.lon >= gpsLonMin || p.lon <= gpsLonMax;
+        }
+        return false;
+    });
+    return filtered.length > 0 ? filtered : points;
+}
+
+function getMapWeatherGridPoints(cols = 8, rows = 6) {
+    if (!map) return { points: [], key: '' };
+    const b = map.getBounds();
+    if (!b || !b.isValid()) return { points: [], key: '' };
+    const north = b.getNorth();
+    const south = b.getSouth();
+    const west = b.getWest();
+    const east = b.getEast();
+
+    const latSpan = Math.max(0.05, Math.abs(north - south));
+    let lonSpan = east - west;
+    if (lonSpan < 0) lonSpan += 360;
+    lonSpan = Math.max(0.05, lonSpan);
+
+    const latStep = pickWeatherGridStep(latSpan, rows) * WX_GRID_SPACING_SCALE;
+    const lonStep = pickWeatherGridStep(lonSpan, cols) * WX_GRID_SPACING_SCALE;
+    const latStart = Math.floor(south / latStep) * latStep;
+    const latEnd = Math.ceil(north / latStep) * latStep;
+
+    const westN = ((west % 360) + 360) % 360;
+    const eastN = westN + lonSpan;
+    const lonStart = Math.floor(westN / lonStep) * lonStep;
+    const lonEnd = Math.ceil(eastN / lonStep) * lonStep;
+
+    const pts = [];
+    for (let lat = latStart; lat <= latEnd + (latStep * 0.25); lat += latStep) {
+        const clampedLat = Math.max(-89.5, Math.min(89.5, lat));
+        for (let lon = lonStart; lon <= lonEnd + (lonStep * 0.25); lon += lonStep) {
+            pts.push({
+                lat: Math.round(clampedLat * 1e5) / 1e5,
+                lon: Math.round(normalizeLon180(lon) * 1e5) / 1e5
+            });
+        }
+    }
+    const filteredPts = filterWeatherPointsByActiveDomain(pts);
+    return {
+        points: filteredPts,
+        key: [
+            latStep.toFixed(3),
+            lonStep.toFixed(3),
+            latStart.toFixed(3),
+            latEnd.toFixed(3),
+            lonStart.toFixed(3),
+            lonEnd.toFixed(3),
+            filteredPts.length
+        ].join('|')
+    };
+}
+
+window.scheduleMapWeatherOverlayUpdate = function(forceFetch = false) {
+    if (wxOverlayFetchTimer) clearTimeout(wxOverlayFetchTimer);
+    wxOverlayFetchTimer = setTimeout(() => {
+        if (typeof window.renderMapWeatherOverlays === 'function') window.renderMapWeatherOverlays(forceFetch);
+    }, forceFetch ? 80 : 260);
+};
+
+window.renderMapWeatherOverlays = async function(forceFetch = false) {
+    if (!map) return;
+    if (window.vpWeatherSource !== 'openmeteo') {
+        clearMapOpenMeteoOverlays();
+        return;
+    }
+    if (window.mapHints.weather === false) {
+        clearMapOpenMeteoOverlays();
+        return;
+    }
+    const showWind = window.mapHints.windBarbs !== false;
+    const showCloud = window.mapHints.cloudFields !== false;
+    if (!showWind && !showCloud) {
+        clearMapOpenMeteoOverlays();
+        return;
+    }
+    if (typeof window.fetchOpenMeteoWeatherPoints !== 'function') return;
+
+    const grid = getMapWeatherGridPoints(8, 6);
+    const points = grid.points;
+    if (!points.length) return;
+    const gridKey = `${grid.key}|${showWind ? 1 : 0}|${showCloud ? 1 : 0}`;
+    if (!forceFetch && gridKey === wxOverlayLastKey) return;
+    wxOverlayLastKey = gridKey;
+
+    if (wxOverlayFetchController) wxOverlayFetchController.abort();
+    wxOverlayFetchController = new AbortController();
+    const signal = wxOverlayFetchController.signal;
+
+    try {
+        if (window.vpWeatherDebug) window.vpWeatherDebug.mapOverlayFetches += 1;
+        const samples = await window.fetchOpenMeteoWeatherPoints(points, { signal, includePressure: false, maxConcurrency: 4 });
+        if (signal.aborted) return;
+
+        clearMapOpenMeteoOverlays();
+        const z = map.getZoom ? map.getZoom() : 8;
+        const cloudIconSize = Math.max(37, Math.min(56, Math.round((50 + (z - 6) * 2.4) * 0.8)));
+
+        samples.forEach((sample, idx) => {
+            if (!sample || !Number.isFinite(sample.lat) || !Number.isFinite(sample.lon)) return;
+            const lat = sample.lat, lon = sample.lon;
+
+            if (showCloud) {
+                const low = Number(sample.cloudLowPct || 0);
+                const mid = Number(sample.cloudMidPct || 0);
+                const high = Number(sample.cloudHighPct || 0);
+                const cloudMarker = createCloudFieldMarker(lat, lon, low, mid, high, cloudIconSize);
+                if (cloudMarker) wxCloudFieldMarkers.push(cloudMarker.addTo(map));
+            }
+
+            if (showWind) {
+                const dir = Number(sample.wdir);
+                const spd = Number(sample.wspd);
+                if (Number.isFinite(dir) && Number.isFinite(spd)) {
+                    const icon = buildWindBarbIcon(dir, spd);
+                    const m = L.marker([lat, lon], { icon, interactive: false, keyboard: false, opacity: 1 }).addTo(map);
+                    wxWindBarbMarkers.push(m);
+                }
+            }
+        });
+    } catch (e) {
+        if (e && e.name === 'AbortError') return;
+        console.warn('[MapWX] Open-Meteo Overlay Fehler:', e);
+        if (window.vpWeatherDebug && typeof window.vpWeatherDebugSetError === 'function') {
+            window.vpWeatherDebugSetError(e, 'map overlay');
+        } else if (window.vpWeatherDebug) {
+            window.vpWeatherDebug.openMeteoErrors = (window.vpWeatherDebug.openMeteoErrors || 0) + 1;
+            window.vpWeatherDebug.lastErrorAt = Date.now();
+            window.vpWeatherDebug.lastErrorMsg = `map overlay: ${e && (e.message || String(e))}`;
+        }
+        clearMapOpenMeteoOverlays();
+    }
+};
 
     window.updateWeatherMarkerDodging = function() {
         if (!map || typeof wxMapMarkers === 'undefined' || wxMapMarkers.length === 0) return;
@@ -2318,6 +2672,11 @@ window.renderWeatherMarkers = function() {
     if (!map) return;
     wxMapMarkers.forEach(m => map.removeLayer(m));
     wxMapMarkers = [];
+
+    if (window.vpWeatherSource === 'openmeteo') {
+        if (typeof window.scheduleMapWeatherOverlayUpdate === 'function') window.scheduleMapWeatherOverlayUpdate(false);
+        return;
+    }
 
     if (!window.vpShowMapMetar) return;
     if (typeof vpWeatherData === 'undefined' || !vpWeatherData || vpWeatherData.length === 0) return;

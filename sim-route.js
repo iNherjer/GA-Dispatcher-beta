@@ -140,6 +140,11 @@
         const box = document.getElementById('liveTelemetryBox');
         if (box) box.style.display = 'none';
 
+        // Wenn die Simulation endet, HDG-Modus sauber zurück auf ROUTE setzen.
+        if (typeof window.vpEnsureRouteMode === 'function') {
+            window.vpEnsureRouteMode();
+        }
+
         _ui(false);
     }
 
