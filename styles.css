@@ -18,6 +18,10 @@
     --navlog-border: #444;
     --plane-color: #E63946;
     --plane-size: 40px;
+    --drawer-duration: 480ms;
+    --drawer-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --drawer-mobile-shift: 100vw;
+    --drawer-bg: rgba(8, 8, 8, 0.92);
 }
 
 html {
@@ -940,8 +944,22 @@ body.theme-retro .drum-digit {
     background-color: transparent;
 }
 
+body.theme-retro .drum-separator {
+    height: 22px;
+    line-height: 22px;
+    width: 8px;
+    text-align: center;
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    font-size: 17px;
+    color: var(--piper-white);
+    user-select: none;
+}
+
 body.theme-retro .highlight .drum-digit,
-body.theme-retro .theme-green-text .drum-digit {
+body.theme-retro .theme-green-text .drum-digit,
+body.theme-retro .highlight .drum-separator,
+body.theme-retro .theme-green-text .drum-separator {
     color: var(--piper-yellow);
 }
 
@@ -1607,19 +1625,54 @@ body.theme-retro .api-fuel-meter .api-scale {
    10. HANGAR PINNWAND (MAINTENANCE BOARD) & CONTAINER SKALIERUNG
    ========================================================================== */
 .pinboard-overlay {
-    display: none;
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.85);
+    background: var(--drawer-bg);
     z-index: 9999;
+    display: flex;
     flex-direction: column;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translate3d(0, 0, 0);
+    transition: transform var(--drawer-duration) var(--drawer-ease),
+        opacity var(--drawer-duration) var(--drawer-ease),
+        visibility 0s linear var(--drawer-duration);
+    will-change: transform, opacity;
+}
+
+#mapTableOverlay {
+    transform: translate3d(-100%, 0, 0);
+}
+
+#pinboardOverlay {
+    transform: translate3d(100%, 0, 0);
 }
 
 .pinboard-overlay.active {
-    display: flex;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translate3d(0, 0, 0);
+    transition-delay: 0s, 0s, 0s;
+}
+
+#mapTableOverlay.active,
+#pinboardOverlay.active {
+    transform: translate3d(0, 0, 0);
+}
+
+.pinboard-overlay.is-opening,
+.pinboard-overlay.is-closing {
+    visibility: visible;
+    transition-delay: 0s, 0s, 0s;
+}
+
+.pinboard-overlay.is-closing {
+    pointer-events: none;
 }
 
 .pinboard-header {
@@ -2182,7 +2235,7 @@ body.map-is-fullscreen .map-profile-strip {
 .container {
     position: relative;
     z-index: 10;
-    transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: transform var(--drawer-duration) var(--drawer-ease);
     overflow-x: hidden;
 }
 
@@ -2191,7 +2244,6 @@ body.map-is-fullscreen .map-profile-strip {
     /* Container für die Overlays auf der rechten / linken Seite */
     #pinboardOverlay,
     #mapTableOverlay {
-        display: flex !important;
         flex-direction: column;
         visibility: hidden;
         background: transparent;
@@ -2203,18 +2255,21 @@ body.map-is-fullscreen .map-profile-strip {
         position: fixed;
         overflow: hidden !important;
         /* Verhindert das Auftauchen von Scrollbalken! */
-        transition: opacity 0.4s, visibility 0.4s;
-        transform: none !important;
+        transition: transform var(--drawer-duration) var(--drawer-ease),
+            opacity var(--drawer-duration) var(--drawer-ease),
+            visibility 0s linear var(--drawer-duration);
     }
 
     #pinboardOverlay {
         left: 520px !important;
         right: 20px !important;
+        transform: translate3d(90px, 0, 0);
     }
 
     #mapTableOverlay {
         left: 20px !important;
         right: 520px !important;
+        transform: translate3d(-90px, 0, 0);
     }
 
     /* Das Hauptpanel schiebt sich zur Seite */
@@ -2231,6 +2286,16 @@ body.map-is-fullscreen .map-profile-strip {
         visibility: visible;
         opacity: 1;
         pointer-events: all;
+        transform: translate3d(0, 0, 0);
+        transition-delay: 0s, 0s, 0s;
+    }
+
+    #pinboardOverlay.is-opening,
+    #mapTableOverlay.is-opening,
+    #pinboardOverlay.is-closing,
+    #mapTableOverlay.is-closing {
+        visibility: visible;
+        transition-delay: 0s, 0s, 0s;
     }
 
     /* Der innere Bereich unter dem Header bekommt den gesamten Restplatz */
@@ -2248,7 +2313,8 @@ body.map-is-fullscreen .map-profile-strip {
     /* Die Bretter: 16:10 Format stur halten, passen sich perfekt ein */
     .maptable-content,
     .pinboard-content {
-        transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+        transition: transform var(--drawer-duration) var(--drawer-ease),
+            opacity var(--drawer-duration) var(--drawer-ease);
         aspect-ratio: 16 / 10 !important;
         width: 100% !important;
         max-width: calc((100vh - 120px) * 1.6) !important;
@@ -2257,7 +2323,8 @@ body.map-is-fullscreen .map-profile-strip {
         margin: auto !important;
         background-size: cover !important;
         background-position: center !important;
-        transform: scale(0.8);
+        transform: scale(0.94);
+        opacity: 0.7;
         padding: 5% 6% 6% 6%;
         box-sizing: border-box;
     }
@@ -2265,6 +2332,7 @@ body.map-is-fullscreen .map-profile-strip {
     #pinboardOverlay.active .pinboard-content,
     #mapTableOverlay.active .maptable-content {
         transform: scale(1);
+        opacity: 1;
     }
 }
 
@@ -2273,15 +2341,34 @@ body.map-is-fullscreen .map-profile-strip {
     body.maptable-open,
     body.pinboard-open {
         overflow: hidden !important;
-        position: fixed !important;
-        width: 100% !important;
     }
 
     .pinboard-overlay {
         background: #080808 !important;
     }
 
-       #mapTableOverlay {
+    body.pinboard-open .container {
+        transform: translateX(calc(-1 * var(--drawer-mobile-shift)));
+    }
+
+    body.maptable-open .container {
+        transform: translateX(var(--drawer-mobile-shift));
+    }
+
+    #pinboardOverlay,
+    #mapTableOverlay {
+        top: 0 !important;
+        bottom: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        height: 100dvh !important;
+    }
+
+    #pinboardOverlay {
+        transform: translate3d(100%, 0, 0);
+    }
+
+    #mapTableOverlay {
         touch-action: none;
         overflow: hidden !important;
         position: fixed !important;
@@ -2291,6 +2378,7 @@ body.map-is-fullscreen .map-profile-strip {
         height: 100vh !important;           /* Fallback für sehr alte Browser */
         height: 100dvh !important;          /* FIX: Dynamische Höhe für iOS Safari */
         overscroll-behavior: none;
+        transform: translate3d(-100%, 0, 0);
     }
 
 
@@ -2303,6 +2391,12 @@ body.map-is-fullscreen .map-profile-strip {
     .maptable-content {
         touch-action: none;
         overflow: hidden !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --drawer-duration: 1ms;
     }
 }
 

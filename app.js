@@ -882,24 +882,31 @@ function resetApp() {
 function setDrumCounter(elementId, valueStr) {
     const container = document.getElementById(elementId);
     if (!container) return;
+    const normalizeDisplayValue = () => {
+        if (elementId !== 'distDrum') return String(valueStr ?? '0');
+        const parsed = Number(String(valueStr ?? '').replace(',', '.'));
+        if (!Number.isFinite(parsed)) return '0.0';
+        return (Math.round(parsed * 10) / 10).toFixed(1);
+    };
+    const displayValue = normalizeDisplayValue();
 
     if (!document.body.classList.contains('theme-retro')) {
-        if (container.dataset.lastVal !== valueStr.toString()) {
+        if (container.dataset.lastVal !== displayValue) {
             let span = container.querySelector('span');
             if (!span) {
-                container.innerHTML = `<span class="theme-color-text" style="font-weight:bold;">${valueStr}</span>`;
+                container.innerHTML = `<span class="theme-color-text" style="font-weight:bold;">${displayValue}</span>`;
                 updateDynamicColors(); // Nur einmalig beim Erstellen formatieren!
             } else {
-                span.textContent = valueStr;
+                span.textContent = displayValue;
             }
-            container.dataset.lastVal = valueStr.toString();
+            container.dataset.lastVal = displayValue;
         }
         return;
     }
 
-    let numericValue = valueStr.toString().replace(/[^0-9]/g, '');
-    if (numericValue === "") numericValue = "0";
-    const digits = numericValue.split('');
+    let tokenValue = displayValue.replace(/,/g, '.').replace(/[^0-9.]/g, '');
+    if (!tokenValue) tokenValue = (elementId === 'distDrum') ? '0.0' : '0';
+    const tokens = tokenValue.split('');
     const digitHeight = 22;
 
     let cache = window.drumCache[elementId];
@@ -909,30 +916,37 @@ function setDrumCounter(elementId, valueStr) {
         container.innerHTML = '<div class="drum-window"></div>';
         cache = {
             windowEl: container.querySelector('.drum-window'),
-            strips: []
+            strips: [],
+            layoutKey: ''
         };
         window.drumCache[elementId] = cache;
     }
 
-    const neededStrips = digits.length;
-
-    // Fehlende Streifen hinzufügen
-    while (cache.strips.length < neededStrips) {
-        const strip = document.createElement('div');
-        strip.className = 'drum-strip';
-        strip.innerHTML = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => `<div class="drum-digit">${d}</div>`).join('');
-        cache.windowEl.appendChild(strip);
-        cache.strips.push(strip);
-    }
-
-    // Überschüssige Streifen entfernen
-    while (cache.strips.length > neededStrips) {
-        const strip = cache.strips.pop();
-        cache.windowEl.removeChild(strip);
+    const layoutKey = tokens.map(ch => (/\d/.test(ch) ? '#' : ch)).join('');
+    if (cache.layoutKey !== layoutKey) {
+        cache.windowEl.innerHTML = '';
+        cache.strips = [];
+        tokens.forEach((token) => {
+            if (/\d/.test(token)) {
+                const strip = document.createElement('div');
+                strip.className = 'drum-strip';
+                strip.innerHTML = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => `<div class="drum-digit">${d}</div>`).join('');
+                cache.windowEl.appendChild(strip);
+                cache.strips.push(strip);
+                return;
+            }
+            const sep = document.createElement('div');
+            sep.className = 'drum-separator';
+            sep.textContent = token;
+            cache.windowEl.appendChild(sep);
+        });
+        cache.layoutKey = layoutKey;
     }
 
     // Werte (CSS Transform) aktualisieren
+    const digits = tokens.filter(token => /\d/.test(token));
     digits.forEach((digit, index) => {
+        if (!cache.strips[index]) return;
         const translateY = -(parseInt(digit) * digitHeight);
         const transformStr = `translateY(${translateY}px)`;
         if (cache.strips[index].style.transform !== transformStr) {
