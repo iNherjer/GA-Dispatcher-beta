@@ -56,11 +56,14 @@ async function loadGlobalCities() {
 let vpZoomLevel = 100; // 100 = full route, 10 = 10% view
 let vpHighResData = null; // Higher resolution elevation data for zoom
 let vpElevationCache = {}; // Cache to prevent API rate limits (HTTP 429)
+const VP_ELEVATION_COOLDOWN_MS = 15 * 60 * 1000;
 let vpClimbRate = 500; // ft/min climb rate (configurable)
 let vpDescentRate = 500; // ft/min descent rate (configurable)
 let vpLandmarks = [];
 let vpObstacles = [];
 let vpLinearFeatures = [];
+window.vpElevationFallbackActive = false;
+window.vpTerrainElevationSource = 'terrarium';
 
 // Traffic im Profil
 window.vpTrafficProfileVisible = true;
@@ -432,6 +435,7 @@ function triggerVerticalProfileUpdate() {
     if (window.vpFetchController) window.vpFetchController.abort();
     window.vpFetchController = new AbortController();
     const currentSignal = window.vpFetchController.signal;
+    window.vpBgNeedsUpdate = true;
 
     vpProfileFastTimeout = setTimeout(async () => {
         if (!routeWaypoints || routeWaypoints.length < 2) return;
@@ -454,6 +458,7 @@ function triggerVerticalProfileUpdate() {
         try {
             // 1. Höhendaten (Blockierend, da alles andere darauf aufbaut)
             vpElevationData = await fetchRouteElevation(routeWaypoints, currentSignal);
+            window.vpBgNeedsUpdate = true;
             
             window.vpElevationData = vpElevationData;
             
@@ -545,7 +550,8 @@ function triggerVerticalProfileUpdate() {
                 const wxInfo = (vpWeatherSource === 'openmeteo')
                     ? (window.vpWeatherFallbackActive ? ' • Fallback METAR' : ' • Open-Meteo')
                     : ' • METAR';
-                status.textContent = vpElevationData.length + ' Punkte & API-Daten geladen' + wxInfo;
+                const terrainInfo = window.vpElevationFallbackActive ? ' • Terrain Fallback' : '';
+                status.textContent = vpElevationData.length + ' Punkte & API-Daten geladen' + wxInfo + terrainInfo;
             }
             
         } catch(e) {
@@ -563,58 +569,59 @@ function triggerVerticalProfileUpdate() {
 async function fetchRouteElevation(routePts, signal) {
     if (!routePts || routePts.length < 2) return [];
 
-    // Generate a unique cache key based on route coordinates
-    const cacheKey = routePts.map(p => `${(p.lat || 0).toFixed(4)},${((p.lng || p.lon) || 0).toFixed(4)}`).join('|');
+    const cacheKey = vpBuildElevationRouteKey(routePts, 4);
+    const coarseKey = vpBuildElevationRouteKey(routePts, 3);
+    const coarseMemKey = 'q3|' + coarseKey;
+
     if (vpElevationCache[cacheKey]) {
+        window.vpElevationFallbackActive = false;
+        window.vpTerrainElevationSource = 'terrarium-cache';
         return vpElevationCache[cacheKey];
     }
 
-    try {
-        const stored = localStorage.getItem('ga_elev_cache_' + cacheKey);
-        if (stored) {
-            const data = JSON.parse(stored);
-            vpElevationCache[cacheKey] = data;
-            return data;
-        }
-    } catch (e) { }
-
-    const interpolated = [];
-    let cumulativeDist = 0;
-
-    for (let i = 0; i < routePts.length - 1; i++) {
-        const p1 = routePts[i], p2 = routePts[i + 1];
-        const lat1 = p1.lat, lon1 = p1.lng || p1.lon;
-        const lat2 = p2.lat, lon2 = p2.lng || p2.lon;
-        const segDist = calcNav(lat1, lon1, lat2, lon2).dist;
-        const steps = Math.max(1, Math.round(segDist));
-
-        for (let j = 0; j <= steps; j++) {
-            if (i > 0 && j === 0) continue;
-            const f = j / steps;
-            interpolated.push({
-                lat: lat1 + (lat2 - lat1) * f,
-                lon: lon1 + (lon2 - lon1) * f,
-                distNM: cumulativeDist + segDist * f
-            });
-        }
-        cumulativeDist += segDist;
+    const exactStored = vpGetStoredElevationCache(cacheKey, false);
+    if (exactStored) {
+        vpElevationCache[cacheKey] = exactStored;
+        window.vpElevationFallbackActive = false;
+        window.vpTerrainElevationSource = 'terrarium-cache';
+        return exactStored;
     }
 
-    let samplePts = interpolated;
-    if (interpolated.length > 100) {
-        samplePts = [];
-        for (let i = 0; i < 100; i++) {
-            const idx = Math.round(i * (interpolated.length - 1) / 99);
-            samplePts.push(interpolated[idx]);
+    const coarseCached = vpElevationCache[coarseMemKey] || vpGetStoredElevationCache(coarseKey, true);
+    if (coarseCached) {
+        vpElevationCache[coarseMemKey] = coarseCached;
+        vpRecordElevationFallback('coarse route cache');
+        return coarseCached;
+    }
+
+    const { interpolated, samplePts } = vpBuildInterpolatedRoutePoints(routePts);
+    const approxProfile = vpBuildApproxElevationProfile(interpolated);
+
+    try {
+        const terrariumData = await vpFetchElevationFromTerrarium(samplePts, signal);
+        if (terrariumData && terrariumData.length === samplePts.length) {
+            return vpPersistElevationResult(cacheKey, coarseKey, terrariumData, 'terrarium');
         }
+    } catch (e) {
+        if (e && e.name === 'AbortError') return null;
+        vpWeatherDebugSetError(e, 'terrarium elevation');
+    }
+
+    if (vpIsElevationCoolingDown()) {
+        vpRecordElevationFallback('terrarium unavailable + openmeteo cooldown');
+        return approxProfile;
     }
 
     const lats = samplePts.map(p => p.lat.toFixed(4)).join(',');
     const lons = samplePts.map(p => p.lon.toFixed(4)).join(',');
 
     try {
+        if (window.vpWeatherDebug) window.vpWeatherDebug.elevationNetworkRequests += 1;
         const res = await fetch('https://api.open-meteo.com/v1/elevation?latitude=' + lats + '&longitude=' + lons, { signal });
-        if (!res.ok) throw new Error('Elevation API error: ' + res.status);
+        if (!res.ok) {
+            if (res.status === 429) vpRecordElevation429();
+            throw new Error('Elevation API error: ' + res.status);
+        }
         const data = await res.json();
 
         if (!data.elevation || data.elevation.length !== samplePts.length) {
@@ -628,12 +635,14 @@ async function fetchRouteElevation(routePts, signal) {
             lon: p.lon
         }));
 
-        vpElevationCache[cacheKey] = finalData;
-        try { localStorage.setItem('ga_elev_cache_' + cacheKey, JSON.stringify(finalData)); } catch (e) { }
+        vpPersistElevationResult(cacheKey, coarseKey, finalData, 'openmeteo');
+        if (window.vpWeatherDebug) window.vpWeatherDebug.lastElevationSuccessAt = Date.now();
         return finalData;
     } catch (e) {
         if (e && e.name === 'AbortError') return null;
-        throw e;
+        vpWeatherDebugSetError(e, 'elevation');
+        vpRecordElevationFallback((e && e.message) ? e.message : 'elevation fetch failed');
+        return approxProfile;
     }
 }
 
@@ -780,6 +789,7 @@ const VP_OM_LEVEL_DEFAULT_FT = {
 };
 const VP_STD_MSL_PRESSURE_HPA = 1013.25;
 const VP_OM_CACHE_TTL_MS = 15 * 60 * 1000;
+const VP_OM_COOLDOWN_MS = 15 * 60 * 1000;
 const VP_OM_CACHE_STORAGE_KEY = 'ga_om_cache_v1';
 const VP_OM_CACHE_MAX_ENTRIES = 900;
 const VP_OM_COORD_STEP_BASE = 0.05;     // ~3 NM
@@ -792,6 +802,7 @@ window.vpWeatherFallbackActive = false;
 window.vpWeatherDebug = window.vpWeatherDebug || {
     sessionStartedAt: Date.now(),
     openMeteoNetworkRequests: 0,
+    elevationNetworkRequests: 0,
     openMeteoBatchCalls: 0,
     openMeteoBatchPoints: 0,
     openMeteoCacheHits: 0,
@@ -806,11 +817,16 @@ window.vpWeatherDebug = window.vpWeatherDebug || {
     fallbackToMetarCount: 0,
     fallbackLastAt: 0,
     fallbackLastReason: '',
+    elevationFallbackCount: 0,
+    lastElevationFallbackAt: 0,
+    lastElevationFallbackReason: '',
     openMeteoErrors: 0,
     lastErrorAt: 0,
     lastErrorMsg: '',
     openMeteo429Count: 0,
     last429At: 0,
+    elevation429Count: 0,
+    lastElevation429At: 0,
     globalErrors: 0,
     globalWarnings: 0,
     unhandledRejections: 0,
@@ -818,6 +834,7 @@ window.vpWeatherDebug = window.vpWeatherDebug || {
     lastGlobalErrorMsg: '',
     debugHooksInstalled: false,
     lastSuccessAt: 0,
+    lastElevationSuccessAt: 0,
     recentEvents: []
 };
 
@@ -839,6 +856,184 @@ function vpWeatherDebugSetError(err, context = '') {
     vpWeatherDebugEvent(`ERR ${dbg.lastErrorMsg}`);
 }
 window.vpWeatherDebugSetError = vpWeatherDebugSetError;
+
+function vpBuildElevationRouteKey(routePts, precision = 4) {
+    return (routePts || []).map(p => `${Number(p.lat || 0).toFixed(precision)},${Number((p.lng || p.lon) || 0).toFixed(precision)}`).join('|');
+}
+
+function vpGetStoredElevationCache(key, coarse = false) {
+    try {
+        const prefix = coarse ? 'ga_elev_cache_q3_' : 'ga_elev_cache_';
+        const stored = localStorage.getItem(prefix + key);
+        if (!stored) return null;
+        const data = JSON.parse(stored);
+        return Array.isArray(data) && data.length >= 2 ? data : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function vpSetStoredElevationCache(key, data, coarse = false) {
+    try {
+        const prefix = coarse ? 'ga_elev_cache_q3_' : 'ga_elev_cache_';
+        localStorage.setItem(prefix + key, JSON.stringify(data));
+    } catch (_) { }
+}
+
+function vpIsElevationCoolingDown(now = Date.now()) {
+    const last429 = Number(window.vpWeatherDebug?.lastElevation429At || 0);
+    return last429 > 0 && (now - last429) < VP_ELEVATION_COOLDOWN_MS;
+}
+
+function vpRecordElevation429() {
+    const dbg = window.vpWeatherDebug;
+    if (!dbg) return;
+    dbg.elevation429Count += 1;
+    dbg.lastElevation429At = Date.now();
+    vpWeatherDebugEvent('Elevation 429 rate limit');
+}
+
+function vpRecordElevationFallback(reason) {
+    window.vpElevationFallbackActive = true;
+    window.vpTerrainElevationSource = 'fallback';
+    const dbg = window.vpWeatherDebug;
+    if (!dbg) return;
+    dbg.elevationFallbackCount += 1;
+    dbg.lastElevationFallbackAt = Date.now();
+    dbg.lastElevationFallbackReason = String(reason || 'fallback');
+    vpWeatherDebugEvent(`terrain fallback -> ${dbg.lastElevationFallbackReason}`);
+}
+
+function vpPersistElevationResult(cacheKey, coarseKey, data, source = 'terrarium') {
+    if (!Array.isArray(data) || data.length < 2) return data;
+    const coarseMemKey = 'q3|' + coarseKey;
+    vpElevationCache[cacheKey] = data;
+    vpElevationCache[coarseMemKey] = data;
+    vpSetStoredElevationCache(cacheKey, data, false);
+    vpSetStoredElevationCache(coarseKey, data, true);
+    window.vpElevationFallbackActive = false;
+    window.vpTerrainElevationSource = source;
+    if (window.vpWeatherDebug) window.vpWeatherDebug.lastElevationSuccessAt = Date.now();
+    return data;
+}
+
+function vpGetTerrariumZoom() {
+    return (typeof TAWS_TILE_ZOOM === 'number' && TAWS_TILE_ZOOM > 0) ? TAWS_TILE_ZOOM : 10;
+}
+
+function vpDecodeTerrariumFt(imageData, px, py) {
+    if (!imageData || !imageData.data) return 0;
+    const idx = (py * 256 + px) * 4;
+    const r = imageData.data[idx];
+    const g = imageData.data[idx + 1];
+    const b = imageData.data[idx + 2];
+    const elevM = (r * 256 + g + b / 256) - 32768;
+    return Math.round(elevM * 3.28084);
+}
+
+async function vpFetchElevationFromTerrarium(samplePts, signal) {
+    if (!Array.isArray(samplePts) || samplePts.length < 2) return null;
+    if (typeof _tawsLatLonToPixel !== 'function' || typeof _tawsLoadTile !== 'function') return null;
+
+    const zoom = vpGetTerrariumZoom();
+    const tileMap = new Map();
+    for (const p of samplePts) {
+        if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
+        const { tile } = _tawsLatLonToPixel(p.lat, p.lon, zoom);
+        const key = `${zoom}/${tile.x}/${tile.y}`;
+        if (!tileMap.has(key)) tileMap.set(key, { x: tile.x, y: tile.y });
+    }
+
+    const loads = [];
+    tileMap.forEach((tile, key) => {
+        loads.push(
+            _tawsLoadTile(tile.x, tile.y, zoom)
+                .then(imageData => { tileMap.set(key, { ...tile, imageData }); })
+                .catch(() => { tileMap.set(key, { ...tile, imageData: null }); })
+        );
+    });
+    await Promise.all(loads);
+    if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+    const result = [];
+    for (const p of samplePts) {
+        const { tile, px, py } = _tawsLatLonToPixel(p.lat, p.lon, zoom);
+        const key = `${zoom}/${tile.x}/${tile.y}`;
+        const imageData = tileMap.get(key)?.imageData || null;
+        if (!imageData) return null;
+        result.push({
+            distNM: p.distNM,
+            elevFt: Math.max(0, vpDecodeTerrariumFt(imageData, px, py)),
+            lat: p.lat,
+            lon: p.lon
+        });
+    }
+    return result;
+}
+
+function vpBuildInterpolatedRoutePoints(routePts) {
+    const interpolated = [];
+    let cumulativeDist = 0;
+
+    for (let i = 0; i < routePts.length - 1; i++) {
+        const p1 = routePts[i], p2 = routePts[i + 1];
+        const lat1 = p1.lat, lon1 = p1.lng || p1.lon;
+        const lat2 = p2.lat, lon2 = p2.lng || p2.lon;
+        const segDist = calcNav(lat1, lon1, lat2, lon2).dist;
+        const steps = Math.max(1, Math.round(segDist));
+
+        for (let j = 0; j <= steps; j++) {
+            if (i > 0 && j === 0) continue;
+            const f = j / steps;
+            interpolated.push({
+                lat: lat1 + (lat2 - lat1) * f,
+                lon: lon1 + (lon2 - lon1) * f,
+                distNM: cumulativeDist + segDist * f
+            });
+        }
+        cumulativeDist += segDist;
+    }
+
+    let samplePts = interpolated;
+    if (interpolated.length > 100) {
+        samplePts = [];
+        for (let i = 0; i < 100; i++) {
+            const idx = Math.round(i * (interpolated.length - 1) / 99);
+            samplePts.push(interpolated[idx]);
+        }
+    }
+
+    return { interpolated, samplePts };
+}
+
+function vpBuildApproxElevationProfile(interpolated) {
+    if (!Array.isArray(interpolated) || interpolated.length < 2) return [];
+    const totalDist = interpolated[interpolated.length - 1].distNM || 1;
+    const depElevFt = Number.isFinite(currentDepElev) ? Number(currentDepElev) : 0;
+    const destElevFt = Number.isFinite(currentDestElev) ? Number(currentDestElev) : depElevFt;
+
+    return interpolated.map(p => {
+        const t = totalDist > 0 ? (p.distNM / totalDist) : 0;
+        const smoothBias = Math.sin(t * Math.PI) * 120;
+        return {
+            distNM: p.distNM,
+            elevFt: Math.max(0, Math.round(depElevFt + ((destElevFt - depElevFt) * t) + smoothBias)),
+            lat: p.lat,
+            lon: p.lon
+        };
+    });
+}
+
+function vpIsOpenMeteoCoolingDown(now = Date.now()) {
+    const last429 = Number(window.vpWeatherDebug?.last429At || 0);
+    return last429 > 0 && (now - last429) < VP_OM_COOLDOWN_MS;
+}
+window.vpIsOpenMeteoCoolingDown = vpIsOpenMeteoCoolingDown;
+
+function vpIsOpenMeteoDisplayActive() {
+    return vpWeatherSource === 'openmeteo' && !window.vpWeatherFallbackActive && !vpIsOpenMeteoCoolingDown();
+}
+window.vpIsOpenMeteoDisplayActive = vpIsOpenMeteoDisplayActive;
 
 function vpInstallGlobalDebugHooks() {
     const dbg = window.vpWeatherDebug;
@@ -911,10 +1106,12 @@ window.vpBuildWeatherDebugReport = function() {
     const lines = [];
     lines.push(`Session seit: ${vpFormatDebugTs(dbg.sessionStartedAt)}`);
     lines.push(`Quelle aktiv: ${(window.vpWeatherSource || 'metar').toUpperCase()}${window.vpWeatherFallbackActive ? ' (Fallback METAR aktiv)' : ''}`);
+    lines.push(`Terrain Quelle: ${(window.vpTerrainElevationSource || 'terrarium').toUpperCase()}${window.vpElevationFallbackActive ? ' (Fallback aktiv)' : ''}`);
     lines.push(`Refresh Intervall: 15 min`);
     lines.push('');
     lines.push('Open-Meteo Verbrauch');
     lines.push(`- Netzwerk-Requests (Session): ${approxCalls}`);
+    lines.push(`- Elevation Requests: ${dbg.elevationNetworkRequests || 0}`);
     lines.push(`- Batch Calls: ${dbg.openMeteoBatchCalls || 0} (Punkte: ${dbg.openMeteoBatchPoints || 0})`);
     lines.push(`- Cache Hit/Miss: ${hit}/${miss} (Hitrate ${hitRate}%)`);
     lines.push(`- Cache Einträge (RAM): ${cacheTotal}/${VP_OM_CACHE_MAX_ENTRIES}`);
@@ -929,9 +1126,13 @@ window.vpBuildWeatherDebugReport = function() {
     lines.push(`- Fallback zu METAR: ${dbg.fallbackToMetarCount || 0}`);
     lines.push(`- Letzter Fallback: ${vpFormatDebugTs(dbg.fallbackLastAt)}${dbg.fallbackLastReason ? ` (${dbg.fallbackLastReason})` : ''}`);
     lines.push(`- Open-Meteo 429: ${dbg.openMeteo429Count || 0} (letzter: ${vpFormatDebugTs(dbg.last429At)})`);
+    lines.push(`- Elevation 429: ${dbg.elevation429Count || 0} (letzter: ${vpFormatDebugTs(dbg.lastElevation429At)})`);
+    lines.push(`- Cooldown aktiv: ${vpIsOpenMeteoCoolingDown() ? 'Ja' : 'Nein'}`);
+    lines.push(`- Terrain Fallback: ${dbg.elevationFallbackCount || 0} (letzter: ${vpFormatDebugTs(dbg.lastElevationFallbackAt)}${dbg.lastElevationFallbackReason ? ` / ${dbg.lastElevationFallbackReason}` : ''})`);
     lines.push(`- Open-Meteo Fehler: ${dbg.openMeteoErrors || 0}`);
     lines.push(`- Letzter Fehler: ${vpFormatDebugTs(dbg.lastErrorAt)}${dbg.lastErrorMsg ? ` (${dbg.lastErrorMsg})` : ''}`);
     lines.push(`- Letzter Erfolg: ${vpFormatDebugTs(dbg.lastSuccessAt)}`);
+    lines.push(`- Letzter Elevation-Erfolg: ${vpFormatDebugTs(dbg.lastElevationSuccessAt)}`);
     lines.push('');
     lines.push('Allgemeine App-Fehler');
     lines.push(`- Global Errors: ${dbg.globalErrors || 0}`);
@@ -1367,6 +1568,16 @@ async function fetchRouteWeatherOpenMeteo(routePts, elevData, signal) {
 async function fetchRouteWeather(routePts, elevData, signal) {
     const source = window.vpWeatherSource || localStorage.getItem('ga_weather_source') || 'metar';
     if (source === 'openmeteo') {
+        if (vpIsOpenMeteoCoolingDown()) {
+            window.vpWeatherFallbackActive = true;
+            if (window.vpWeatherDebug) {
+                window.vpWeatherDebug.fallbackToMetarCount += 1;
+                window.vpWeatherDebug.fallbackLastAt = Date.now();
+                window.vpWeatherDebug.fallbackLastReason = 'openmeteo cooldown after 429';
+                vpWeatherDebugEvent('fallback -> METAR (cooldown)');
+            }
+            return await fetchRouteWeatherMetar(routePts, elevData, signal);
+        }
         try {
             const om = await fetchRouteWeatherOpenMeteo(routePts, elevData, signal);
             const hasCore = !!(om && om.some(z => z && Array.isArray(z.pressureProfile) && z.pressureProfile.length >= 3));
@@ -2530,7 +2741,7 @@ function vpMapIsobarDisplayFt(level, rawFt, reliefStats) {
 }
 
 function vpDrawIsobars(ctx, xOf, yOf, padTop, plotH, viewMinX, viewMaxX, rightX) {
-    if (!vpShowIsobars || vpWeatherSource !== 'openmeteo' || !vpWeatherData || vpWeatherData.length < 2) return;
+    if (!vpShowIsobars || !vpIsOpenMeteoDisplayActive() || !vpWeatherData || vpWeatherData.length < 2) return;
     const levels = VP_OM_PRESSURE_LEVELS;
     const reliefStats = vpBuildIsobarReliefStats();
     ctx.save();
@@ -2588,7 +2799,7 @@ function vpDrawIsobars(ctx, xOf, yOf, padTop, plotH, viewMinX, viewMaxX, rightX)
 }
 
 function vpDrawWindComponentsOnIsobars(ctx, xOf, yOf, elevData, viewMinX, viewMaxX, padTop, plotH) {
-    if (!vpShowWindComponents || vpWeatherSource !== 'openmeteo' || !vpWeatherData || vpWeatherData.length === 0) return;
+    if (!vpShowWindComponents || !vpIsOpenMeteoDisplayActive() || !vpWeatherData || vpWeatherData.length === 0) return;
     const levels = VP_OM_PRESSURE_LEVELS;
     const reliefStats = vpBuildIsobarReliefStats();
     ctx.save();
@@ -3253,7 +3464,20 @@ async function fetchHighResElevation() {
     const lons = samplePts.map(p => p.lon.toFixed(5)).join(',');
 
     try {
+        const terrariumData = await vpFetchElevationFromTerrarium(samplePts);
+        if (terrariumData && terrariumData.length === samplePts.length) {
+            vpHighResData = terrariumData;
+            window.vpTerrainElevationSource = 'terrarium';
+            return;
+        }
+
+        if (vpIsElevationCoolingDown()) return;
+        if (window.vpWeatherDebug) window.vpWeatherDebug.elevationNetworkRequests += 1;
         const res = await fetch('https://api.open-meteo.com/v1/elevation?latitude=' + lats + '&longitude=' + lons);
+        if (res.status === 429) {
+            vpRecordElevation429();
+            return;
+        }
         if (!res.ok) return;
         const data = await res.json();
         if (!data.elevation || data.elevation.length !== samplePts.length) return;
@@ -3264,14 +3488,16 @@ async function fetchHighResElevation() {
             lat: p.lat,
             lon: p.lon
         }));
+        window.vpTerrainElevationSource = 'openmeteo';
     } catch (e) {
         console.error('High-res elevation fetch error:', e);
     }
 }
 
 function renderMapProfile() {
-    // FIX: window.vpBgNeedsUpdate = true; ENTFERNT! 
-    // Der Background aktualisiert sich nur noch, wenn sich Panning oder die Y-Achse ändert!
+    // Sicherheitsnetz: explizite Render-Aufrufe sollen den statischen Layer
+    // immer neu zeichnen, damit Karten-Edits und Menü-Toggles sichtbar werden.
+    window.vpBgNeedsUpdate = true;
     if (!window.vpAnimFrameId) {
         window.vpAnimFrameId = requestAnimationFrame(renderMapProfileFrames);
     }
@@ -4773,7 +4999,9 @@ function ensureWeatherRefreshTimer() {
         const weatherNeeded = (vpShowClouds || vpShowIsobars || vpShowWindComponents || (window.mapHints && window.mapHints.weather !== false));
         if (!weatherNeeded) return;
         if (typeof triggerVerticalProfileUpdate === 'function') triggerVerticalProfileUpdate();
-        if (typeof window.scheduleMapWeatherOverlayUpdate === 'function') window.scheduleMapWeatherOverlayUpdate(true);
+        if (!window.vpWeatherFallbackActive && !vpIsOpenMeteoCoolingDown() && typeof window.scheduleMapWeatherOverlayUpdate === 'function') {
+            window.scheduleMapWeatherOverlayUpdate(true);
+        }
     }, 15 * 60 * 1000);
 }
 

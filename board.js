@@ -207,7 +207,7 @@ function clearPinboard() {
         renderNotes(); triggerCloudSave();
     }
 }
-async function togglePinboard(forceInternal) {
+function togglePinboard(forceInternal) {
     const board = document.getElementById('pinboardOverlay');
     const mapBoard = document.getElementById('mapTableOverlay');
     if (!board || !mapBoard) return;
@@ -217,20 +217,8 @@ async function togglePinboard(forceInternal) {
     if (typeof setDrawerTransitionBusy === 'function' && !force) setDrawerTransitionBusy(true);
 
     try {
-        const pinboardIsOpen = board.classList.contains('active') || (typeof getDrawerState === 'function' && getDrawerState(board) === 'opening');
-        if (pinboardIsOpen) {
-            document.body.classList.remove('pinboard-open');
-            if (typeof animateDrawerOverlay === 'function') await animateDrawerOverlay(board, false);
-            else board.classList.remove('active');
-            unlockBodyScroll();
-            triggerCloudSave();
-            if (getGroupName()) triggerGroupSave();
-            return;
-        }
-
-        const mapIsOpen = mapBoard.classList.contains('active') || (typeof getDrawerState === 'function' && getDrawerState(mapBoard) === 'opening');
-        if (mapIsOpen && typeof toggleMapTable === 'function') {
-            await toggleMapTable(true);
+        if (mapBoard.classList.contains('active') && typeof toggleMapTable === 'function') {
+            toggleMapTable(true);
         }
         if (document.body.classList.contains('map-is-fullscreen')) {
             if (typeof exitMapFullscreenMode === 'function') exitMapFullscreenMode();
@@ -241,18 +229,30 @@ async function togglePinboard(forceInternal) {
             }
         }
 
-        lockBodyScroll();
-        document.body.classList.add('pinboard-open');
-        renderNotes();
-        silentSyncLoad();
-        if (getGroupName()) silentGroupSync();
-        if (typeof animateDrawerOverlay === 'function') await animateDrawerOverlay(board, true);
-        else board.classList.add('active');
+        board.classList.toggle('active');
+        document.body.classList.toggle('pinboard-open');
+
+        if (board.classList.contains('active')) {
+            if (window.innerWidth < 1250) lockBodyScroll();
+            renderNotes();
+            silentSyncLoad();
+            if (getGroupName()) silentGroupSync();
+        } else {
+            unlockBodyScroll();
+            triggerCloudSave();
+            if (getGroupName()) triggerGroupSave();
+        }
+        if (typeof setDrawerState === 'function') {
+            setDrawerState(board, board.classList.contains('active') ? 'open' : 'closed');
+        }
     } catch (error) {
         console.error('Pinboard toggle failed:', error);
         unlockBodyScroll();
     } finally {
-        if (typeof setDrawerTransitionBusy === 'function' && !force) setDrawerTransitionBusy(false);
+        if (typeof setDrawerTransitionBusy === 'function' && !force) {
+            const releaseDelay = (typeof getDrawerDurationMs === 'function') ? Math.max(120, getDrawerDurationMs() + 80) : 200;
+            setTimeout(() => setDrawerTransitionBusy(false), releaseDelay);
+        }
     }
 }
 function addNote() {

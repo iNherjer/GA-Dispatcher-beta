@@ -113,7 +113,8 @@ document.addEventListener('click',      _tawsUnlockAll, { once: true });
 
 // ── Airspace Warning Module (AWM) ─────────────────────────────────────────────
 // Spielt dynamisch zusammengesetzte Ansagen via AudioContext ab (iOS-sicher).
-// Clips: audio-warnings/aw-*.m4a — erzeugt mit Anna Premium de_DE.
+// Standard-Clips: audio-warnings/aw-*.m4a (Anna de_DE).
+// Voice-Packs: audio-warnings/voices/<pack>/aw-*.mp3 (z.B. Ava EN).
 
 const _AWM_CLIPS = [
     'aw-achtung','aw-in',
@@ -213,7 +214,7 @@ const _awBuffers   = {};           // key → AudioBuffer
 let   _awLoaded    = false;
 let   _awLoading   = false;
 
-// Voice-Pack: '' = Anna (Standard), 'matilda'|'liam'|'hannah' = ElevenLabs
+// Voice-Pack: '' = Anna (Standard), weitere Packs via audio-warnings/voices/catalog.json
 let _awmVoicePack = localStorage.getItem('awm_voice_pack') || '';
 window.awmSetVoice = function(pack) {
     _awmVoicePack = pack;

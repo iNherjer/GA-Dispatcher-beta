@@ -1080,7 +1080,8 @@
             const fallback = [
                 { id: 'matilda', label: 'Matilda', emoji: '🎙️' },
                 { id: 'liam',    label: 'Liam',    emoji: '🎙️' },
-                { id: 'hannah',  label: 'Hannah',  emoji: '🎙️' }
+                { id: 'hannah',  label: 'Hannah',  emoji: '🎙️' },
+                { id: 'ava-en',  label: 'Ava (EN)', emoji: '🇬🇧' }
             ];
             try {
                 const r = await fetch('./audio-warnings/voices/catalog.json', { cache: 'no-store' });
@@ -1110,7 +1111,7 @@
             for (const p of dynamicPacks) {
                 if (p?.id && await _packHasDemo(p.id)) visiblePacks.push(p);
             }
-            const VOICE_PACKS = [{ id: '', label: 'Anna', emoji: '🇩🇪' }, ...visiblePacks];
+            const VOICE_PACKS = [{ id: '', label: 'Anna (DE)', emoji: '🇩🇪' }, ...visiblePacks];
             VOICE_PACKS.forEach(v => {
                 const row = document.createElement('div');
                 row.style.cssText = 'display:flex; align-items:center; gap:6px;';
